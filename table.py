@@ -5,7 +5,7 @@ from myio import warn
 from recipes.misc import getTerminalSize
 from recipes.iter import as_sequence, first_true_index
 
-from .string import SuperString, as_superstrings
+from .str import SuperString, as_superstrings
 
 from IPython import embed
 
