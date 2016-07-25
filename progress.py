@@ -74,7 +74,7 @@ class ProgressBar(object):
     def update(self, state):
         '''Make progress/percentage indicator strings.'''
         
-        frac = state/self.end   if self.end>1   else 1
+        frac = state/self.end   if self.end>1   else 1 #???
         ifb = int( round(frac*self.width) )                                     #integer fraction of completeness of for loop
         progress = (self.symbol*ifb).ljust( self.width )                        #filled up to 'width' in whitespaces
         percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)                      #percentage completeness displayed to sigfig decimals
@@ -122,7 +122,13 @@ class ProgressBar(object):
             
             stdout.flush()
         
-        if state==self.end-1:
+        if state == self.end-1:
+            progress, percentage = self.update( self.end )
+            alp, ali = self.alignment
+            bar = overlay(percentage, progress, alp)
+                
+            stdout.write( '\r' + self.apply_props(bar) )
+            
             self.close()
         
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

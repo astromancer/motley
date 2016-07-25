@@ -26,6 +26,7 @@ class ANSICodes( object ):
         
     #Escape sequence
     ESC = '\033'
+    CSI = ESC + '['
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #Text effects and colours
@@ -86,6 +87,9 @@ class ANSICodes( object ):
                         'white'             :       107     }
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    Movement = {}
+    
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def factory(cD, shorthands):
         '''Create the code translation dict'''
         Codes = SuperDict(cD)
@@ -110,7 +114,7 @@ class ANSICodes( object ):
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #End
-    END = ESC+'[0m'
+    END = CSI + '0m'
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @classmethod
@@ -157,17 +161,17 @@ class ANSICodes( object ):
                    
         codes = ';'.join( map(str, codes) )
         #format as ANSI escape sequence. NOTE: still missisg END at this point
-        return '{}[{}m'.format(cls.ESC, codes)
+        return '{}{}m'.format(cls.CSI, codes)
                 
         
 #****************************************************************************************************
-class SuperString( str ):
+class SuperString(str):
     ansi_pattern = '\033\[[\d;]*[a-zA-Z]'
     ansi_matcher = re.compile(ansi_pattern)
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __getitem__(self, key):
-        return SuperString( str.__getitem__(self, key) )
+        return SuperString(str.__getitem__(self, key))
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #def __len__(self):
@@ -175,15 +179,15 @@ class SuperString( str ):
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __add__(self, other):
-        return SuperString( str(self)+other )
+        return SuperString(str(self) + other)
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __radd__(self, other):
-        return SuperString( other+str(self) )
+        return SuperString(other + str(self))
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def join(self, iterable):
-        return SuperString( super().join(iterable) )
+        return SuperString(super().join(iterable))
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def ansi_strip(self):
@@ -243,7 +247,7 @@ class SuperString( str ):
         else:
             string = self
         
-        return SuperString( '{}{}{}'.format(code, string, end) )
+        return SuperString('{}{}{}'.format(code, string, end))
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def stripNonAscii(s):
@@ -391,7 +395,9 @@ def rformat( item, precision=2, pretty=True ):
         #return str(item)
     
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def as_superstrings( obj, props=(), **propkw ):
+#from decor import expose
+#@expose.args()
+def as_superstrings(obj, props=(), **propkw):
     ''' 
     Convert the obj to an array of SuperString objects, applying the properties.
     Parameters
@@ -400,17 +406,19 @@ def as_superstrings( obj, props=(), **propkw ):
                         If input is 0 size - return empty SuperString object
                         Else return array of SuperString objects
     '''
-    precision   = propkw.pop( 'precision', 2 )
-    ndmin       = propkw.pop( 'ndmin', 0 )
-    pretty      = propkw.pop( 'pretty', True )
+    precision   = propkw.pop('precision', 2)
+    ndmin       = propkw.pop('ndmin', 0)
+    pretty      = propkw.pop('pretty', True)
     
-    obja = np.array(as_sequence(obj), dtype=object )
+    obja = np.array(as_sequence(obj), dtype=object)
     #try:
         #obja = np.atleast_1d(obj)
     #except Exception as err:
         #print(err)
         #from IPython import embed
         #embed()
+        
+    #print()
     
     #reshape complex dtype arrays to object arrays
     if obja.dtype.kind == 'V':  #complex dtype as in record array
@@ -433,8 +441,11 @@ def as_superstrings( obj, props=(), **propkw ):
     #deal with empty arrays     #???????
     if not len(obja): #???????
         return SuperString(str(obj)) 
-        
-    fun = lambda s : SuperString( rformat(s, precision, pretty) ).set_property(*props, **propkw)
+    
+    #from IPython import embed
+    #embed()
+    
+    fun = lambda s : SuperString(rformat(s, precision, pretty)).set_property(*props, **propkw)
     out = np.vectorize(fun, (SuperString,))(obja)
     
     if len(out)==1 and out.ndim==1 and ndmin==0:
@@ -443,7 +454,7 @@ def as_superstrings( obj, props=(), **propkw ):
     return out
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def banner( *args, **props ):
+def banner(*args, **props):
     '''print pretty banner'''
     swoosh      = props.pop( 'swoosh', '=', )
     width       = props.pop( 'width', getTerminalSize()[0] )
@@ -458,7 +469,7 @@ def banner( *args, **props ):
         #embed()
     
     #.center( width )
-    info = '\n'.join( ['\n', swoosh, msg, swoosh, '\n' ] )
+    info = '\n'.join( [swoosh, msg, swoosh] )
     
     info = as_superstrings(info).set_property( **props )
     
