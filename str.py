@@ -291,7 +291,6 @@ def overlay( text, bgtext='', alignment='^', width=None ):
     elif not width:
         width = len(bgtext)
     
-    
     if len(bgtext) < len(text):                 #pointless alignment
         return text
     

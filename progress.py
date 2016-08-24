@@ -1,52 +1,62 @@
-from .str import SuperString, overlay
-from recipes.misc import getTerminalSize
-from sys import stdout
+import sys
 import math
+
+from recipes.misc import getTerminalSize
+
+from .str import SuperString, overlay
+
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def move_cursor(val):
     '''move cursor up or down'''
     AB = 'AB'[val>0]               #move up (A) or down (B)
     mover = '\033[{}{}'.format(abs(val), AB)
-    stdout.write(mover)
+    sys.stdout.write(mover)
 
 
 #****************************************************************************************************
 class ProgressBar(object):
+    #TODO: convert to base class
     #TODO: Timing estimate!?
     #TODO: Get it to work in qtconsole  (cursor movements not working!)  NOTE: This is probably impossible with text progressbar
-    #TODO: capture sys.stdout ????
+    #TODO: capture sys.stdout ????  optional stream
     '''
     A basic progress bar intended to be used inside a function or for-loop which
     executes 'end' times
     
-    Note: print (stdout.write) statements inside the for loop will screw up
+    Note: print (sys.stdout.write) statements inside the for loop will screw up
     the progress bar.
     '''
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, **kws):
         ''' '''
-        self.sigfig             = kws.get('sigfig',     3)
+        self.sigfig             = kws.get('sigfig',     2)
         self.width              = kws.get('width',      getTerminalSize()[0])
-        self.symbol             = kws.get('symbol',     '*' )
+        self.symbol             = kws.get('symbol',     '*')
+        self.sides              = kws.get('sides',      '|')
         self.nbars              = kws.get('nbars',      1 )
-        self.alignment          = kws.get('align',      ('^','<') )      #centering for percentage, info
+        self.alignment          = kws.get('align',      ('^','<'))      #centering for percentage, info
         self.infoloc            = kws.get('infoloc',    'above' ).lower()
-        self.infospace          = kws.get('infospace',  0 )
-        self.props              = kws.get('properties' )
+        self.infospace          = kws.get('infospace',  0)
+        self.props              = kws.get('properties')
         
-        self.bar_wrapper        = '{0}\n{1}{0}'.format( self.symbol*self.width, '\n'*self.nbars )
+        wraps, empty = ['{1}{0}{1}'.format(sym*(self.width-2), self.sides)
+                            for sym in (self.symbol, ' ')]  
+        self.bar_wrapper = '{0}\n{1}{0}'.format(wraps, (empty+'\n')*self.nbars)
         
-        self.space              = (self.sigfig + 6)                             #space needed for percentage string (5 for xxx.pp% and one more for good measure)
-        #self.move_up            = '\033[{}A'.format( self.nbars-1 )             #how much should the cursor move up again
-        #self.move_down          = '\033[{}B'.format( self.nbars-1 )
+        #space needed for percentage string (5 for xxx.pp% and one more for good measure)
+        self.space              = (self.sigfig + 6)
         
+    #@property
+    #def every(self):
+        #math.ceil((10**-(self.sigfig+2)) * self.end)
+    
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def create(self, end):
+    def create(self, end, stream=sys.stdout):
         '''create the bar and move cursor to it's center'''
         
         self.end = end
-        self.every = math.ceil((10**-self.sigfig) * self.end)  #only have to updat text every so often
+        self.every = math.ceil((10**-(self.sigfig+2)) * self.end)  #only have to updat text every so often
         
         infospacer = '\n' * self.infospace
         
@@ -62,7 +72,7 @@ class ProgressBar(object):
             whole = self.bar_wrapper
             move = -self.nbars
         
-        stdout.write( self.apply_props(whole) + '\r' )
+        stream.write(self.apply_props(whole) + '\r')
         move_cursor(move)                        #center cursor in bar
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -78,8 +88,10 @@ class ProgressBar(object):
         '''Make progress/percentage indicator strings.'''
         
         frac = state/self.end   if self.end>1   else 1 #???
-        ifb = int( round(frac*self.width) )             #integer fraction of completeness of for loop
-        progress = (self.symbol*ifb).ljust(self.width)  #filled up to 'width' in whitespaces
+        ifb = int(round(frac*(self.width-2)))             #integer fraction of completeness of for loop
+        
+        progress = (self.symbol*ifb).ljust(self.width-2)  #filled up to 'width' in whitespaces
+        progress = self.sides + progress + self.sides
         percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)   #percentage completeness displayed to sigfig decimals
         
         return progress, percentage
@@ -87,61 +99,61 @@ class ProgressBar(object):
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def overlay(self, text, bgtext='', alignment='^', width=None):
         
-        layer = ft.partial( overlay, alignment=alignment, width=width )
+        layer = ft.partial(overlay, alignment=alignment, width=width)
         args = itt.zip_longest(text.split('\n'), bgtext.split('\n'), fillvalue='')
         #TODO: truncate if longer than available space????
         ov = '\n'.join( itt.starmap(layer, args) )
         return ov
-
+    
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def needs_update(self, state):
+        return (state == self.end-1) or (not bool(state % self.every))
+        
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def get_bar(self, state):
+        progress, percentage = self.update(state+1)
+        alp, ali = self.alignment
+        return overlay(percentage, progress, alp)
+        
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def progress(self, state, info=None):
         
-        if state < self.end:
-            if state % self.every:
-                #The state is not significantly different yet
-                return
-            
-            #update the text
-            progress, percentage = self.update(state+1)
-            alp, ali = self.alignment
-            
-            #TODO: optimize: only print if necessary: threshold 
-            bar = overlay(percentage, progress, alp)
-                
-            stdout.write('\r' + self.apply_props(bar))
-            
-            if info:
-                info = self.overlay(info, '', ali or '<', self.width)
-                nn = info.count( '\n' )
-                
-                #if nn > self.infospace:
-                    #print(nn, self.infospace, '!!')
-                    #raise ValueError
-                #print( info )
-                
-                if self.infoloc in ('above','top'):
-                    
-                    move_cursor( -self.infospace )
-                    stdout.write( info )
-                    move_cursor( self.infospace-nn-1 )
-                    
-                #bar = self.overlay(info, progress, ali)
-                #stdout.write( self.move_down )            #cursor down
-                #stdout.write( '\r' + bar )
-                #stdout.write( self.move_up )            #cursor up
-            
-            stdout.flush()
+        if state >= self.end:
+            return
+        
+        if not self.needs_update(state):
+            return #The state is not significantly different yet
         
         if state == self.end-1:
-            progress, percentage = self.update( self.end )
-            alp, ali = self.alignment
-            bar = overlay(percentage, progress, alp)
-                
-            stdout.write( '\r' + self.apply_props(bar) )
-            
             self.close()
+            return
+        
+        bar = self.get_bar(state)
+        sys.stdout.write('\r' + self.apply_props(bar))
+        
+        if info:
+            info = self.overlay(info, '', ali or '<', self.width)
+            nn = info.count( '\n' )
+            
+            #if nn > self.infospace:
+                #print(nn, self.infospace, '!!')
+                #raise ValueError
+            #print( info )
+            
+            if self.infoloc in ('above','top'):
+                
+                move_cursor( -self.infospace )
+                sys.stdout.write( info )
+                move_cursor( self.infospace-nn-1 )
+                
+            #bar = self.overlay(info, progress, ali)
+            #sys.stdout.write( self.move_down )            #cursor down
+            #sys.stdout.write( '\r' + bar )
+            #sys.stdout.write( self.move_up )            #cursor up
+        
+        sys.stdout.flush()
         
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def close(self):
-        stdout.write('\n'*4)                # move the cursor down 4 lines
-        stdout.flush()
+        sys.stdout.write('\n'*4)                # move the cursor down 4 lines
+        sys.stdout.flush()
