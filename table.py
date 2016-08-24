@@ -168,7 +168,7 @@ class Table( object ):          #TODO: remane as ansi table??
         if char.lower()[0] in self.ALIGNMENT_MAP:
             return self.ALIGNMENT_MAP[char.lower()[0]]
         else:
-            raise ValueError('Unrecognised alignment {!r}'.format(align))
+            raise ValueError('Unrecognised alignment {!r}'.format(char))
     
     #====================================================================================================    
     @staticmethod
@@ -184,7 +184,8 @@ class Table( object ):          #TODO: remane as ansi table??
     def convert_dict(dic, ignore_keys):
         _dic = dic.copy()
         if not ignore_keys is None:
-            ignore = [_dic.pop(key) for key in ignore_keys if key in _dic]
+            for key in ignore_keys:
+                _dic.pop(key, None)
         
         keys = list(_dic.keys())
         vals = list(_dic.values())

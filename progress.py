@@ -1,6 +1,7 @@
 from .str import SuperString, overlay
 from recipes.misc import getTerminalSize
 from sys import stdout
+import math
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def move_cursor(val):
@@ -23,16 +24,16 @@ class ProgressBar(object):
     the progress bar.
     '''
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    def __init__(self, **kw):
+    def __init__(self, **kws):
         ''' '''
-        self.sigfig             = kw.get('sigfig',     3 )
-        self.width              = kw.get('width',      getTerminalSize()[0] )
-        self.symbol             = kw.get('symbol',     '*' )
-        self.nbars              = kw.get('nbars',      1 )
-        self.alignment          = kw.get('align',      ('^','<') )      #centering for percentage, info
-        self.infoloc            = kw.get('infoloc',    'above' ).lower()
-        self.infospace          = kw.get('infospace',  0 )
-        self.props              = kw.get('properties' )
+        self.sigfig             = kws.get('sigfig',     3)
+        self.width              = kws.get('width',      getTerminalSize()[0])
+        self.symbol             = kws.get('symbol',     '*' )
+        self.nbars              = kws.get('nbars',      1 )
+        self.alignment          = kws.get('align',      ('^','<') )      #centering for percentage, info
+        self.infoloc            = kws.get('infoloc',    'above' ).lower()
+        self.infospace          = kws.get('infospace',  0 )
+        self.props              = kws.get('properties' )
         
         self.bar_wrapper        = '{0}\n{1}{0}'.format( self.symbol*self.width, '\n'*self.nbars )
         
@@ -45,6 +46,8 @@ class ProgressBar(object):
         '''create the bar and move cursor to it's center'''
         
         self.end = end
+        self.every = math.ceil((10**-self.sigfig) * self.end)  #only have to updat text every so often
+        
         infospacer = '\n' * self.infospace
         
         if self.infoloc in ('above','top'):
@@ -61,7 +64,7 @@ class ProgressBar(object):
         
         stdout.write( self.apply_props(whole) + '\r' )
         move_cursor(move)                        #center cursor in bar
-        
+    
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def apply_props(self, string):
         if isinstance(self.props, dict):
@@ -75,9 +78,9 @@ class ProgressBar(object):
         '''Make progress/percentage indicator strings.'''
         
         frac = state/self.end   if self.end>1   else 1 #???
-        ifb = int( round(frac*self.width) )                                     #integer fraction of completeness of for loop
-        progress = (self.symbol*ifb).ljust( self.width )                        #filled up to 'width' in whitespaces
-        percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)                      #percentage completeness displayed to sigfig decimals
+        ifb = int( round(frac*self.width) )             #integer fraction of completeness of for loop
+        progress = (self.symbol*ifb).ljust(self.width)  #filled up to 'width' in whitespaces
+        percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)   #percentage completeness displayed to sigfig decimals
         
         return progress, percentage
     
@@ -94,11 +97,18 @@ class ProgressBar(object):
     def progress(self, state, info=None):
         
         if state < self.end:
-            progress, percentage = self.update( state+1 )
+            if state % self.every:
+                #The state is not significantly different yet
+                return
+            
+            #update the text
+            progress, percentage = self.update(state+1)
             alp, ali = self.alignment
+            
+            #TODO: optimize: only print if necessary: threshold 
             bar = overlay(percentage, progress, alp)
                 
-            stdout.write( '\r' + self.apply_props(bar) )
+            stdout.write('\r' + self.apply_props(bar))
             
             if info:
                 info = self.overlay(info, '', ali or '<', self.width)
