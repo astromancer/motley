@@ -1,10 +1,11 @@
 import sys
 import math
+import time
+import functools
 
 from recipes.misc import getTerminalSize
-
-from .str import SuperString, overlay
-
+from recipes.string import overlay
+from .str import SuperString
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def move_cursor(val):
@@ -36,20 +37,32 @@ class ProgressBar(object):
         self.sides              = kws.get('sides',      '|')
         self.nbars              = kws.get('nbars',      1 )
         self.alignment          = kws.get('align',      ('^','<'))      #centering for percentage, info
-        self.infoloc            = kws.get('infoloc',    'above' ).lower()
+        self.infoloc            = kws.get('infoloc',    'above').lower()
         self.infospace          = kws.get('infospace',  0)
         self.props              = kws.get('properties')
+        self.show_eta           = kws.get('eta',        False)
         
         wraps, empty = ['{1}{0}{1}'.format(sym*(self.width-2), self.sides)
                             for sym in (self.symbol, ' ')]  
         self.bar_wrapper = '{0}\n{1}{0}'.format(wraps, (empty+'\n')*self.nbars)
         
-        #space needed for percentage string (5 for xxx.pp% and one more for good measure)
-        self.space              = (self.sigfig + 6)
+        self.t0 = time.time()
+        self.progress = self.timer(self.progress)
         
-    #@property
-    #def every(self):
-        #math.ceil((10**-(self.sigfig+2)) * self.end)
+        #space needed for percentage string (5 for xxx.pp% and one more for good measure)
+        #self.space              = (self.sigfig + 6)
+    
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def timer(self, f):
+        
+        @functools.wraps(f)
+        def wrapper(*args, **kw):
+            ts = time.time()
+            result = f(*args, **kw)
+            te = time.time()
+            self.deltat = te - ts
+        
+        return wrapper
     
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def create(self, end, stream=sys.stdout):
@@ -92,7 +105,8 @@ class ProgressBar(object):
         
         progress = (self.symbol*ifb).ljust(self.width-2)  #filled up to 'width' in whitespaces
         progress = self.sides + progress + self.sides
-        percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)   #percentage completeness displayed to sigfig decimals
+        #percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)   #percentage completeness displayed to sigfig decimals
+        percentage = '{0:.{1}%}'.format(frac, self.sigfig)
         
         return progress, percentage
     
@@ -113,7 +127,14 @@ class ProgressBar(object):
     def get_bar(self, state):
         progress, percentage = self.update(state+1)
         alp, ali = self.alignment
-        return overlay(percentage, progress, alp)
+        bar = overlay(percentage, progress, alp)
+        
+        if self.show_eta:
+            eta = (self.end - state) * self.deltat
+            eta_str = 'ETA: {:.1f} s'.format(eta)
+            bar = overlay(eta_str, bar, '<')
+        
+        return bar
         
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def progress(self, state, info=None):
@@ -124,12 +145,12 @@ class ProgressBar(object):
         if not self.needs_update(state):
             return #The state is not significantly different yet
         
+        bar = self.get_bar(state)
+        sys.stdout.write('\r' + self.apply_props(bar))
+        
         if state == self.end-1:
             self.close()
             return
-        
-        bar = self.get_bar(state)
-        sys.stdout.write('\r' + self.apply_props(bar))
         
         if info:
             info = self.overlay(info, '', ali or '<', self.width)
