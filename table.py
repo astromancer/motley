@@ -1,13 +1,13 @@
 import numpy as np
 
-from myio import warn
+# from myio import warn
 
 from recipes.misc import getTerminalSize
 from recipes.iter import as_sequence, pairwise
 
 from .str import AnsiStr, as_ansi
 
-from IPython import embed
+# from IPython import embed
 
 #TODO: unit tests!!!!!!!!
 
