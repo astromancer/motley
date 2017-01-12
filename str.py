@@ -5,9 +5,10 @@ import re
 import numpy as np
 
 from recipes.misc import getTerminalSize
-from recipes.iter import as_sequence
+from recipes.iter import as_sequence, pairwise
 from recipes.dict import SmartDict
 from recipes.string import rformat as as_str
+
 
 # from decor import expose
 #from IPython import embed
@@ -117,9 +118,9 @@ class ANSICodes(object):
                  'background'   : '48;5;{}' }        #BackgroundCodes256
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     #24bit (3-byte) true color support
-    #NOTE: Gnome Terminal 24bit support is enabled by default but gnome-terminal
-    #has to be in version linked against libvte >= 0.36
-    #see: http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
+    #NOTE:  Gnome Terminal 24bit support is enabled by default but gnome-terminal
+    #       has to be in version linked against libvte >= 0.36
+    #       see: http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
     #TODO
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -135,17 +136,18 @@ class ANSICodes(object):
             return cdict[prop]
 
         elif str(prop).isdigit():
-            if int(prop)<=256:
+            if int(prop) <= 256:
                 return cls.Format256[which].format(prop)
             else:
-                raise ValueError( 'Only 256 colours available.' )
+                raise ValueError('Only 256 colours available.')
         else:
-            raise ValueError( 'Unknown property {}'.format(prop) )
+            raise ValueError('Unknown property {}'.format(prop))
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     @classmethod
-    def get_code(cls, *properties, **kw):
-        '''Get ANSI code given the properties and kw descriptors.
+    def _get_codes(cls, *properties, **kw):
+        '''
+        Get ANSI code given the properties and kw descriptors.
         properties      - text colour or effects
         kw              - 'text_colour', 'text_effect', 'background_colour'
         '''
@@ -169,15 +171,28 @@ class ANSICodes(object):
                     for prop in properties:
                         codes.append(cls.get_prop_code(prop, desc))
 
-        codes = ';'.join(map(str, codes))
-        #format as ANSI escape sequence. NOTE: still missisg END at this point
-        return '{}{}m'.format(cls.CSI, codes)
+        return tuple(codes)
+
+        # codes = ';'.join(map(str, codes))
+        # format as ANSI escape sequence. NOTE: still missisg END at this point
+        # return '{}{}m'.format(cls.CSI, codes)
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    @classmethod
+    def get_code(cls, *properties, **kw):
+        codes = cls._get_codes(*properties, **kw)
+        cs = ';'.join(map(str, codes))
+        return '{}{}m'.format(cls.CSI, cs)
 
 
 #*******************************************************************************
 class AnsiStr(str):
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     ansi_pattern = '\033\[[\d;]*[a-zA-Z]'
     ansi_matcher = re.compile(ansi_pattern)
+
+    # ansi_nr_extract = '\033\[([\d;]*)[a-zA-Z]'
+    # ansi_nr_matcher = re.compile(ansi_nr_extract)
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __getitem__(self, key):
@@ -209,17 +224,20 @@ class AnsiStr(str):
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def ansi_split(self):
-        parsed = []
+        ''''''
         idxs = []
-        for match in AnsiStr.ansi_matcher.finditer(self):
+        for i, match in enumerate(AnsiStr.ansi_matcher.finditer(self)):
             idxs += [match.start(), match.end()]
+
         if not len(idxs):
-            return [self]
-        for i in range(len(idxs)):
-            try:
-                parsed.append( self[ idxs[i]:idxs[i+1] ] )
-            except IndexError:
-                pass
+             return [self]
+
+        if idxs[0] != 0:
+            idxs = [0] + idxs
+        if idxs[-1] != len(self):
+            idxs += [len(self)]
+
+        parsed = [self[i0:i1] for i0, i1 in pairwise(idxs)]
         return parsed
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -247,7 +265,7 @@ class AnsiStr(str):
         if noprops and not kw:
             return self
 
-        code = ANSICodes.get_code( *properties, **kw )
+        code = ANSICodes.get_code(*properties, **kw)
 
         #elliminate unnecesary END codes. (self may already have previous END code)
         end = ANSICodes.END
@@ -258,6 +276,46 @@ class AnsiStr(str):
             string = self
 
         return AnsiStr('{}{}{}'.format(code, string, end))
+
+    #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    def set_property2(self, *properties, **kw):
+    #     '''set the ANSI codes for a string given the properties and kw descriptors'''
+    #     # TODO: strip superfluous ANSI characters - eg. empty coded strings.
+    #     # TODO: combine multiple codes as ; separated and strip extra escape
+    #
+        noprops = properties in [(), None] or None in properties
+        if noprops and not kw:
+            return self
+
+    #     # if self.len_no_ansi() == 0: #empty coded string
+    #     #     return ''
+    #
+    #     # if self.len_ansi() == 0:
+    #     esc, csi, end = ANSICodes.ESC, ANSICodes.CSI, ANSICodes.END
+    #
+        parts = self.ansi_split()
+        new_codes = ANSICodes._get_codes(*properties, **kw)
+
+    #     new_parts = []
+    #     for p in parts:
+    #         # if p == end:
+    #         #     continue
+    #         #extract code nrs and append new codes
+    #         match = self.ansi_nr_matcher.match(p)
+    #         if match:
+    #             cx = match.groups() + new_codes
+    #             p = '{}{}m'.format(csi, ';'.join(map(str, cx)))
+    #         new_parts.append(p)
+    #         # re.sub
+    #
+    #     string = ''.join(new_parts)
+    #
+    #     if string.startswith(esc):
+    #         AnsiStr('{}{}'.format(string, end))
+    #         return string
+    #
+    #     code = '{}{}m'.format(csi, ';'.join(map(str, new_codes)))
+    #     return AnsiStr('{}{}{}'.format(code, string, end))
 
     #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def stripNonAscii(s):
@@ -292,28 +350,22 @@ SuperString = AnsiStr
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #from decor import expose
 # @expose.args()
-def as_ansi(obj, props=(), **propkw):   #as_ansi_array???
+def as_ansi(obj, props=(), **propkw):   #TODO: rename for clarity as_ansi_array
     '''
-    Convert the obj to an array of AnsiStr objects, applying the properties.
+    Convert the obj to an array of AnsiStr objects, applying the properties globally.
     Parameters
     ----------
     obj         :       If input is unsized - return its AnsiStr representation
                         If input is 0 size - return empty AnsiStr object
                         Else return array of AnsiStr objects
     '''
-    precision   = propkw.pop('precision', 2)
-    ndmin       = propkw.pop('ndmin', 0)
-    pretty      = propkw.pop('pretty', True)
+    precision = propkw.pop('precision', 2)
+    minimalist = propkw.pop('minimalist', True)  # minimalist representation for floating point numbers
+    ndmin = propkw.pop('ndmin', 0)
+    # pretty = propkw.pop('pretty', True)
 
+    #
     obja = np.array(as_sequence(obj), dtype=object)
-    #try:
-        #obja = np.atleast_1d(obj)
-    #except Exception as err:
-        #print(err)
-        #from IPython import embed
-        #embed()
-
-    #print()
 
     #reshape complex dtype arrays to object arrays
     if obja.dtype.kind == 'V':  #complex dtype as in record array
@@ -337,11 +389,12 @@ def as_ansi(obj, props=(), **propkw):   #as_ansi_array???
     if not len(obja): #???????
         return AnsiStr(str(obj))
 
-    fun = lambda s: AnsiStr(as_str(s, precision, pretty)).set_property(*props, **propkw)
+    # Create array of AnsiStr objects applying codes globally
+    fun = lambda s: AnsiStr(as_str(s, precision, minimalist)).set_property(*props, **propkw)
     out = np.vectorize(fun, (AnsiStr,))(obja)
 
-    if len(out)==1 and out.ndim==1 and ndmin==0:
-        out = out[0] #collapse arrays of shape (1,) to item itself if ndmin=0 asked for
+    if (len(out) == 1) and (out.ndim == 1) and (ndmin == 0):
+        out = out[0]  # collapse arrays of shape (1,) to item itself if ndmin = 0 asked for
 
     return out
 
@@ -352,13 +405,13 @@ def banner(*args, **props):
     '''print pretty banner'''
     swoosh      = props.pop('swoosh', '=',)
     width       = props.pop('width', getTerminalSize()[0])
-    pretty      = props.pop('pretty', True)
+    # pretty      = props.pop('pretty', True)
     _print      = props.pop('_print', True)
 
     swoosh = swoosh * width
     #TODO: fill whitespace to width?
     #try:
-    msg = '\n'.join(as_ansi(args, ndmin=1, pretty=pretty))
+    msg = '\n'.join(as_ansi(args, ndmin=1)) # pretty=pretty
     #except:
         #embed()
 

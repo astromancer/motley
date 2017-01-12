@@ -4,6 +4,7 @@ import numpy as np
 
 from recipes.misc import getTerminalSize
 from recipes.iter import as_sequence, pairwise
+from decor import expose
 
 from .str import AnsiStr, as_ansi
 
@@ -19,6 +20,8 @@ from .str import AnsiStr, as_ansi
 class Table( object ):          #TODO: remane as ansi table??
     ALIGNMENT_MAP = { 'r' : '>', 'l' : '<', 'c' : '^' }     #map to alignment format characters
     ALLOWED_KWARGS = [] #TODO
+
+    col_fmt = '{0:{2}{1}}'  # The column format specification. 0 - item; 1 - fill; 2 - alignment character
     #====================================================================================================
     def __init__(self, data,
                  title=None, title_props=(), title_alignment='center',
@@ -27,9 +30,9 @@ class Table( object ):          #TODO: remane as ansi table??
                  #TODO: where_col_borders
                  row_headers=None, row_head_props='bold', where_row_borders=None,
                  row_sort=None,
-                 align='left', num_prec=2, number_rows=False,
+                 align='left', precision=2, number_rows=False,
                  ignore_keys=None, order ='c',
-                 max_col_width=None, max_table_width=None, truncation_policy='split',
+                 max_col_width=None, max_table_width=None, truncation='split',
                 ):
         #TODO: reformat docstring
         '''
@@ -61,7 +64,7 @@ class Table( object ):          #TODO: remane as ansi table??
         row_sort        :       TODO callable that operates on strings and returns row sorting order
 
         align           :       column alignment  {'left', 'right', or 'center'}
-        num_prec        :       integer precision to use for number representation FIXME!!!!!!!!!!!!!
+        precision        :      integer precision to use for number representation FIXME!!!!!!!!!!!!!
         number_rows     :       bool
             Will number the rows if True
 
@@ -70,7 +73,7 @@ class Table( object ):          #TODO: remane as ansi table??
         order           :       str - {'row', 'col'}
             whether to interpret data as row ordered or column ordered
 
-        truncation_policy:      what to do in case of tables that are too wide for display
+        truncation:      (dict) what to do in case of tables that are too wide for display
         '''
 
         #self.datatypes = np.vectorize(type)(data)
@@ -89,7 +92,8 @@ class Table( object ):          #TODO: remane as ansi table??
         # TODO: deal with multiline cell data
 
         #convert to array of AnsiStrs
-        self.data = as_ansi(data)
+        self.data = as_ansi(data, precision=precision, minimalist=False)
+
 
         #check data shape
         dim = np.ndim(self.data)
@@ -99,56 +103,31 @@ class Table( object ):          #TODO: remane as ansi table??
         if dim > 2:
             raise ValueError('Only 2D data can be tabelised!  Data is {}D'.format(dim))
 
-        #title
+        # title
         self.title = title
         self.title_props =  title_props
         self.title_alignment = self.get_alignment(title_alignment)
 
+        # misc
         self.number_rows = number_rows
+        self.col_borders = col_borders
+        self.align = self.get_alignment(align)
+        self.precision = precision
 
-        #row and column headers     #TODO: error check for len of row/col_headers
-        self.col_headers = col_headers
-        self.row_headers = row_headers
-        self.has_row_head = row_headers is not None
-        self.has_col_head = col_headers is not None
-
-        if self.has_col_head:
-            self.col_head_props = col_head_props
-            self.col_headers = self.apply_props(col_headers, 'bold')    #HACK: see
-
-
-        if self.has_col_head and self.has_row_head:
-            #NOTE:  when both are given, the 0,0 table position is ambiguously both column and row header
-            if len(row_headers) == self.data.shape[0]:
-                row_headers = [''] + list(row_headers)
-        if self.has_row_head:
-            Nrows = len(row_headers)
-            self.row_headers = self.apply_props(row_headers,
-                                                row_head_props).reshape(Nrows, 1)
-            #FIXME: will apply props just to text and not to whitespace filled column...
-
-        # self.col_widths = np.r_[max(map(len, self.col_headers)), self.col_widths]
-        # self.col_widths_no_ansi = np.r_[max(map(AnsiStr.len_no_ansi, self.col_headers)), self.col_widths]
-
-        self.pre_table = self.add_headers(self.data, self.col_headers, self.row_headers)
+        # Add row/column headers
+        self.col_head_props = col_head_props
+        self.row_head_props = row_head_props
+        self.pre_table = self.add_headers(self.data, row_headers, col_headers)
         self.nrows, self.ncols = self.pre_table.shape # np.add(data.shape, (int(self.has_row_head), int(self.has_col_head))  #
 
-        #Column specs
-        self.col_borders = col_borders
+        # Column specs
         if col_widths is None:
             self.col_widths = self.get_column_widths(self.pre_table) + 1    #add 1 for whitespace
             self.col_widths_no_ansi = self.get_column_widths(self.pre_table, as_displayed=True)
         else:
             self.col_widths = col_widths
 
-        #column alignment
-        self.align = self.get_alignment(align)
-
-        #The column format specification. 0 - item; 1 - fill; 2 - alignment character
-        self.col_fmt = '{0:{2}{1}}'
-        self.num_prec = num_prec
-
-        #Row specs
+        # Row specs
         self.rows = []
         # self.row_fmt = ('{}'+self.col_borders) * Ncols
 
@@ -165,9 +144,10 @@ class Table( object ):          #TODO: remane as ansi table??
         # table truncation / split stuff
         self.max_table_width = max_table_width or getTerminalSize()[0]
 
-        if truncation_policy.lower() != 'split':
-            raise NotImplementedError
-        self.trunc = truncation_policy
+        # if truncation_policy.lower() != 'split':
+        #     raise NotImplementedError
+        self.truncation = truncation
+        # self.max_column_width = self.truncation.get('columns')
 
         self.show_colourbar = False
 
@@ -176,6 +156,7 @@ class Table( object ):          #TODO: remane as ansi table??
         '''data should be string type array'''
         lcb = len(self.col_borders) if with_borders else 0
         lenf = AnsiStr.len_no_ansi if as_displayed else len
+        # max_column_width = self.truncation.get('columns')
         return np.vectorize(lenf)(data).max(axis=0) + lcb
 
     #====================================================================================================
@@ -199,6 +180,8 @@ class Table( object ):          #TODO: remane as ansi table??
     #====================================================================================================
     @staticmethod
     def apply_props(obj, props=()):
+        '''Convert to ansi array and apply given properties globally'''
+        #TODO: options to apply globally, or sequentially??
         if isinstance(props, dict):
             return as_ansi(obj, **props)
         else:
@@ -218,87 +201,76 @@ class Table( object ):          #TODO: remane as ansi table??
         return keys, vals
 
     #====================================================================================================
-    def add_headers(self, data, col_headers=None, row_headers=None):
+    # @expose.args()
+    def add_headers(self, data, row_headers=None, col_headers=None):
         '''Add row and column headers to table data'''
-        # data = self.data[...]
 
-        if col_headers is not None:
-            data = np.vstack((col_headers, data))
+        # row and column headers     #TODO: error check for len of row/col_headers
+        self.has_row_head = row_headers is not None
+        self.has_col_head = col_headers is not None
+        self.col_headers = col_headers  # May be None. will be re-written below if necessary
+        self.row_headers = row_headers
 
-        if row_headers is not None:
-            data = np.hstack((row_headers, data))
+        if self.has_col_head:
+            # self.col_headers = self.apply_props(col_headers, col_head_props)
+            data = np.vstack((self.col_headers, data))
 
-        if self.number_rows:
+            if self.has_row_head:
+                # NOTE:  when both are given, the 0,0 table position is ambiguously both column and row header
+                if len(row_headers) == self.data.shape[0]:
+                    row_headers = [''] + list(row_headers)
+
+        # from IPython import embed
+        # embed()
+
+        if self.has_row_head:
+            # first pad whitespace
+            # cw0 = max(map(len, map(str, row_headers))) + 1
+            # row_headers = [self.col_fmt.format(rh, cw0, self.align) for rh in row_headers]
+            # apply props and convert to column vector
+            # self.row_headers = self.apply_props(row_headers, row_head_props)
+            # FIXME: will apply props just to text and not to whitespace filled column...
+            data = np.hstack((np.c_[row_headers], data))
+
+        if self.number_rows:            #FIXME: may cause problems during colourise...
             numbers = np.arange(1, data.shape[0]+1).astype(str)
             if col_headers is not None:
                 numbers = ['#'] + list(numbers[:-1])
 
             data = np.c_[numbers, data]
 
+        # TODO:   implement truncation here
+        # TODO: here data should be an array of AnsiStr objects.  To do the truncation, we first need to strip
+        # TODO: the control characters, truncate, then re-apply control....
+        # TODO: ??? OR is there a better way??
+
         return as_ansi(data)    #as_ansi necessary because numpy sometimes implicitly converts AnsiStr to str
 
     #====================================================================================================
-    def create_row(self, columns):
+    def make_row(self, columns):
         '''apply properties each item in the list of columns create a single string'''
-        columns = as_ansi(columns)
-
-        # embed()
-        # print(columns)
-
-        # try:
+        cb = self.col_borders
+        columns = as_ansi(columns)  # convert to ansi array so we can measure component lengths
         col_padwidths = [w + col.ansi_len() if col.has_ansi() else w
                             for col, w in zip(columns, self.col_widths_no_ansi)]
-        # except Exception as err:
-        #     from IPython import embed
-        #     embed()
-        #     raise SystemExit
-
-        columns = [self.col_fmt.format(col, cw, self.align)
-                   for col, cw in zip(columns, col_padwidths)]
+        # format columns (and add rhs border)
+        col_fmt = self.col_fmt + cb
+        columns = [col_fmt.format(col, cw, self.align)#[:self.max_column_width]
+                        for col, cw in zip(columns, col_padwidths)]
         # this is needed because the alignment formatting gets screwed up by the ANSI characters that
         # have length, but are not displayed
-        cb = self.col_borders
-        row = AnsiStr(cb + cb.join(columns) + cb)
+
+        # Apply header properties to whitespace filled row headers (including column borders)
+        if self.has_row_head:
+            columns[0] = self.apply_props(cb + columns[0], self.row_head_props)
+        else:
+            columns[0] = cb + columns[0]
+
+        # stick columns together
+        row = ''.join(columns)
         self.rows.append(row)
 
         return row
-
-    #====================================================================================================
-    def colourise(self, states, *colours): #TODO: figure out a way of setting bg colours here - dict wont preserve order
-
-        #if less colours than number of states are specified
-        if len(colours) < states.max() + 1:
-            colours = ('default',) + colours            #i.e. index zero corresponds to default colour
-
-        while len(colours) < states.max() + 1:
-            colours += colours[-1:]                     #all remaining higher states will be assigned the same colour
-
-        #embed()
-        for i, c in enumerate(colours):
-            where = states==i
-            if np.any(where):
-                cdata = as_ansi(self.data[where], c)
-                self.data[where] = cdata
-
-        self.pre_table = self.add_headers(self.data, self.col_headers, self.row_headers)
-
-        self.states = np.unique(states)
-        self.colours = colours
-        self.show_colourbar = True
-
-        return self.data
-
-    #alias
-    colorize = colourise
-
-    #====================================================================================================
-    def add_colourbar(self, table):
-
-        #ignore default state in colourbar
-        start = int('default' in self.colours)
-        cbar = ''.join(map(as_ansi, self.states[start:], self.colours[start:]))
-        return '\n'.join((table, cbar))
-
 
     #====================================================================================================
     def make_table(self, truncate=False):
@@ -312,34 +284,26 @@ class Table( object ):          #TODO: remane as ansi table??
 
         # print('MX', table_width, self.max_table_width)
 
-        #if table_width > self.max_table_width:
-        if self.trunc == 'split':
+        if table_width > self.max_table_width:     # if self.truncation == 'split':
             split_tables = self.split()
             if self.show_colourbar:
                 split_tables[-1] = self.add_colourbar(split_tables[-1])
             table = '\n\n'.join(split_tables)
             return table
-        else:
-            raise NotImplementedError
         # else:
-        #     table = self._build_partial(0, None)
-        #     return '\n'.join(table)
+        #     raise NotImplementedError
+        else:
+            table = self._build_partial(0, None)
+            return '\n'.join(table)
 
     #====================================================================================================
     def split(self, max_width=None):
         max_width = max_width or self.max_table_width
         split_tables = []
 
-        lcb = len(self.col_borders)
-        no_rh = self.pre_table[:, int(self.has_row_head):]          #excude row headers
+        no_rh = self.pre_table[:, int(self.has_row_head):]          # excude row headers
         tcw = self.get_column_widths(no_rh, as_displayed=True) + 1  # total column width #NOTE: add 1 to compensate whitespace
         rhw = tcw[0] if self.has_row_head else 0
-        # ctcw = np.cumsum(tcw)                   # cumulative total column width
-        # table_width = sum(tcw) + lcb
-        # nsplit = table_width // self.max_table_width
-
-        # embed()
-
         splix = 0
         while True:
             if splix == no_rh.shape[1]:
@@ -349,16 +313,12 @@ class Table( object ):          #TODO: remane as ansi table??
 
             if len(w):
                 endix = splix + max(w[0], 1)
-
                 if w[0] == 0: #first column +row headers too wide to display
                     'TODO: truncation_policy'
             else:
                 endix = None
 
             last = endix is None
-
-            # print(ctcw, w, last, splix, endix)
-
             tbl = self._build_partial(splix, endix, bool(splix))      # make a table using selection of columns
             tblstr = '\n'.join(tbl)
             split_tables.append(tblstr)
@@ -371,42 +331,40 @@ class Table( object ):          #TODO: remane as ansi table??
     #====================================================================================================
     def _build_partial(self, c0, c1, continued=False):
 
-        # print(c0, c1)
-
         table = []
         slice_ = slice(c0, c1)
         lcb = len(self.col_borders)
 
         #add headers
         col_headers = self.col_headers[slice_] if self.has_col_head else None
-        part_table = self.add_headers(self.data[:, slice_], col_headers, self.row_headers)
+        #FIXME: use pre_table?
+        part_table = self.add_headers(self.data[:, slice_], self.row_headers, col_headers)
 
-        #tcw = self.col_widths_no_ansi[slice_] + lcb     # total column width
-        # ctcw = np.cumsum(tcw)                   # cumulative total column width
         #NOTE: add 1 below to compensate whitespace
         table_width = sum(self.get_column_widths(part_table, as_displayed=True) + 1)
 
         # FIXME: problems with too-wide columns
 
         # top line
+        # FIXME: topline too short with tables with title
         top_line = self.col_fmt.format('', table_width + lcb, '^')
         top_line = as_ansi(top_line, 'underline')
         table.append(top_line)
 
         if not self.title is None:
-            title = self.make_title(table_width - lcb, continued)
+            title = self.make_title(table_width + lcb, continued)
             table.append(title)
 
         # FIXME; case if title wider than table!
 
         # make rows
         for i, col_items in enumerate(part_table):
-            row = self.create_row(col_items)
+            row = self.make_row(col_items)
             if i == 0 and self.has_col_head:
                 row = as_ansi(row, self.col_head_props)  # HACK
 
             if i in self.where_row_borders:
-                row = as_ansi(row, 'underline', precision=self.num_prec)  # FIXME!!!!!!!!!!!!!
+                row = as_ansi(row, 'underline')
 
             # row = trunc(row)
             table.append(row)
@@ -426,6 +384,58 @@ class Table( object ):          #TODO: remane as ansi table??
         title_lines[-1] = title_lines[-1].set_property('underline')
 
         return '\n'.join(title_lines)
+
+    # ====================================================================================================
+    def colourise(self, states, *colours, **kws):
+        # if less colours than number of states are specified
+        states = states.astype(int)
+        if len(colours) < states.max() + 1:
+            colours = ('default',) + colours  # i.e. index zero corresponds to default colour
+
+        while len(colours) < states.max() + 1:
+            colours += colours[-1:]  # all remaining higher states will be assigned the same colour
+
+        for i, c in enumerate(colours):
+            where = (states == i)
+            if np.any(where):
+                cdata = as_ansi(self.data[where], c)
+                self.data[where] = cdata
+
+        # row_headers = self.row_headers
+        # col_headers = self.col_headers
+
+        if kws.get('flag_headers', False):
+            #apply colours implied by states sequentially to headers
+            if self.has_row_head:
+                self.row_headers = [AnsiStr(rh).set_property(c)
+                    for rh, c in zip(self.row_headers, np.take(colours, states.max(0)))]
+            if self.has_col_head:
+                self.col_headers = [AnsiStr(ch).set_property(c)
+                     for ch, c in zip(self.col_headers, np.take(colours, states.max(1)))]
+
+        #FIXME: OR JUST PLONK data into pre_table instead of re-adding headers??
+        #self.pre_table = self.add_headers(self.data, row_headers, col_headers)
+        self.pre_table[int(self.has_col_head):, int(self.has_row_head):] = self.data
+
+        self.states = np.unique(states)
+        self.colours = colours
+        self.show_colourbar = True
+
+        return self.data
+
+    # alias
+    colorize = colourise
+
+    # ====================================================================================================
+    # def
+
+    # ====================================================================================================
+    def add_colourbar(self, table):
+
+        # ignore default state in colourbar
+        start = int('default' in self.colours)
+        cbar = ''.join(map(as_ansi, self.states[start:], self.colours[start:]))
+        return '\n'.join((table, cbar))
 
     #====================================================================================================
     #def truncate(self, table ):
