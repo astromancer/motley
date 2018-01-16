@@ -3,17 +3,20 @@ Convenient coloured strings
 """
 
 import re
+import warnings
+import itertools as itt
+from collections import defaultdict
 
 import numpy as np
 from recipes.iter import as_sequence, pairwise
 from recipes.misc import getTerminalSize
-from recipes.string import rformat as as_str
+from recipes.pprint import rformat as as_str
 
 from . import codes
 
 # from pprint import pformat
 # from decor import expose
-# from IPython import embed
+from IPython import embed
 
 pattern = '\033\[[\d;]*[a-zA-Z]'
 matcher = re.compile(pattern)
@@ -21,7 +24,6 @@ matcher = re.compile(pattern)
 
 # ansi_nr_extract = '\033\[([\d;]*)[a-zA-Z]'
 # ansi_nr_matcher = re.compile(ansi_nr_extract)
-
 
 # TODO: convenience methods:
 # bold
@@ -84,22 +86,115 @@ def len_bare(s):
     """
     return len(strip(s))
 
-# def format(s, ):
 
+def rainbow(words, effects=(), **kws):
+    # try:
+    # embed()
+
+    propIter = _prop_dict_gen(*effects, **kws)
+    propList = list(propIter)
+    nprops = len(propList)
+
+    if len(words) < nprops:
+        pairIter = itt.zip_longest(words, propList, fillvalue='default')
+    else:
+        pairIter = zip(words, propList)
+
+    try:
+        out = list(itt.starmap(codes.apply, pairIter))
+    except:
+        print('rainbow_' * 25)
+        embed()
+    #     raise SystemExit
+    # out = []
+    # for i, (word, props) in enumerate(pairIter):
+    #     word = codes.apply(word, **props)
+    #     out.append(word)
+
+    if isinstance(words, str):
+        return ''.join(out)
+
+    return out
+
+    # except:
+    #     print('rainbow_' * 25)
+    #     embed()
+    #     raise SystemExit
+
+
+def banner(*args, **props):
+    """print pretty banner"""
+    swoosh = props.pop('swoosh', '=')
+    width = props.pop('width', getTerminalSize()[0])
+    # pretty      = props.pop('pretty', True)
+    _print = props.pop('_print', True)
+
+    swoosh = swoosh * width
+    # TODO: fill whitespace to width?
+    # try:
+    msg = '\n'.join(as_ansi(args, ndmin=1))  # pretty=pretty
+    # except:
+    # embed()
+
+    # .center( width )
+    info = '\n'.join([swoosh, msg, swoosh])
+    info = codes.apply(info, **props)
+
+    if _print:
+        print(info)
+
+    return info
+
+
+def _prop_dict_gen(*effects, **kws):
+    # if isinstance()
+
+    # deal with `effects' being list of dicts
+    props = defaultdict(list)
+    for effect in effects:
+        if isinstance(effect, dict):
+            for k in ('fg', 'bg'):
+                v = effect.get(k, None)
+                props[k].append(v)
+        else:
+            props['fg'].append(effect)
+
+    # deal with kws having itearble values
+    for k, v in kws.items():
+        if len(props[k]):
+            warnings.warning('Ambiguous: keyword %r. ignoring' % k)
+        else:
+            props[k].extend(v)
+
+    # generate prop dicts
+    propIter = itt.zip_longest(*props.values(), fillvalue='default')
+    for p in propIter:
+        d = dict(zip(props.keys(), p))
+        yield d
+
+
+def get_state_dicts(states, *effects, **kws):
+    propIter = _prop_dict_gen(*effects, **kws)
+    propList = list(propIter)
+    nprops = len(propList)
+    nstates = states.max()  # ptp??
+    istart = int(nstates - nprops + 1)
+    return ([{}] * istart) + propList
 
 
 # @expose.args()
 def as_ansi(obj, props=(), **propkw):  # TODO: rename for clarity as_ansi_array
-    '''
+    """
     Convert the obj to an array of AnsiStr objects, applying the properties globally.
     Parameters
     ----------
-    obj         :       If input is unsized - return its AnsiStr representation
-                        If input is 0 size - return empty AnsiStr object
-                        Else return array of AnsiStr objects
-    '''
+    obj:
+        If input is unsized - return its AnsiStr representation
+        If input is 0 size - return empty AnsiStr object
+        Else return array of AnsiStr objects
+    """
 
-    # TODO: hanlde masked data
+    # TODO: handle masked data
 
     precision = propkw.pop('precision', 2)
     minimalist = propkw.pop('minimalist', True)  # minimalist representation for floating point numbers
@@ -122,10 +217,10 @@ def as_ansi(obj, props=(), **propkw):  # TODO: rename for clarity as_ansi_array
         propkw.update(props)
         props = ()
     else:
-        props = np.atleast_1d(props)  # as_sequence( props, return_as=tuple)
+        props = np.atleast_1d(props)  # as_sequence(props, return_as=tuple)
 
     # deal with empty arrays        # ???????
-    if not len(obja):               # ???????
+    if not len(obja):  # ???????
         return str(obj)
 
     # Create array of AnsiStr objects applying codes globally
@@ -138,35 +233,10 @@ def as_ansi(obj, props=(), **propkw):  # TODO: rename for clarity as_ansi_array
 
     return out
 
-
-def banner(*args, **props):
-    '''print pretty banner'''
-    swoosh = props.pop('swoosh', '=', )
-    width = props.pop('width', getTerminalSize()[0])
-    # pretty      = props.pop('pretty', True)
-    _print = props.pop('_print', True)
-
-    swoosh = swoosh * width
-    # TODO: fill whitespace to width?
-    # try:
-    msg = '\n'.join(as_ansi(args, ndmin=1))  # pretty=pretty
-    # except:
-    # embed()
-
-    # .center( width )
-    info = '\n'.join([swoosh, msg, swoosh])
-
-    info = as_ansi(info).set_property(**props)
-
-    if _print:
-        print(info)
-
-    return info
-
 #
 #
 # def set_property2(s, *properties, **kw):
-#     #     '''set the ANSI codes for a string given the properties and kw descriptors'''
+#     #     """set the ANSI codes for a string given the properties and kw descriptors"""
 #     #     # TODO: strip superfluous ANSI characters - eg. empty coded strings.
 #     #     # TODO: combine multiple codes as ; separated and strip extra escape
 #     #

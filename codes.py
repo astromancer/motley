@@ -212,17 +212,26 @@ def _gen_codes(*properties, **kws):
     properties      - text colour or effects
     kws              - 'text_colour', 'text_effect', 'background_colour'
     """
-    noprops = properties in [(), None] or (None in properties)
+    properties = tuple(filter(None, properties))
+    noprops = (len(properties) == 0)
     if noprops and not kws:
         return
 
     yield from map(get_prop_code, properties)
 
     for desc, properties in kws.items():
-        if isinstance(properties, (str, int)):
+        if properties is None:
+            continue
+
+        if isinstance(properties, str):
+            if len(properties.strip()) == 0:
+                continue
             properties = properties,
 
-        for prop in properties:
+        if isinstance(properties, int):
+            properties = properties,
+
+        for prop in filter(None, properties):
             yield get_prop_code(prop, desc)
 
 
@@ -238,14 +247,16 @@ def get_code_str(*properties, **kws):
 
 def apply(s, *properties, **kws):
     """set the ANSI codes for a string given the properties and kws descriptors"""
+    # s = str(s) #TODO: warn if converting?
     properties = tuple(filter(None, properties))
     noprops = (len(properties) == 0) #(None in properties) or (
     if noprops and not kws:
         return s
 
-    if len(properties) == 1 and isinstance(properties[0], dict):
-        kws.update(properties[0])
-        properties = ()
+    if len(properties) == 1:
+        if isinstance(properties[0], dict):
+            kws.update(properties[0])
+            properties = ()
 
     code = get_code_str(*properties, **kws)      #NOTE: still missisg END at this point
 

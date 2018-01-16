@@ -1,3 +1,4 @@
+import os
 import sys
 import math
 import time
@@ -5,10 +6,10 @@ import functools
 
 from recipes.misc import getTerminalSize
 from recipes.string import overlay
+# from recipes.progressbar import ProgressBarBase
 from . import codes
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 def move_cursor(val):
     """move cursor up or down"""
     AB = 'AB'[val > 0]  # move up (A) or down (B)
@@ -16,7 +17,6 @@ def move_cursor(val):
     sys.stdout.write(mover)
 
 
-# ****************************************************************************************************
 class ProgressBar(object):
     # TODO: convert to base class
     # TODO: Timing estimate!?
@@ -30,7 +30,6 @@ class ProgressBar(object):
     the progress bar.
     """
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def __init__(self, **kws):
         """ """
         self.sigfig = kws.get('sigfig', 2)
@@ -54,7 +53,6 @@ class ProgressBar(object):
         # space needed for percentage string (5 for xxx.pp% and one more for good measure)
         # self.space              = (self.sigfig + 6)
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def timer(self, f):
 
         @functools.wraps(f)
@@ -66,7 +64,6 @@ class ProgressBar(object):
 
         return wrapper
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def create(self, end, stream=sys.stdout):
         """create the bar and move cursor to it's center"""
 
@@ -91,42 +88,22 @@ class ProgressBar(object):
             codes.apply(whole, self.props) + '\r')
         move_cursor(move)  # center cursor in bar
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # def apply_props(self, string):
-    #     # if isinstance(self.props, dict):
-    #         string = codes.apply(string, self.props)
-    #     # else:
-    #     #     string = SuperString(string).set_property(self.props)
-    #     return string
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def update(self, state):
         """Make progress/percentage indicator strings."""
 
-        frac = state / self.end if self.end > 1   else 1  # ???
+        frac = state / self.end if self.end > 1 else 1  # ???
         ifb = int(round(frac * (self.width - 2)))  # integer fraction of completeness of for loop
 
         progress = (self.symbol * ifb).ljust(self.width - 2)  # filled up to 'width' in whitespaces
         progress = self.sides + progress + self.sides
-        # percentage = '{0:>{1}.{2}%}'.format(frac, self.space, self.sigfig)   #percentage completeness displayed to sigfig decimals
+        # percentage completeness displayed to sigfig decimals
         percentage = '{0:.{1}%}'.format(frac, self.sigfig)
 
         return progress, percentage
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-    # def overlay(self, text, bgtext='', alignment='^', width=None):
-    #
-    #     layer = ft.partial(overlay, alignment=alignment, width=width)
-    #     args = itt.zip_longest(text.split('\n'), bgtext.split('\n'), fillvalue='')
-    #     #TODO: truncate if longer than available space????
-    #     ov = '\n'.join( itt.starmap(layer, args) )
-    #     return ov
-
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def needs_update(self, state):
         return (state == self.end - 1) or (not bool(state % self.every))
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def get_bar(self, state):
         progress, percentage = self.update(state + 1)
         alp, ali = self.alignment
@@ -139,7 +116,6 @@ class ProgressBar(object):
 
         return bar
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def progress(self, state, info=None):  # TODO: make state optional
 
         if state >= self.end:
@@ -176,7 +152,6 @@ class ProgressBar(object):
 
         sys.stdout.flush()
 
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     def close(self):
         sys.stdout.write('\n' * 4)  # move the cursor down 4 lines
         sys.stdout.flush()
