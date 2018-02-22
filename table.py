@@ -1,20 +1,13 @@
-# import functools
-import os
-import re
-import warnings
 import itertools as itt
+import os
+import warnings
 from shutil import get_terminal_size
 
 import numpy as np
-
 from recipes.pprint import PrettyPrinter
 
+from . import ansi
 from . import codes
-from . import core as ansi
-
-as_ansi = ansi.as_ansi
-
-from IPython import embed
 
 
 # TODO: unit tests!!!!!!!!
@@ -36,13 +29,23 @@ from IPython import embed
 #     def _underline(s):
 #         return codes.apply(s, 'underline')
 
+_alignment_map = {'r': '>',
+                      'l': '<',
+                      'c': '^'}
+
+def get_alignment(align):
+    align = _alignment_map.get(align.lower()[0], align)
+    if align not in '<^>':
+        raise ValueError('Unrecognised alignment {!r}'.format(align))
+    return align
+
+
 def _underline(s):
     return codes.apply(s, 'underline')
 
 
-class Table(object):  # TODO: remane as ansi table??
+class Table(object):
     # map to alignment format characters
-    ALIGNMENT_MAP = {'r': '>', 'l': '<', 'c': '^'}  # TODO: move up??
     ALLOWED_KWARGS = []  # TODO
 
     #
@@ -106,7 +109,7 @@ class Table(object):  # TODO: remane as ansi table??
             Default is after column headers, and after last data line and after
             totals line if any.
 
-        number_rows : bool
+        number_rows : bool #TODO: or integer starting value
             Whether to number the rows
 
         precision : int
@@ -211,12 +214,8 @@ class Table(object):  # TODO: remane as ansi table??
         self.has_row_head = hrh = (row_headers is not None)
         self.has_col_head = hch = (col_headers is not None)
         self.n_head_col = nhc = hrh + hrn
-        try:
-            n_data_col = data.shape[1]
-        except:
-            from IPython import embed
-            embed()
-            raise
+
+        n_data_col = data.shape[1]
         ncols = n_data_col + nhc
 
         # col borders (rhs)
@@ -255,7 +254,7 @@ class Table(object):  # TODO: remane as ansi table??
         # title
         self.title = title
         self.title_props = title_props
-        self.title_align = self.get_alignment(title_align)
+        self.title_align = get_alignment(title_align)
 
         # row borders
         if where_row_borders is not None:
@@ -272,8 +271,11 @@ class Table(object):  # TODO: remane as ansi table??
         self.where_row_borders = wrb
 
         # misc
-        self.align = self.get_alignment(align)
-        # self.precision = precision
+        if isinstance(align, str):
+            align = (align, ) * ncols
+        align = list(map(get_alignment, align))
+        assert len(align) == ncols, 'Incorrect number of alignment specifiers'
+        self.align = np.array(align)
 
         # Column specs
         self.cell_white = cell_whitespace  # add whitespace for better legibility
@@ -349,8 +351,6 @@ class Table(object):  # TODO: remane as ansi table??
         ncols = data.shape[1]
         pprint = PrettyPrinter(precision=precision, minimalist=minimalist)
 
-        # embed()
-
         if formatters is None:
             data = np.vectorize(pprint.pformat, (str,))(data)
         elif isinstance(formatters, dict):
@@ -388,8 +388,7 @@ class Table(object):  # TODO: remane as ansi table??
         width_max = None
         if width is None:
             # each column will be as wide as the widest data element it contains
-            col_widths = self.get_column_widths(self.pre_table,
-                                                as_displayed=True)
+            col_widths = self.get_column_widths(self.pre_table, raw=True)
         elif np.size(width) == 1:
             # The table will be made exactly this wide
             width = int(width)  # requested width
@@ -404,8 +403,7 @@ class Table(object):  # TODO: remane as ansi table??
             col_widths = width
         elif isinstance(width, range):
             # maximum table width given.
-            col_widths = self.get_column_widths(self.pre_table,
-                                                as_displayed=True)
+            col_widths = self.get_column_widths(self.pre_table, raw=True)
             width_min = width.start
             width_max = width.stop
         else:
@@ -451,14 +449,13 @@ class Table(object):  # TODO: remane as ansi table??
 
         return data[:, ~same], ishown, isupp, col_headers, compacted
 
-    def get_column_widths(self, data, as_displayed=False, with_borders=False):
+    def get_column_widths(self, data, raw=False, with_borders=False):
         """data should be string type array"""
 
-        lenf = ansi.len_bare if as_displayed else len
+        length = ansi.length_bare if raw else len
         # deal with cell elements that contain newlines
-        length = lambda s: max(map(lenf, s.split(os.linesep)))
-        # NOTE: s.splitlines() may be better, but ''.splitlines() returns empty list which borks on map
-        w = np.vectorize(length, [int])(data).max(axis=0)
+        maxlength = lambda s: max(map(length, s.split(os.linesep)))
+        w = np.vectorize(maxlength, [int])(data).max(axis=0)
 
         # add border size
         b = self.lcb if with_borders else 0
@@ -468,14 +465,8 @@ class Table(object):  # TODO: remane as ansi table??
     def get_width(self, data=None):
         if data is None:
             data = self.pre_table
-        w = self.get_column_widths(data, as_displayed=True, with_borders=True)
+        w = self.get_column_widths(data, raw=True, with_borders=True)
         return sum(w)  # total column width
-
-    def get_alignment(self, align):
-        align = self.ALIGNMENT_MAP.get(align.lower()[0], align)
-        if align not in '<^>':
-            raise ValueError('Unrecognised alignment {!r}'.format(align))
-        return align
 
     def get_totals(self, data, indices):
         if data.ndim < 2:
@@ -594,7 +585,7 @@ class Table(object):  # TODO: remane as ansi table??
     def format_cell(self, text, width, align, border=_default_border, lhs=''):
         # this is needed because the alignment formatting gets screwed up by the ANSI
         # characters (which have length, but are not displayed)
-        pad_width = ansi.len_codes(text) + width
+        pad_width = ansi.length_codes(text) + width
         return self.cell_fmt.format(text, pad_width, align, border, lhs)
 
     def gen_multiline_rows(self, cells, colix=..., underline=False):
@@ -614,14 +605,14 @@ class Table(object):  # TODO: remane as ansi table??
             # print(row_items)
             row = self.make_row_single(row_items, colix)
             if (i + 1 == nlines) and underline:
-                row = _underline(row)  # as_ansi(row, 'underline')
+                row = _underline(row)
             yield row
 
     def make_row_single(self, cells, colix=...):
         # TODO: handle various column alignment...
 
         # format cells
-        align = itt.repeat(self.align)
+        align = self.align[colix]
         cw = self.col_widths[colix]
         cb = self.borders[colix]
         cells = list(map(self.format_cell, cells, cw, align, cb))
@@ -729,7 +720,7 @@ class Table(object):  # TODO: remane as ansi table??
             # NOTE: ANSI overline not supported (linux terminal) use underlined whitespace
             lcb = len(self._default_border)
             top_line = ' ' * (table_width + lcb)
-            top_line = _underline(top_line)  # as_ansi(top_line, 'underline')
+            top_line = _underline(top_line)
             table.append(top_line)
 
         # title

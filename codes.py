@@ -1,17 +1,16 @@
 from recipes.dict import SmartDict
 
-# https://en.wikipedia.org/wiki/ANSI_escape_code
+# source: https://en.wikipedia.org/wiki/ANSI_escape_code
+# http://ascii-table.com/ansi-escape-sequences.php
 
 # Escape sequence
 ESC = '\033'            # All sequences start with this character
 CSI = ESC + '['         # Control Sequence Initiator
 END = CSI + '0m'
-# '{}{}m'.format(CSI, cs)
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Text effects and colours
 textCodes = {
-
     'bold': 1,
     'dim': 2,               # faint
     'italic': 3,
@@ -175,7 +174,7 @@ class CodeTranslator(SmartDict):
 
 
 resolver = KeyResolver(text=CodeTranslator(textCodes),
-                       background= CodeTranslator(backgroundCodes))
+                       background=CodeTranslator(backgroundCodes))
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # 256 Colours
 format256 = KeyResolver(text='38;5;{}',
@@ -191,7 +190,7 @@ format256 = KeyResolver(text='38;5;{}',
 
 
 def get_prop_code(prop, which='text'):
-    """Retrieve the ansi number"""
+    """Retrieve the motley number"""
     cdict = resolver[which]  # .get(prop)
     if prop in cdict:
         return cdict[prop]
@@ -202,7 +201,7 @@ def get_prop_code(prop, which='text'):
         else:
             raise ValueError('Only 256 colours available.')
     else:
-        raise ValueError('Unknown property %r' %prop)
+        raise ValueError('Unknown property %r' % prop)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -258,7 +257,8 @@ def apply(s, *properties, **kws):
             kws.update(properties[0])
             properties = ()
 
-    code = get_code_str(*properties, **kws)      #NOTE: still missisg END at this point
+    code = get_code_str(*properties, **kws)
+    # still missing END code at this point
 
     # eliminate unnecessary END codes. (self may already have previous END code)
     string = s.replace(END, END + code, s.count(END))
@@ -268,10 +268,10 @@ def apply(s, *properties, **kws):
 
 
 if __name__ == '__main__':
-    for i in range(256):
-        print(
-            apply(' ' * 16, i)
-        )
+
+        # Demo 256 colours
+        bg256 = (apply('{0:<10}'.format(i), bg=i) for i in range(256))
+        print(''.join(bg256))
 
         # TODO: print pretty things:
         # http://misc.flogisoft.com/bash/tip_colors_and_formatting

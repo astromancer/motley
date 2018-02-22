@@ -4,7 +4,7 @@ import math
 import time
 import functools
 
-from recipes.misc import getTerminalSize
+from recipes.misc import get_terminal_size
 from recipes.string import overlay
 # from recipes.progressbar import ProgressBarBase
 from . import codes
@@ -33,7 +33,7 @@ class ProgressBar(object):
     def __init__(self, **kws):
         """ """
         self.sigfig = kws.get('sigfig', 2)
-        self.width = kws.get('width', getTerminalSize()[0])
+        self.width = kws.get('width', get_terminal_size()[0])
         self.symbol = kws.get('symbol', '*')
         self.sides = kws.get('sides', '|')
         self.nbars = kws.get('nbars', 1)
