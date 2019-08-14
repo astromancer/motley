@@ -3,14 +3,16 @@ import math
 import functools
 import traceback
 import inspect
-from collections import defaultdict#, OrderedDict
+from collections import defaultdict  # , OrderedDict
 from recipes.dict import DefaultOrderedDict
+from recipes import pprint
 
 from .. import codes
 
-# TODO: Singleton so it can be used accross multiple modules
+
 class Chrono():
-    fmt = '{: <50s} took {:s}'
+    # TODO: Singleton so it can be used across multiple modules
+    fmt = '{: <50s}{:s}'
 
     def __init__(self, title=None):
         # print(inspect.getmodule(self))
@@ -24,9 +26,8 @@ class Chrono():
         self.deltas = []
         self.labels = []
 
-        self.funcs = DefaultOrderedDict(int)#OrderedDict()
+        self.funcs = DefaultOrderedDict(int)  # OrderedDict()
         self.hits = defaultdict(int)
-
 
     def mark(self, label=None):
         elapsed = time.time() - self._mark
@@ -35,30 +36,29 @@ class Chrono():
             self.deltas.append(elapsed)
             self.labels.append(label)
 
-
     def report(self):
+
+        # TODO: multiline text block better?
+        # TODO: spacing for timing values based on magnitude
+        # FIXME: time format does not always pad zeros correctly
+
         total = time.time() - self._start
-        border = '='*80
-        hline = '-'*80
+        border = '=' * 80
+        hline = '-' * 80
+        print()
         print(border)
-        print('%s Report: %s' %(self.__class__.__name__, self.title))
+        print('%s Report: %s' % (self.__class__.__name__, self.title))
         print(hline)
         for t, lbl in zip(self.deltas, self.labels):
-            txt = self.fmt.format(lbl, fmt_hms(t))
-
-            try:
-                print(txt)
-            except Exception as err:
-                from IPython import embed
-                embed()
-                raise
+            txt = self.fmt.format(lbl, pprint.hms(t))
+            print(txt)
 
         for f, t in self.funcs.items():
-            txt = self.fmt.format('Function: %s' % f.__name__, fmt_hms(t))
+            txt = self.fmt.format('Function: %s' % f.__name__, pprint.hms(t))
             print(txt)
 
         print(hline)
-        print('{: <50s}      {: >10s}'.format('Total:', fmt_hms(total)))
+        print(self.fmt.format('Total:', pprint.hms(total)))
         print(border)
 
     # def add_function(self):
@@ -86,8 +86,12 @@ class Chrono():
         return wrapper
 
 
-def timer(f):
+#
 
+
+
+
+def timer(f):
     @functools.wraps(f)
     def wrapper(*args, **kw):
         ts = time.time()
@@ -135,11 +139,6 @@ def timer_extra(postscript, *psargs):
     return timer
 
 
-def hms(t):
-    m, s = divmod(t, 60)
-    h, m = divmod(m, 60)
-    return h, m, s
-
 
 def first_non_zero(a):
     for i, e in enumerate(a):
@@ -159,22 +158,24 @@ def metric_unit(x):
         u = prefixes[pwr]
         return s, xun, u
 
-    return s, xus, ''   # sign, val, unit
+    return s, xus, ''  # sign, val, unit
 
 
-def fmt_hms(t, sep='hms'):
-    if len(sep) == 1:
-        sep *= 3
-    assert len(sep) == 3, 'bad seperator'
-
-    sexa = hms(t)
-    start = first_non_zero(sexa)
-
-    if start == 2:
-        return '%s%.1f %ss' % metric_unit(sexa[2])
-
-    parts = list(map('{:g}{:}'.format, sexa, sep))
-    return ''.join(parts[start:])
+# def fmt_hms(t, sep='hms'):
+#     raise DeprecationWarning('use obstools.utils.fmt_hms')
+#
+#     if len(sep) == 1:
+#         sep *= 3
+#     assert len(sep) == 3, 'bad seperator'
+#
+#     sexa = hms(t)
+#     start = first_non_zero(sexa)
+#
+#     if start == 2:
+#         return '%s%.1f %ss' % metric_unit(sexa[2])
+#
+#     parts = list(map('{:g}{:}'.format, sexa, sep))
+#     return ''.join(parts[start:])
 
 
 def timer_highlight(f):
@@ -190,7 +191,7 @@ def timer_highlight(f):
         # r = f.__name__
         print(codes.apply('Timer', txt='underline', bg='c'))
         print(codes.apply(r, bg='c'))
-        print(codes.apply(fmt_hms(te - ts), bg='y'))
+        print(codes.apply(pprint.hms(te - ts), bg='y'))
 
         return result
 
@@ -210,7 +211,7 @@ def timer_dev(f):
         te = time.time()
 
         r = get_func_repr(f, args, kw, verbosity=1)
-        tstr = codes.apply(fmt_hms(te - ts), bg='y')
+        tstr = codes.apply(pprint.hms(te - ts), bg='y')
         tbl = Table([r, tstr],
                     title='Timer',
                     title_props=dict(c='bold', bg='g'),
@@ -220,11 +221,6 @@ def timer_dev(f):
         return result
 
     return wrapper
-
-
-
-
-
 
 # def timer(codicil, *psargs):
 # def timer(f):
@@ -244,7 +240,6 @@ def timer_dev(f):
 # return result
 # return wrapper
 # return timer
-
 
 
 # from ..expose import get_func_repr

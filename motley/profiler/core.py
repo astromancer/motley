@@ -47,6 +47,7 @@ class LineProfiler(lp.LineProfiler):
         """
         lstats = lp.LineProfiler.get_stats(self)
         # return lstats
+
         # replace func name in timing dict with actual func object
         timings = {}
         grand_total = sum(a for v in lstats.timings.values() for *_, a in v)
@@ -55,16 +56,18 @@ class LineProfiler(lp.LineProfiler):
             filename, start_line_no, name = info
             if len(line_times):
                 # function was executed
-                lineNos, nhits, times = zip(*line_times)
+                lnr, hits, times = zip(*line_times)
+
                 # calculate extras
                 times = np.array(times)
                 total = times.sum()
                 total_time = total * lstats.unit
-                per_hit = times / nhits
+                per_hit = times / hits
                 foft = times / total  # fraction of function total
                 fogt = times / grand_total  # fraction of grand total
 
-                stats = dict(zip(lineNos, zip(nhits, times, per_hit, foft, fogt)))
+                # remake stats dict
+                stats = dict(zip(lnr, zip(hits, times, per_hit, foft, fogt)))
             else:
                 total_time = 0
                 stats = {}
@@ -114,7 +117,6 @@ class HLineProfiler(LineProfiler):
 
     # TODO: Optionally display top 10 most expensive lines...
 
-
     def rank_functions(self):
         from shutil import get_terminal_size
 
@@ -139,7 +141,7 @@ class HLineProfiler(LineProfiler):
 
         # format totals with space as thousands separator for readability
         fmtr = lambda s: '{:,}'.format(s).replace(',', ' ')
-        #totals = list(map(fmtr, totals))
+        # totals = list(map(fmtr, totals))
         col_headers = ('Function', u'Time (\u00B5s)')
         table = Table(list(zip(names, totals)),
                       col_headers=col_headers,
@@ -156,10 +158,6 @@ class HLineProfiler(LineProfiler):
             sTable[i + 2] += hline
         htable = '\n'.join(sTable)
         print(htable)
-
-
-
-
 
 
 # ****************************************************************************************************

@@ -1,62 +1,50 @@
 """
-Printers displaying profiled source code
+Printers for displaying profiled source code
 """
 
-import ast
-import inspect
+# builtin libs
 import re
+import ast
 import sys
+import inspect
 import textwrap
-import functools
+import functools as ftl
 from io import StringIO
 
+# third-party libs
 import numpy as np
-from recipes.iter import where_true, where_false, pairwise
-from recipes.list import flatten
+import more_itertools as mit
 
-from .. import codes, length
+# local libs
+from recipes.iter import where_true, where_false
+from recipes.introspection import get_class_that_defined_method
+from recipes import pprint
+
+# relative
+from .. import codes
+from ..ansi import length
 from ..table import Table
-
+from ..utils import ConditionalFormatter
 
 # FIXME: line stripping still buggy
 
-# TODO: print std if more than one hit per line
-# TODO: make all tables same width for consistency
+# TODO: print std if more than one hit per line  σ =
+# TODO: make all tables same width for consistency for multi print
 # TODO: Heatmap256
 
-cdot = u'\u00B7'
+cdot = u'\u00B7'  # '·'
+
 
 def func2str(func):
     cls = get_class_that_defined_method(func)
     if cls is None:
-        if isinstance(func, functools.partial):
+        if isinstance(func, ftl.partial):
             func = func.func
             argstr = str(func.args).strip(')') + ', %s)' % cdot
             return 'partial(%s%s)' % (func2str(func.func), argstr)
         return func.__name__
     else:
         return '.'.join((cls.__name__, func.__name__))
-
-
-def get_class_that_defined_method(meth):
-    # source: https://stackoverflow.com/questions/3589311/get-defining-class-of-unbound-method-object-in-python-3/25959545#25959545
-
-    # handle bound methods
-    if inspect.ismethod(meth):
-        for cls in inspect.getmro(meth.__self__.__class__):
-            if cls.__dict__.get(meth.__name__) is meth:
-                return cls
-        meth = meth.__func__  # fallback to __qualname__ parsing
-
-    # handle unbound methods
-    if inspect.isfunction(meth):
-        cls = getattr(inspect.getmodule(meth),
-                      meth.__qualname__.split('.<locals>', 1)[0].rsplit('.', 1)[0])
-        if isinstance(cls, type):
-            return cls
-
-    # handle special descriptor objects
-    return getattr(meth, '__objclass__', None)
 
 
 # ====================================================================================================
@@ -121,7 +109,7 @@ def _ast_func_index(source):
             if len(node.body) > 1:  # function has content
                 line_nr_body = node.body[1].lineno - 1
             else:  # function has no content besides docstring
-                line_nr_body = node.body[0].lineno
+                line_nr_body = node.body[0].lineno - 1
             # and we're done
             break
 
@@ -139,7 +127,8 @@ def _ast_func_index(source):
         sourceLines = source.splitlines()
         head = '\n'.join(sourceLines[line_nr_def:line_nr_body + 1])
         # escape regex characters in docstring
-        matcher = re.compile('[^"\']*?(["\']{1,3})(%s)(\\1)' % re.escape(doc_raw))
+        matcher = re.compile(
+                '[^"\']*?(["\']{1,3})(%s)(\\1)' % re.escape(doc_raw))
         for m in matcher.finditer(head):
             pass  # go to last match
 
@@ -203,7 +192,7 @@ class PrintStats(object):
         Note that this method takes the actual function object as its third
         argument and not just the function name as is the case with the
         `line_profiler.show_func`.  This offers several advantages, the foremost
-        being that we can retreive the function source code for functions
+        being that we can retrieve the source code for functions
         defined in interactive sessions with minimal effort.
         """
 
@@ -278,7 +267,7 @@ class PrintStats(object):
     def table(self, stats, show_fot, stream=None):
         """print stats table"""
         stream = stream or sys.stdout
-        empty = ('', ) * 5
+        empty = ('',) * 5
         for lineNo, line in self.enumerate():
             nhits, time, per_hit, fof, fot = stats.get(lineNo, empty)
             txt = self.template.format(
@@ -302,6 +291,13 @@ class ShowHistogram(PrintStats):
     comment = r'\s*#'  # match only whitespace followed by comment #
     commentMatcher = re.compile(comment)
 
+    # any of these can be passed to strip docstring
+    docIds = {'"""', "'''", 'doc', 'docstring'}
+    commentIds = {'#', 'comment', 'comments'}
+    blankIds = {'', ' ', 'blank'}
+    zeroIds = {0, '0', 'zero', 'zeros'}
+
+    # printing
     dots = codes.apply(cdot * 3, 'r', 'bold')
     histogram_color = 'g'
 
@@ -310,17 +306,19 @@ class ShowHistogram(PrintStats):
 
         # TODO option to show outside table / overlapping with source
 
-        # default is to strip comment lines, blank lines, docstrings and zero-time lines
-        strip = set(kws.get('strip', ('#', '', '"""', '<1e-5')))
-        docInd = ('"""', "'''", 'doc', 'docstring')  # any of these can be passed to strip docstring
-        commentInd = ('#', 'comment', 'comments')
-        blankInd = ('', ' ', 'blank')
-        zeroInd = (0, '0', 'zero', 'zeros')
+        # FIXME: blank lines not being stripped correctly
+        # FIXME: keep scope lines when stripping
 
-        self.strip_docstring = set(docInd) & strip
-        self.strip_comments = set(commentInd) & strip
-        self.strip_blanks = set(blankInd) & strip
-        self.strip_zeros = set(zeroInd) & strip
+        # default is to strip comment lines, blank lines, docstrings and zero-time lines
+
+        strip = kws.get('strip', ('#', '', '"""', '<1e-5'))
+        if strip in (None, False):
+            strip =
+
+        self.strip_docstring = self.docIds & strip
+        self.strip_comments = self.commentIds & strip
+        self.strip_blanks = self.blankIds & strip
+        self.strip_zeros = self.zeroIds & strip
         # self.strip_decor = # '@'
 
         handled = (self.strip_docstring | self.strip_comments |
@@ -363,15 +361,18 @@ class ShowHistogram(PrintStats):
 
             if (line_nr_doc is not None) and (line_nr_doc != line_nr_def):
                 # source code relative line numbers
-                line_nrs_doc = np.arange(line_nr_doc, line_nr_doc_end + 1) + start
+                line_nrs_doc = np.arange(line_nr_doc,
+                                         line_nr_doc_end + 1) + start
                 ignore.extend(line_nrs_doc)
 
         if self.strip_comments:
-            line_nrs_comment = where_true(source_lines, self.commentMatcher.match)
+            line_nrs_comment = where_true(source_lines,
+                                          self.commentMatcher.match)
             ignore.extend(np.add(line_nrs_comment, start))
 
         if self.strip_blanks:
-            line_nrs_blank = where_true(source_lines, str.isspace)  # only whitespace
+            line_nrs_blank = where_true(source_lines,
+                                        str.isspace)  # only whitespace
             ignore.extend(np.add(line_nrs_blank, start))
             line_nrs_empty = where_false(source_lines)  # empty lines
             ignore.extend(np.add(line_nrs_empty, start))
@@ -398,19 +399,22 @@ class ShowHistogram(PrintStats):
         # the purpose to do so for a single skipped line
         ignore = sorted(set(ignore))
         if len(ignore) > 1:
-            singleSkip = np.diff(ignore) == 1  # isolated ignore lines.
+            singleSkip = (np.diff(ignore) == 1)  # isolated ignore lines.
             wms, = np.where(~singleSkip)
             splitBlockIx = np.split(ignore, wms + 1)
             skipBlockSize = np.array(list(map(len, splitBlockIx)))  #
             ix = np.take(splitBlockIx, np.where(skipBlockSize == 1))
-            ignore = list(set(ignore) - set(flatten(ix)))
-            # ignore now contains only indices of continuous multiline code blocks to skip when printing
+            ignore = list(set(ignore) - set(mit.collapse(ix)))
+            # ignore now contains only indices of continuous multi-line code
+            # blocks to skip when printing
 
-            # figure out where the gaps are in the displayed code so we can indicate gaps with ellipsis
+            # figure out where the gaps are in the displayed code so we can
+            # indicate gaps with ellipsis
             lineIxShow = sorted(set(range(start, end)) - set(ignore))
-            nrpairs = np.array(list(pairwise(lineIxShow)))
-            gaps = np.subtract(*zip(*nrpairs))
-            self.where_gaps = nrpairs[gaps < -1][:, 0]  # relative to source code line numbers
+            nrpairs = np.array(list(mit.pairwise(lineIxShow + [end])))
+            gaps = nrpairs.ptp(1)  # np.subtract(*zip(*nrpairs))
+            self.where_gaps = nrpairs[gaps > 1][:, 0]
+            # relative to source code line numbers
         else:
             ignore = []
 
@@ -421,7 +425,8 @@ class ShowHistogram(PrintStats):
                                                  self.max_line_width,
                                                  self.dots)
 
-    def preamble(self, filename, func_name, start_line_nr, total_time, stream=None):
+    def preamble(self, filename, func_name, start_line_nr, total_time,
+                 stream=None):
         # intercept the preamble text so we can use it as a table header
         self._preamble = StringIO()
         filename = codes.apply(filename, 'y')
@@ -433,22 +438,27 @@ class ShowHistogram(PrintStats):
         # for the table we need tuple of headers not formatted str, so pass
         pass
 
-    def table(self, stats, show_fot=True, stream=None):
-        """make the time table and write to stream"""
+    def table(self, stats, show_fot=True, show_hits=None, stream=None):
+        """
+        make the time table and write to stream
+        """
         stream = stream or sys.stdout
 
         empty = ('',) * 5
-        n = len(self.sourceCodeLines) - len(self.ignoreLines) + len(self.where_gaps)
+        n = len(self.sourceCodeLines) - len(self.ignoreLines) + \
+            len(self.where_gaps)
         table = np.empty((n, 7), 'O')
 
-        # at this point all lines are the same length
-        lineLength = len(self.sourceCodeLines[0])
+        lineLength = min(max(map(len, self.sourceCodeLines)), 80)
+        # at this point all lines are the same length (NOT ALWAYS~!!)
+        # lineLength = len(self.sourceCodeLines[0])
         where_row_borders = [0]  # first border after column headers
         i = 0
+
         for lineNo, line in self.enumerate():
             nhits, time, per_hit, fof, fot = stats.get(lineNo, empty)
             # Convert fraction to percentage
-            pof, pot = fof * 100, fot * 100
+            # pof, pot = fof * 100, fot * 100
             # make time indicator bar
             if time:  # might be empty str
                 line = make_bar(line, fof, lineLength, self.histogram_color)
@@ -473,12 +483,37 @@ class ShowHistogram(PrintStats):
         # right align numbered columns
         align = list('>>>>>><')
 
-        # Remove column with percentage of total
-        if not show_fot:
-            colhead.pop(-2)
-            table = np.delete(table, -2, 1)
-            align = np.delete(align, -2)
+        # assign column formatters
+        #    = '#', 'Hits', 'Time', 'Per Hit', '% Func', '% Total', 'Source'
+        pformat = '{:.1%}'.format
+        formatters = {'#': str,
+                      colhead[2]: ftl.partial(pprint.decimal, precision=0,
+                                              thousands=' '),
+                      '% Func': pformat,
+                      '% Total': pformat}
 
+        # Remove column with percentage of total
+        remove_col = []
+        if not show_fot:
+            remove_col.append(5)
+            formatters.pop('% Total')
+
+        # if hits all 1, doesn't make sense to print Hits and Per Hit
+        if show_hits is None:
+            col = table[:, 1]
+            show_hits = np.all(col[col != ''] == 1)
+
+        if show_hits:
+            remove_col.extend([1, 3])
+
+        if len(remove_col):
+            keep_cols = np.setdiff1d(np.arange(table.shape[1]), remove_col)
+            colhead = np.take(colhead, keep_cols)
+            align = np.take(align, keep_cols)
+            table = table[:, keep_cols]
+            # formatters = list(np.take(formatters, keep_cols))
+
+        table = np.ma.MaskedArray(table, table == '')
 
         # title
         self._preamble.seek(0)
@@ -492,18 +527,20 @@ class ShowHistogram(PrintStats):
                             col_head_props=dict(text=('bold', 'w'), bg='b'),
                             where_row_borders=where_row_borders,
                             align=align,
-                            precision=3, minimalist=True,
-                            width=range(1000))  # large max width so table doesn't split
+                            width=range(1000),
+                            formatters=formatters,
+                            masked='')
+        # large max width so table doesn't split
         stream.write(str(self._table))
+
+        # from IPython import embed
+        # embed()
 
 
 class ShowDynamicFunction(ShowHistogram):
     """
     Pretty printer for dynamically generated functions
     """
-    # FIXME: show the file name in header
-    # FIXME: show the actual source line numbers
-    # FIXME: remove def line for print
 
     def __init__(self, **kws):
         self._source_lib = kws.pop('contents')
@@ -511,84 +548,5 @@ class ShowDynamicFunction(ShowHistogram):
 
     def get_block(self, func):
         source_code_lines = self._source_lib[func].splitlines()
-        return '__main__', 0, source_code_lines
+        return '__main__', 1, source_code_lines
 
-
-
-
-if __name__ == '__main__':
-    from recipes.iter import pairwise
-
-
-    def show_func_parts(source):
-        exec(source)  # make sure source code has valid syntax
-        indices = _ast_func_index(source)
-        sourceLines = source.splitlines()
-        for i0, i1 in pairwise((0,) + indices + (None,)):
-            if i0 is not None:
-                print('\n'.join(sourceLines[i0:i1]))
-                print('-' * 50)
-
-
-    def bla(f):  # do nothing decorator for testing
-        return f
-
-
-    foo = bla
-
-    # some source code snippets
-    source = [
-        'class Foo: ""',
-
-        'def foo(): pass',
-
-        '''
-        def foo(*zzz,
-                **gork): "bad"
-        ''',
-
-        r'''
-        @bla
-        class Foo:
-            """
-            lol
-            """
-            'yo'
-        ''',
-
-        r'''
-    
-    
-        @bla
-        @foo
-        def find_def(source_code_lines
-    
-    
-                        ) -> 'hi':
-    
-    
-            """
-            lol
-            """
-    
-    
-            # some comment
-            pass
-        ''',
-
-        r'''
-        @bla
-        class Foo:
-            """
-            lol
-            """
-            'your mamma'
-        ''',
-
-        '''
-        @bla
-        @foo
-        def horrible(baz, *a, z='""""""', zz={'#'},
-                            **kws
-                            ) -> "valid syntax":    "bad style docstring"; 1+1
-        ''']
