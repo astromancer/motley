@@ -1,4 +1,4 @@
-from
+from motley.profiler.printers import _ast_func_index
 
 from more_itertools import pairwise
 
@@ -19,15 +19,15 @@ def bla(f):  # do nothing decorator for testing
 
 foo = bla
 
-# some source code snippets
-source = [
-    'class Foo: ""',
+# some source code snippets of barely legible source code for testing
+sources = [
+    'class F: ""',  # shortest class def with actual doc string
 
     'def foo(): pass',
 
     '''
     def foo(*zzz,
-            **gork): "bad"
+            **dork): "bad"
     ''',
 
     r'''
@@ -65,13 +65,17 @@ source = [
         """
         lol
         """
-        'your mamma'
+        'your doc'
     ''',
 
     '''
     @bla
     @foo
     def horrible(baz, *a, z='""""""', zz={'#'},
+                        
+                        zzz=...,
+                        
                         **kws
-                        ) -> "valid syntax":    "bad style docstring"; 1+1
+                        
+                        ) -> "??":    "this is the docstring?!?"; 1+1
     ''']
