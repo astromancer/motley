@@ -59,8 +59,8 @@ class ConvenienceFunction(object):
 
 
 # can also dynamically generate combination fg, bg colour functions
-_colour_names = (
-    'black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan', 'gray', None)
+_colour_names = ('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
+                 'gray', 'white', None)
 for fg, bg in itt.product(_colour_names, _colour_names):
     if fg == bg:
         # something like red on red is pointless
