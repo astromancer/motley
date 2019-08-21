@@ -1,23 +1,27 @@
 """
 Does the work to translate colour/effect names to ANSI codes
 """
+
 import warnings
 
 import more_itertools as mit
 
 from recipes.dict import Many2OneMap
+from .ansi import parse
+
+import functools as ftl
 
 # source: https://en.wikipedia.org/wiki/ANSI_escape_code
 # http://ascii-table.com/ansi-escape-sequences.php
 
 # Escape sequence
-ESC = '\033'  # All sequences start with this character
+ESC = '\033'  # All sequences start with this character # equivalent to \x1b
 CSI = ESC + '['  # Control Sequence Initiator
 END = CSI + '0m'
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ANSI Codes for Text effects and colours
-fgCodes = {
+# ANSI Codes for Text effects and colours  FG_CODES BG_CODE
+FG_CODES = {
     'bold': 1,
     'dim': 2,  # faint
     'italic': 3,
@@ -29,9 +33,12 @@ fgCodes = {
     'strikethrough': 9,
     # ------------------
     # 10	Primary(default) font
-    # 11–19	{\displaystyle n} n-th alternate font	Select the {\displaystyle n} n-th alternate font (14 being the fourth alternate font, up to 19 being the 9th alternate font).
+    # 11–19	{\displaystyle n} n-th alternate font	Select the {\displaystyle n}
+    # n-th alternate font (14 being the fourth alternate font, up to 19 being
+    # the 9th alternate font).
     # 20	Fraktur	hardly ever supported
-    # 21	Bold: off or Underline: Double	Bold off not widely supported; double underline hardly ever supported.
+    # 21	Bold: off or Underline: Double	Bold off not widely supported;
+    # double underline hardly ever supported.
     # 22	Normal color or intensity	Neither bold nor faint
     # 23	Not italic, not Fraktur
     # 24	Underline: None	Not singly or doubly underlined
@@ -49,7 +56,10 @@ fgCodes = {
     'magenta': 35,
     'cyan': 36,
     'light gray': 37,
-    # 38	Reserved for extended set foreground color	typical supported next arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color channels (out of 255)
+    # 38	Reserved for extended set foreground color typical supported next
+    # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
+    # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
+    # channels (out of 255)
     'default': 39,  # Default text color (foreground)
     # ------------------
     'frame': 51,
@@ -59,7 +69,7 @@ fgCodes = {
     # 55	Not overlined
     # ------------------
     'dark gray': 90,
-    'gray' : 90,
+    'gray': 90,
     'light red': 91,
     'light green': 92,
     'light yellow': 93,
@@ -71,8 +81,7 @@ fgCodes = {
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Background Colours
-bgCodes = {
-    'default': 49,
+BG_CODES = {
     'black': 40,
     'red': 41,
     'green': 42,
@@ -82,17 +91,25 @@ bgCodes = {
     'cyan': 46,
     'light gray': 47,
     # ------------------
-    # 48	Reserved for extended set background color	typical supported next arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color channels (out of 255)
-    # 49	Default background color	implementation defined (according to standard)
+    # 48	Reserved for extended set background color	typical supported next
+    # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
+    # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
+    # channels (out of 255)
+    'default': 49,
+    # 49	Default background color	implementation defined (according to
+    # standard)
     # 50	Reserved
     # ------------------
     # 56–59	Reserved
     # 60	ideogram underline or right side line	hardly ever supported
-    # 61	ideogram double underline or double line on the right side	hardly ever supported
+    # 61	ideogram double underline or double line on the right side	hardly
+    # ever supported
     # 62	ideogram overline or left side line	hardly ever supported
-    # 63	ideogram double overline or double line on the left side	hardly ever supported
+    # 63	ideogram double overline or double line on the left side
+    # hardly ever supported
     # 64	ideogram stress marking	hardly ever supported
-    # 65	ideogram attributes off	hardly ever supported, reset the effects of all of 60–64
+    # 65	ideogram attributes off	hardly ever supported, reset the effects of
+    # all of 60–64
     # ------------------
     'dark gray': 100,
     'light red': 101,
@@ -103,10 +120,11 @@ bgCodes = {
     'light cyan': 106,
     'white': 107,
 }
+# TODO: alternate colour names here: https://en.wikipedia.org/wiki/ANSI_escape_code
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Convenient short colour descriptions a la matplotlib
-mplShorthands = {
+mplShortsMap = {
     'b': 'blue',
     'g': 'green',
     'r': 'red',
@@ -117,9 +135,16 @@ mplShorthands = {
     'w': 'white',
 }
 
+#
+effectShortsMap = {'B': 'bold',
+                   'I': 'italic'}
+# volcab is translated before keyword mappings in Many2One, so the uppercase
+# here works
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # alias map for allowed keywords for functions
-aliasMap = {
+kwAliasMap = {
+    # text
     'text': 'fg',
     'txt': 'fg',
     'colour': 'fg',
@@ -127,11 +152,19 @@ aliasMap = {
     'c': 'fg',
     'fg': 'fg',
     'foreground': 'fg',
+    'rgb': 'fg',
+    # background
+    'highlight': 'bg',
     'background': 'bg',
     'bg': 'bg',
     'bc': 'bg',
-    'bgc': 'bg',
+    'bgc': 'bg'
 }
+
+FORMAT_8BIT = dict(fg='38;5;{:d}',
+                   bg='48;5;{:d}')
+FORMAT_24BIT = dict(fg='38;2;{:d};{:d};{:d}',
+                    bg='48;2;{:d};{:d};{:d}')
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -139,12 +172,12 @@ aliasMap = {
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-def _aliasFactory(codes, aliases):
-    """Create the code translation dict"""
-    Codes = Many2OneMap(codes)
-    Codes.add_vocab(aliases)
-    Codes.add_map(str.lower)
-    return Codes
+# def _aliasFactory(codes, aliases):
+#     """Create the code translation dict"""
+#     Codes = Many2OneMap(codes)
+#     Codes.add_vocab(aliases)
+#     Codes.add_map(str.lower)
+#     return Codes
 
 
 class KeyResolver(Many2OneMap):
@@ -154,7 +187,7 @@ class KeyResolver(Many2OneMap):
 
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
-        self.add_vocab(aliasMap)  # translation
+        self.add_vocab(kwAliasMap)  # translation
 
     def __missing__(self, key):
         try:
@@ -168,83 +201,92 @@ class CodeResolver(Many2OneMap):
     """
     Resolve all the various names for colours or effects into codes
     """
-    fmt = '{}'
 
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
-        # add mappings for matplotlib color names
-        self.add_vocab(mplShorthands)
-        # add a layer that maps to lower case: REd --> red
+        # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
+        self.add_vocab(mplShortsMap)
+        # add a layer that maps to lower case: 'REd' --> 'red'
         self.add_map(str.lower)
 
     def __getitem__(self, key):
         # make sure we always return a str
         return str(super().__getitem__(key))
 
-    # class Format256Mixin(CodeResolver):
     def __missing__(self, key):
         try:
-            # fromat 256 colour spec
-            if str(key).isdigit():
-                if int(key) <= 256:
-                    return self.fmt.format(key)
-                else:
-                    raise KeyError('Only 256 colours available.')
-
-            # if not 256 colours resolve at parent
             return super().__missing__(key)
         except KeyError as e:
             raise KeyError('Unknown property %r' % key)
 
 
-class FGResolver(CodeResolver):
-    fmt = '38;5;{}'
+# additional shorthands for bold / italic text
+fg_resolver = CodeResolver(FG_CODES)
+fg_resolver.add_vocab(effectShortsMap)
 
 
-class BGResolver(CodeResolver):
-    fmt = '48;5;{}'
+resolver = KeyResolver(fg=fg_resolver,
+                       bg=CodeResolver(BG_CODES))
 
 
-resolver = KeyResolver(fg=FGResolver(fgCodes),
-                       bg=BGResolver(bgCodes))
-resolver.fg = resolver['fg']
-resolver.bg = resolver['bg']
+import numbers
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Dispatch functions for translating user input to ANSI codes
+@ftl.singledispatch
+def resolve(obj, fg_or_bg='fg'):
+    """default dispatch func for resolving ANSI codes from user input"""
+    raise TypeError('Could not interpret %r (type %r) as a colour / effect '
+                    'for %r' % (obj, type(obj), fg_or_bg))
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# 24bit (3-byte) true color support
-# TODO
-# NOTE:  Gnome Terminal 24bit support is enabled by default but gnome-terminal
-#       has to be in version linked against libvte >= 0.36
-#       see: http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
-# TODO
+# TODO: might want to give the functions below names for more readible traceback
+
+@resolve.register(str)
+def _(obj, fg_or_bg='fg'):
+    yield resolver[fg_or_bg][obj]
 
 
-def apply(s, *properties, **kws):
-    """
-    set the ANSI codes for a string given the properties and kws descriptors
-    """
+@resolve.register(numbers.Integral)
+def _(obj, fg_or_bg='fg'):
+    # integers are interpreted as 8-bit colour codes
+    if 0 <= obj < 256:
+        yield FORMAT_8BIT[fg_or_bg].format(obj)
+    else:
+        raise ValueError('Could not interpret key %r as a 8 bit colour' % obj)
 
-    # first convert to str
-    string = str(s)
 
-    # get code string eg: '34;48;5;22'
-    code = get_codes(*properties, **kws)
-    if not len(code):
-        return string
+@resolve.register(list)
+@resolve.register(tuple)
+def _(obj, fg_or_bg='fg'):
+    # tuple, lists are interpreted as 24-bit rgb true colour codes
+    if is_24bit(obj):
+        if all(0 <= _ < 256 for _ in obj):
+            yield FORMAT_24BIT[fg_or_bg].format(*obj)
+        else:
+            raise ValueError(
+                'Could not interpret key %s as a 24 bit colour' % repr(obj))
+    else:
+        for p in obj:
+            yield from resolve(p, fg_or_bg)
 
-    # still missing END code at this point
-    # note `string` may already have previous ANSI codes.
-    n_ends = string.count(END)
-    if n_ends:
-        # next line ensures new ansi code applied across existing ansi code.
-        # May overwrite previous colours, but will stack effects like 'bold'
-        # or 'italic' for recursive invocations
-        string = string.replace(END, END + code, n_ends)
 
-    return code + string + END
+def is_24bit(obj):
+    if len(obj) != 3:
+        return False
 
-# apply = hue
+    for o in obj:
+        if not isinstance(o, numbers.Integral):
+            return False
+
+    return True
+
+
+@resolve.register(dict)
+def _(obj, _=''):
+    for key, val in obj.items():
+        # `val` may have tuple of effects: eg: ((55, 55, 55), 'bold', 'italic')
+        # but may also be a rgb tuple eg: (55, 55, 55)
+        yield from resolve(val, key)
 
 
 def _gen_codes(*properties, **kws):
@@ -262,26 +304,18 @@ def _gen_codes(*properties, **kws):
 
     # flatten nested properties except if dict
     # filter meaningless descriptions like: '' or None
-    for p in filter(None, mit.collapse(properties, dict)):
-        if isinstance(p, dict):
-            twice = set(kws.keys()) - set(p.keys())
-            if len(twice):
-                warnings.warn('Multiple values received for properties %s.' %
-                              twice)
-            kws.update(p)
-        else:
-            yield resolver.fg[p]
+    # twice = set(kws.keys()) - set(p.keys())
+    # if len(twice):
+    #     warnings.warn('Multiple values received for properties %s.' % twice)
+    # kws.update(p)
 
-    for fg_or_bg, pkw in kws.items():
-        for p in filter(None, mit.collapse(pkw)):
-            yield resolver[fg_or_bg][p]
+    for p in filter(None, properties):  #
+        yield from resolve(p)
+
+    yield from resolve(kws)
 
 
-# def get_codes(*properties, **kws):
-#     return list(_gen_codes(*properties, **kws))
-
-
-def get_codes(*properties, **kws):
+def get(*properties, **kws):
     """
 
     Parameters
@@ -293,78 +327,36 @@ def get_codes(*properties, **kws):
     -------
 
     """
-    codes = _gen_codes(*properties, **kws)
-    # codes = list(codes)
-
-    cs = ';'.join(codes)
-    if len(cs):
-        return '{}{}m'.format(CSI, cs)
-    # if no properties given, we have an empty string here
-    return ''
+    return ';'.join(_gen_codes(*properties, **kws))
 
 
-# def _gen_codes(*properties, **kws):
-#     """
-#     Get ANSI code given the properties and kws descriptors.
-#     properties      - foreground (text) colour(s) and/or effect(s)
-#     kws             -
-#     """
-#     # detect if properties is nested tuple of properties. ie. handle use case
-#     # `props = ('italic', 144); codes.apply('yo', props)`
-#     #
-#     if len(properties) == 1:
-#         properties0 = properties[0]
-#         if isinstance(properties0, (tuple, list)):
-#             properties = properties0
-#             # yield from _gen_codes(*properties0)  # recur
-#         if isinstance(properties0, dict):
-#             # use case: `codes.apply(dict(fg='blue'))`
-#             kws.update(properties0)
-#             properties = ()
-#
-#     # filter meaningless descriptions like: '' or None
-#     properties = tuple(filter(None, properties))
-#     no_props = (len(properties) == 0)
-#     if no_props and not kws:
-#         return
-#     #
-#     # everything in `properties` assumed referring to foreground
-#     yield from map(get_code, properties)
-#
-#     # next handle kws: eg. `hue(s, bg='b')
-#     for fg_or_bg, properties in kws.items():
-#
-#         for prop in filter(None, properties):
-#             yield get_code(prop, fg_or_bg)
+def apply(s, *properties, **kws):
+    # first convert to str
+    # string = str(s)
 
-# if isinstance(properties, str):
-#     if len(properties.strip()) == 0:
-#         continue    # empty string. ignore
-#     properties = properties,
-#
-# if isinstance(properties, int):
-#     properties = properties,
-#
-# for prop in filter(None, properties):
-#     yield get_code(prop, fg_or_bg)
+    # get code bits eg: '34;48;5;22'
+    new_codes = get(*properties, **kws)
+    if not len(new_codes):
+        return s
+
+    # In order to get the correct representation of the string,
+    # we strip and ANSI codes that are in place and stack the new codes
+    # This means previous colours are replaced, but effects like 'bold' or
+    # 'italic' will stack for recursive invocations
+    # note: final byte 'm' only valid for SGR (Select Graphic Rendition) and
+    #  not other codes, but this is all we support for now
+    return ''.join(''.join((CSI, params, ';', new_codes, 'm', w, END))
+                   for csi, params, fb, w, _ in parse(s))
 
 
-#
-# def get_fg_code(prop):
-#     return get_code(prop)
+def apply_naive(s, *properties, **kws):
+    """
+    set the ANSI codes for a string given the properties and kws descriptors
+    """
 
-# def _get_codes_tuple(*properties, **kws):
-#     return tuple(_gen_codes(*properties, **kws))
+    # get code string eg: '34;48;5;22'
+    code = get(*properties, **kws)
+    if not len(code):
+        return s
 
-
-if __name__ == '__main__':
-    # Demo 256 colours
-    bg256 = (apply('{0:<10}'.format(i), bg=i) for i in range(256))
-    print(''.join(bg256))
-
-    # TODO: print pretty things:
-    # http://misc.flogisoft.com/bash/tip_colors_and_formatting
-    # http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
-    # https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
-
-    # TODO: unit tests!!
+    return ''.join((code, s, END))
