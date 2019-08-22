@@ -145,7 +145,7 @@ def _ast_func_index(source):
 # ****************************************************************************************************
 class ReportStats(object):
     """
-    Helper class that prints profiler results for a single function when called.
+    Helper class that prints profiling results for a single function when called.
     This base class is essentially an OO (and therefore extensible) version of
     the native `LineProfiler.print_stats` with better handling of interactively
     defined functions.
@@ -154,9 +154,6 @@ class ReportStats(object):
     column_headers = '#', 'Hits', 'Time', 'Per Hit', '% Func', '% Total', 'Line Contents'
     header_template = '{:6} {:9} {:12} {:8} {:8} {:8} {}'
     template = '{:<6} {:>9} {:>12} {:>8} {:>6.2%}, {:>6.2%} {}'
-
-    def __init__(self, **kws):
-        pass
 
     def __call__(self, line_stats):
 
@@ -178,7 +175,7 @@ class ReportStats(object):
 
     def show_func(self, func, stats, unit, total, show_fot=True, stream=None):
         """
-        Show profiler results for a single function.
+        Show profiling results for a single function.
 
         Note that this method takes the actual function object as its 1st
         argument and not just the function name as is the case with the
@@ -546,7 +543,11 @@ class ReportStatsTable(ReportStats):
         # embed()
 
 
-class ShowDynamicFunction(ReportStatsTable):
+# class ReportHeatMap(ReportStatsTable):
+    # TODO
+
+
+class ReportDynamicFunction(ReportStatsTable):
     """
     Pretty printer for dynamically generated functions
     """
