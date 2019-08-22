@@ -8,8 +8,8 @@ import math
 import warnings
 
 from recipes.io import read_file_slice
-from motley.profiler.core import HLineProfiler
-from motley.profiler.printers import ShowDynamicFunction
+from motley.profiling.core import LineProfiler
+from motley.profiling.printers import ReportDynamicFunction
 
 
 def get_block(filename, up_to_line):
@@ -106,15 +106,15 @@ def _construct_importer(filename, up_to_line, name='importer'):
     return None, None
 
 
-class DynamicFunctionProfiler(HLineProfiler):
-    printerClass = ShowDynamicFunction
+class DynamicFunctionProfiler(LineProfiler):
 
     def __init__(self, *args, **kwargs):
-        HLineProfiler.__init__(self, *args, **kwargs)
+        LineProfiler.__init__(self, *args, **kwargs)
         self._source_lib = {}
 
     def print_stats(self, **kws):
-        HLineProfiler.print_stats(self, contents=self._source_lib, **kws)
+        printer = ReportDynamicFunction(contents=self._source_lib, **kws)
+        printer(self.get_stats())
 
     def add_dynamic_function(self, func, source):
         self.add_function(func)
@@ -130,7 +130,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser(
-            prog='motley.profiler.imports',
+            prog='motley.profiling.imports',
             description="Profile your modules import statements easily")
     parser.add_argument('filename', type=str)
     parser.add_argument('up_to_line', type=int, nargs='?', default=math.inf)
@@ -139,7 +139,7 @@ if __name__ == '__main__':
     #
     importer, source = _construct_importer(args.filename, args.up_to_line)
     if importer:
-        # setup profiler
+        # setup profiling
         profiler = DynamicFunctionProfiler()
         profiler.add_dynamic_function(importer, source)
         profiler.enable_by_count()
