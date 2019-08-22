@@ -1,6 +1,30 @@
-from motley.profiler.printers import _ast_func_index
+from motley.profiling.printers import _ast_func_index
+from motley.profiling import profile
 
 from more_itertools import pairwise
+import time
+
+
+@profile(report='bars')
+def foo():
+    """
+    Sample docstring
+    """
+    time.sleep(0.1)
+    time.sleep(0.2)
+    time.sleep(0.3)
+    time.sleep(0.5)
+    time.sleep(0.3)
+    time.sleep(0.2)
+    time.sleep(0.1)
+
+    # comment
+    time.sleep(1e-5)
+    time.sleep(0)
+
+
+foo()
+
 
 
 def show_func_parts(source):
