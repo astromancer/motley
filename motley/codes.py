@@ -251,8 +251,16 @@ def resolve(obj, fg_or_bg='fg'):
 
 # TODO: might want to give the functions below names for more readable traceback
 
+@resolve.register(type(None))
+def _(obj, fg_or_bg='fg'):
+    return
+    yield
+
+
 @resolve.register(str)
 def _(obj, fg_or_bg='fg'):
+    if obj is '':
+        return
     yield resolver[fg_or_bg][obj]
 
 
@@ -312,13 +320,6 @@ def _gen_codes(*properties, **kws):
     -------
 
     """
-
-    # flatten nested properties except if dict
-    # filter meaningless descriptions like: '' or None
-    # twice = set(kws.keys()) - set(p.keys())
-    # if len(twice):
-    #     warnings.warn('Multiple values received for properties %s.' % twice)
-    # kws.update(p)
 
     yield from resolve(properties)
     yield from resolve(kws)
