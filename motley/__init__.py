@@ -3,11 +3,10 @@ Rocking colours. Just like in the 80s...
 """
 
 import textwrap
-import itertools as itt
 
 from . import codes
-from .codes import apply as hue
 from .utils import *
+from .ansi import *
 
 
 class ConvenienceFunction(object):
@@ -19,7 +18,7 @@ class ConvenienceFunction(object):
             >>> codes.apply(s, fg={0!r}, bg={1!r})
             """)
 
-    def __init__(self, fg, bg):
+    def __init__(self, fg, bg=None):
         """
         Api function for applying ANSI codes to strings
         """
@@ -59,12 +58,24 @@ class ConvenienceFunction(object):
 
 
 # can also dynamically generate combination fg, bg colour functions
-_colour_names = ('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
-                 'gray', 'white', None)
-for fg, bg in itt.product(_colour_names, _colour_names):
+_colours = ('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
+            'gray', 'white', None)
+_effects = ('bold', 'dim', 'italic', 'underline', 'blink_slow', 'blink_fast',
+            'invert', 'hide', 'strike')
+
+for fg, bg in itt.chain(
+        itt.product(_colours, _colours),
+        itt.product(_effects, (None,)),
+        itt.product(itt.product(('bold', 'italic'), _colours + ('italic',)),
+                    (None,))):
+
     if fg == bg:
         # something like red on red is pointless
         continue
 
     func = ConvenienceFunction(fg, bg)
+    # TODO: 'y_on_g'
     exec(f'{func.__name__} = func')
+
+# remove from module namespace
+del func
