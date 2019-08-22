@@ -28,6 +28,7 @@ RE_ANSI_VALID = fr'''
 '''
 SRE_ANSI_VALID = re.compile(RE_ANSI_VALID, re.X)
 
+
 # RE_ANSI_OPEN = fr'(?P<code>{RE_ANSI_CODE})(?P<s>.*?)(?!{RE_END})'
 
 # "All common sequences just use the parameters as a series of
@@ -55,12 +56,12 @@ def has_ansi(s):
 
 
 def strip(s):
-    """strip ansi codes from str"""
+    """strip ANSI codes from str"""
     return SRE_ANSI_CODE.sub('', s)
 
 
 def pull(s):
-    """extract ansi codes from str"""
+    """extract ANSI codes from str"""
     return SRE_ANSI_CODE.findall(s)
 
 
@@ -88,20 +89,19 @@ def parse(s):
 
     """
     idx = 0
-    mo = None
     for mo in SRE_ANSI_VALID.finditer(s):
         start = mo.start()
         if start != idx:
             yield '', '', '', s[idx:start], ''
-        yield mo.group('csi', 'params', 'final_byte',  's', 'end')
+        yield mo.group('csi', 'params', 'final_byte', 's', 'end')
         idx = mo.end()
 
-    if mo is None:
-        # no ANSI codes in s
-        yield '',  '', '', s, ''
+    if (len(s) == 0) or (idx != len(s)):
+        # last part of str
+        yield '', '', '', s[idx:], ''
 
 
-def gen_index_csi(s):
+def _gen_index_csi(s):
     match = None
     for match in SRE_ANSI_CODE.finditer(s):
         yield match.start()
@@ -111,8 +111,8 @@ def gen_index_csi(s):
         yield len(s)
 
 
-def gen_index_split(s):
-    itr = gen_index_csi(s)
+def _gen_index_split(s):
+    itr = _gen_index_csi(s)
     i0 = next(itr)
     if not i0 == 0:
         yield 0
@@ -121,16 +121,16 @@ def gen_index_split(s):
 
 
 def split_iter(s):
-    for i0, i1 in mit.pairwise(gen_index_split(s)):
+    for i0, i1 in mit.pairwise(_gen_index_split(s)):
         yield s[i0:i1]
 
 
 def get_split_idx(s):
-    return list(gen_index_split(s))
+    return list(_gen_index_split(s))
 
 
 def split(s):
-    """Blindly split the str `s` at positions ansi code locations"""
+    """Blindly split the str `s` at positions ANSI code locations"""
     return list(split_iter(s))
 
 
@@ -155,13 +155,13 @@ def length(s, raw=True):
 
 
 def length_codes(s):
-    """length of the ansi escape sequences in the str"""
+    """length of the ANSI codes in the str"""
     return sum(map(len, pull(s)))
 
 
 def length_raw(s):
     """
     length of the string as it would be displayed on screen
-    i.e. all ansi codes resolved / removed
+    i.e. all ANSI codes resolved / removed
     """
     return len(strip(s))
