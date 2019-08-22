@@ -8,6 +8,7 @@ from . import codes
 from .utils import *
 from .ansi import *
 
+hue = codes.apply
 
 class ConvenienceFunction(object):
     _doc_tmp = textwrap.dedent(
@@ -47,6 +48,10 @@ class ConvenienceFunction(object):
         #
         self.fg = fg
         self.bg = bg
+
+        # join effects eg: 'bold_red'
+        if isinstance(fg, tuple):
+            name = ' '.join(filter(None, fg))
 
         # make space underscore: eg: 'light cyan'
         self.__name__ = name.replace(' ', '_')
