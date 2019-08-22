@@ -11,6 +11,8 @@ from .ansi import parse
 
 import functools as ftl
 
+import numpy as np
+
 # source: https://en.wikipedia.org/wiki/ANSI_escape_code
 # http://ascii-table.com/ansi-escape-sequences.php
 
@@ -30,7 +32,7 @@ FG_CODES = {
     # 'blink' : 6,           # blink fast
     'invert': 7,
     'hidden': 8,  # conceal
-    'strikethrough': 9,
+    'strike': 9,
     # ------------------
     # 10	Primary(default) font
     # 11–19	{\displaystyle n} n-th alternate font	Select the {\displaystyle n}
@@ -137,7 +139,15 @@ mplShortsMap = {
 
 #
 effectShortsMap = {'B': 'bold',
-                   'I': 'italic'}
+                   'I': 'italic',
+                   'U': 'underline',
+                   'S': 'strike',
+                   'unbold': 'dim',
+                   'strikethrough': 'strike',
+                   'blink': 'blink_slow',
+                   'hide': 'hidden',
+                   'faint': 'dim'
+                   }
 # volcab is translated before keyword mappings in Many2One, so the uppercase
 # here works
 
@@ -224,12 +234,12 @@ class CodeResolver(Many2OneMap):
 fg_resolver = CodeResolver(FG_CODES)
 fg_resolver.add_vocab(effectShortsMap)
 
-
 resolver = KeyResolver(fg=fg_resolver,
                        bg=CodeResolver(BG_CODES))
 
-
 import numbers
+
+
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Dispatch functions for translating user input to ANSI codes
 @ftl.singledispatch
@@ -239,7 +249,7 @@ def resolve(obj, fg_or_bg='fg'):
                     'for %r' % (obj, type(obj), fg_or_bg))
 
 
-# TODO: might want to give the functions below names for more readible traceback
+# TODO: might want to give the functions below names for more readable traceback
 
 @resolve.register(str)
 def _(obj, fg_or_bg='fg'):
@@ -255,6 +265,7 @@ def _(obj, fg_or_bg='fg'):
         raise ValueError('Could not interpret key %r as a 8 bit colour' % obj)
 
 
+@resolve.register(np.ndarray)
 @resolve.register(list)
 @resolve.register(tuple)
 def _(obj, fg_or_bg='fg'):
@@ -264,10 +275,18 @@ def _(obj, fg_or_bg='fg'):
             yield FORMAT_24BIT[fg_or_bg].format(*obj)
         else:
             raise ValueError(
-                'Could not interpret key %s as a 24 bit colour' % repr(obj))
+                    'Could not interpret key %s as a 24 bit colour' % repr(obj))
     else:
         for p in obj:
             yield from resolve(p, fg_or_bg)
+
+
+@resolve.register(dict)
+def _(obj, _=''):
+    for key, val in obj.items():
+        # `val` may have tuple of effects: eg: ((55, 55, 55), 'bold', 'italic')
+        # but may also be a rgb tuple eg: (55, 55, 55)
+        yield from resolve(val, key)
 
 
 def is_24bit(obj):
@@ -279,14 +298,6 @@ def is_24bit(obj):
             return False
 
     return True
-
-
-@resolve.register(dict)
-def _(obj, _=''):
-    for key, val in obj.items():
-        # `val` may have tuple of effects: eg: ((55, 55, 55), 'bold', 'italic')
-        # but may also be a rgb tuple eg: (55, 55, 55)
-        yield from resolve(val, key)
 
 
 def _gen_codes(*properties, **kws):
@@ -309,14 +320,18 @@ def _gen_codes(*properties, **kws):
     #     warnings.warn('Multiple values received for properties %s.' % twice)
     # kws.update(p)
 
-    for p in filter(None, properties):  #
-        yield from resolve(p)
-
+    yield from resolve(properties)
     yield from resolve(kws)
+
+
+def _get_params(*properties, **kws):
+    # get the nrs '34;48;5;22' part of the code
+    return ';'.join(_gen_codes(*properties, **kws))
 
 
 def get(*properties, **kws):
     """
+    Get the ANSI code for `properties` and `kws`
 
     Parameters
     ----------
@@ -327,7 +342,15 @@ def get(*properties, **kws):
     -------
 
     """
-    return ';'.join(_gen_codes(*properties, **kws))
+    return ''.join((CSI, _get_params(*properties, **kws), 'm'))
+
+
+def from_list(fg=None, bg=None):
+    if fg is not None:
+        return list(map(get, fg))
+
+    if bg is not None:
+        return [get(bg=_) for _ in bg]
 
 
 def apply(s, *properties, **kws):
@@ -335,14 +358,19 @@ def apply(s, *properties, **kws):
     # string = str(s)
 
     # get code bits eg: '34;48;5;22'
-    new_codes = get(*properties, **kws)
+    new_codes = _get_params(*properties, **kws)
     if not len(new_codes):
         return s
 
     # In order to get the correct representation of the string,
     # we strip and ANSI codes that are in place and stack the new codes
     # This means previous colours are replaced, but effects like 'bold' or
-    # 'italic' will stack for recursive invocations
+    # 'italic' will stack for recursive invocations.  This also means we get
+    # the shortest representation of the string given the parameters which is
+    # nice and optimal.  If we were to apply blindly our string would be
+    # longer than needed by a few (non-display) characters.  This might seem
+    # insignificant but becomes deadly once you start doing more complicated
+    # effects on longer strings
     # note: final byte 'm' only valid for SGR (Select Graphic Rendition) and
     #  not other codes, but this is all we support for now
     return ''.join(''.join((CSI, params, ';', new_codes, 'm', w, END))
