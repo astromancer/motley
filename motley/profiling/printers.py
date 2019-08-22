@@ -143,7 +143,7 @@ def _ast_func_index(source):
 
 
 # ****************************************************************************************************
-class PrintStats(object):
+class ReportStats(object):
     """
     Helper class that prints profiler results for a single function when called.
     This base class is essentially an OO (and therefore extensible) version of
@@ -155,28 +155,19 @@ class PrintStats(object):
     header_template = '{:6} {:9} {:12} {:8} {:8} {:8} {}'
     template = '{:<6} {:>9} {:>12} {:>8} {:>6.2%}, {:>6.2%} {}'
 
-    # TODO: Don't strip lines that are part of multiline statement
-    # TODO: Optionally keep lines that determine statement nesting (eg if, for while etc)
-    # TODO: option to reset after multiple calls.  may sometimes be desired
+    def __init__(self, **kws):
+        pass
 
-    # def __init__(self, **kws):
-    #     pass
-
-    # TODO: optionally sort most expensive first?
-    #     self.timings = lstats.timings
-    #     self.unit = lstats.unit
-    # self.stream = stream or sys.stdout
-
-    def print_stats(self, lstats):
+    def __call__(self, line_stats):
 
         not_run = []
-        timings = lstats.timings
+        timings = line_stats.timings
         ran = map(bool, map(len, timings.values()))
         many_ran = sum(ran) > 1  # we have results for more than one func
 
         for (filename, start_line_no, func), (stats, total) in timings.items():
             if len(stats):
-                self.show_func(func, stats, lstats.unit, total, many_ran)
+                self.show_func(func, stats, line_stats.unit, total, many_ran)
             else:  # No timings ==> function not executed
                 # print these at the end
                 not_run.append(func2str(func))
@@ -189,7 +180,7 @@ class PrintStats(object):
         """
         Show profiler results for a single function.
 
-        Note that this method takes the actual function object as its third
+        Note that this method takes the actual function object as its 1st
         argument and not just the function name as is the case with the
         `line_profiler.show_func`.  This offers several advantages, the foremost
         being that we can retrieve the source code for functions
@@ -263,7 +254,6 @@ class PrintStats(object):
         underline = '=' * len(header)
         stream.write("\n%s\n%s\n" % (header, underline))
 
-    # def table(self, stats, source, ignore):
     def table(self, stats, show_fot, stream=None):
         """print stats table"""
         stream = stream or sys.stdout
@@ -276,17 +266,21 @@ class PrintStats(object):
             stream.write("\n")
 
     def closing(self, stream=None):
-        """print closing remarks"""
+        """print any closing remarks"""
         stream = stream or sys.stdout
         stream.write("\n")
 
 
-# ****************************************************************************************************
-class ShowHistogram(PrintStats):
+class ReportStatsTable(ReportStats):
     """
     Extend the standard profile display with multiple options for how to format
     the returned source code body based on the profiling statistics.
+
+    Optionally show timing stats visually as a "bar chart" (using ANSI
+    background highlight) behind the source code lines that are most
+    expensive. Allows one to see at a glance which code lines are more expensive
     """
+    # TODO option to show outside table so not overlapping with source
 
     comment = r'\s*#'  # match only whitespace followed by comment #
     commentMatcher = re.compile(comment)
@@ -299,27 +293,42 @@ class ShowHistogram(PrintStats):
 
     # printing
     dots = codes.apply(cdot * 3, 'r', 'bold')
-    histogram_color = 'g'
+    bar_color = 'g'
+
+    # TODO: Don't strip lines that are part of multi-line statement
+    # TODO: Optionally keep lines that determine statement nesting
+    #  (eg if, for while etc)
+
+    # def __init__(self, **kws):
+    #     pass
+
+    # TODO: optionally sort most expensive first?
+    #     self.timings = lstats.timings
+    #     self.unit = lstats.unit
+    # self.stream = stream or sys.stdout
 
     def __init__(self, **kws):
-        # PrintStats.__init__(self, **kws)
-
-        # TODO option to show outside table / overlapping with source
+        # ReportStats.__init__(self, **kws)
 
         # FIXME: blank lines not being stripped correctly
         # FIXME: keep scope lines when stripping
 
-        # default is to strip comment lines, blank lines, docstrings and zero-time lines
+        # default is to strip comment lines, blank lines, docstrings.
+        # lines that are fast running can be removed from the report by
+        # passing strip = ('<0.001', ) where the number represents the
+        # fraction of total execution time. In the example above lines that
+        # took less than 1000th of total execution time of the function will
+        # not be shown in the report
+        strip = kws.get('strip', ('#', '', '"""',))
 
-        strip = kws.get('strip', ('#', '', '"""', '<1e-5'))
+        # To keep source verbatim in report use strip=False or strip=None
         if strip in (None, False):
-            strip =
+            strip = set()
 
         self.strip_docstring = self.docIds & strip
         self.strip_comments = self.commentIds & strip
         self.strip_blanks = self.blankIds & strip
         self.strip_zeros = self.zeroIds & strip
-        # self.strip_decor = # '@'
 
         handled = (self.strip_docstring | self.strip_comments |
                    self.strip_blanks | self.strip_zeros)
@@ -335,14 +344,13 @@ class ShowHistogram(PrintStats):
             raise ValueError('Unknown option(s) for strip keyword: %s'
                              % tuple(unhandled))
 
-        self.gap_borders = kws.get('gap_borders', False)
         self.max_line_width = kws.get('max_line_width')  # maxLineWidth
         self.where_gaps = []
 
     # def show_func(self, filename, start_line_no, func, timings,
     #               unit, output_unit=None, stream=None):
     #     # call the base printer
-    #     PrintStats.show_func(self, filename, start_line_no, func, timings, unit,
+    #     ReportStats.show_func(self, filename, start_line_no, func, timings, unit,
     #                          output_unit, stream)
 
     def preprocess(self, stats, start_line_nr, end_line_nr):
@@ -378,7 +386,8 @@ class ShowHistogram(PrintStats):
             ignore.extend(np.add(line_nrs_empty, start))
 
         if self.strip_zeros:
-            # no timing stats available for these lines (i.e. they where not executed)
+            # no timing stats available for these lines (i.e. they where not
+            # executed)
             # Make sure we do not ignore the function `def` line and preceding
             # decorators
             line_nrs = set(range(line_nr_body + start, end + 1))
@@ -394,6 +403,7 @@ class ShowHistogram(PrintStats):
             ignore.extend(line_nrs_small)
 
         # FIXME: not showing ellipses for first skipped block
+
         # remove isolated lines from ignore list
         # If we are inserting ellipsis to indicate missing blocks, it's defies
         # the purpose to do so for a single skipped line
@@ -418,6 +428,7 @@ class ShowHistogram(PrintStats):
         else:
             ignore = []
 
+        #
         self.ignoreLines = ignore
         # truncate and fill lines with whitespace to create block text
         if self.max_line_width:
@@ -431,8 +442,8 @@ class ShowHistogram(PrintStats):
         self._preamble = StringIO()
         filename = codes.apply(filename, 'y')
         name = codes.apply(func_name, 'b')
-        PrintStats.preamble(self, filename, name, start_line_nr, total_time,
-                            self._preamble)
+        ReportStats.preamble(
+                self, filename, name, start_line_nr, total_time, self._preamble)
 
     def header(self, stream=None):
         # for the table we need tuple of headers not formatted str, so pass
@@ -461,15 +472,13 @@ class ShowHistogram(PrintStats):
             # pof, pot = fof * 100, fot * 100
             # make time indicator bar
             if time:  # might be empty str
-                line = make_bar(line, fof, lineLength, self.histogram_color)
+                line = make_bar(line, fof, lineLength, self.bar_color)
             # populate table
             table[i] = lineNo, nhits, time, per_hit, fof, fot, line
             i += 1
 
             # print separator lines to segment code blocks
             if lineNo in self.where_gaps:
-                if self.gap_borders:
-                    where_row_borders.append(i + 1)
                 # insert blank line to indicate gap!
                 table[i] = self.dots, *empty, self.dots
                 i += 1
@@ -537,16 +546,15 @@ class ShowHistogram(PrintStats):
         # embed()
 
 
-class ShowDynamicFunction(ShowHistogram):
+class ShowDynamicFunction(ReportStatsTable):
     """
     Pretty printer for dynamically generated functions
     """
 
     def __init__(self, **kws):
         self._source_lib = kws.pop('contents')
-        ShowHistogram.__init__(self, **kws)
+        ReportStatsTable.__init__(self, **kws)
 
     def get_block(self, func):
         source_code_lines = self._source_lib[func].splitlines()
         return '__main__', 1, source_code_lines
-

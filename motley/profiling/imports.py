@@ -77,11 +77,10 @@ def extractor(filename, up_to_line=None):
                           % lnr)
             line = '# %s' % line
 
-        if isinstance(stm, ast.ImportFrom) and stm.level:
+        if line.startswith('from .'):
             warnings.warn("Cannot profile relative imports. "
                           "Commenting out line nrs %s during profiling."
                           % lnr)
-
             line = '# %s' % line
 
         lines.append(line)
@@ -134,7 +133,7 @@ if __name__ == '__main__':
             prog='motley.profiler.imports',
             description="Profile your modules import statements easily")
     parser.add_argument('filename', type=str)
-    parser.add_argument('up_to_line', type=int, nargs='?', default=100)
+    parser.add_argument('up_to_line', type=int, nargs='?', default=math.inf)
     args = parser.parse_args(sys.argv[1:])
 
     #
@@ -149,8 +148,6 @@ if __name__ == '__main__':
         importer()
 
         # print the results
-        profiler.print_stats(strip=('#', '', '<1e-5'))
-
-
+        profiler.print_stats(strip=False)   # ('#', '', '<1e-5')
     else:
         print('No import statements found.')

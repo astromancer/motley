@@ -4,24 +4,33 @@ with line_profiler and pretty-printing the results.
 
 Example
 -------
-from motley import profiler
+from motley.profiling import profile
 
-@profiler.profile()
+@profile()  # The default `line_profiler` report format
+# FIXME: this probs doesn't  work!
 def foo():
     ...
 
 
-@profiler.histogram()
+@profile(report='bars')
 def foo():
     ...
+
+
+@profile(report='heatmap')
+def foo():
+    ...
+
 
 """
 
 from .core import *
 
 
-profile = PrintStats
-histogram = HistogramDisplay
+
+
+# profile = ReportStats
+# bars = DisplayStatsWithBars
 # all = profileAll
 
 # TODO
@@ -38,7 +47,7 @@ histogram = HistogramDisplay
 
 
 # ****************************************************************************************************
-# class profiler(ProfileStatsDisplay):
+# class profiler(DisplayStatsBase):
 #     """
 #     convenience class that contains various decorators for profiling functions with line_profiler
 #
@@ -48,24 +57,24 @@ histogram = HistogramDisplay
 #     def foo():
 #         ...
 #
-#     @profile.histogram      # FIXME: this doesn't actually work yet!
+#     @profile.bars      # FIXME: this doesn't actually work yet!
 #     def foo():
 #         ...
 #     """
 #
 #     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#     # histogram = HistogramDisplay
+#     # bars = DisplayStatsWithBars
 #     all = profileAll
 #
 #     @property
-#     def histogram(self):
-#         return HistogramDisplay
+#     def bars(self):
+#         return DisplayStatsWithBars
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # TODO
         # def heatmap(self, func):
         #     """Creates a ANSI 256 colour heatmap to indicate line excecution time"""
-        #     return HistogramDisplay(self.follow)(func)
+        #     return DisplayStatsWithBars(self.follow)(func)
 
         # TODO:
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
