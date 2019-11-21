@@ -1,15 +1,81 @@
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Convenience funcs
-# -----------------
+"""
+Utility functions and classes
+"""
 
+import os
 from recipes.misc import get_terminal_size
 from . import codes
+from . import ansi
+
+import itertools as itt
+import functools as ftl
+
+ALIGNMENT_MAP = {'r': '>',
+                 'l': '<',
+                 'c': '^'}
 
 
+def get_alignment(align):
+    align = ALIGNMENT_MAP.get(align.lower()[0], align)
+    if align not in '<^>':
+        raise ValueError('Unrecognised alignment {!r}'.format(align))
+    return align
 
 
-def underline(s):
-    return codes.apply(s, 'underline')
+def overlay(text, background='', align='^', width=None):
+    """overlay text on background using given alignment."""
+
+    if not (background or width):  # nothing to align on
+        return text
+
+    if not background:
+        background = ' ' * width  # align on clear background
+    elif not width:
+        width = ansi.length_seen(background)
+
+    if ansi.length_seen(background) < ansi.length_seen(text):
+        # alignment is pointless
+        return text
+
+    # do alignment
+    align = get_alignment(align)
+    if ansi.has_ansi(background):
+        raise NotImplementedError(
+                '# fixme: will not work if background has coded strings')
+
+    if align == '<':  # left aligned
+        overlaid = text + background[ansi.length_seen(text):]
+
+    elif align == '>':  # right aligned
+        overlaid = background[:-ansi.length_seen(text)] + text
+
+    elif align == '^':  # center aligned
+        div, mod = divmod(ansi.length_seen(text), 2)
+        half_width = width // 2
+        # start and end indices of the text in the center of the background
+        idx = half_width - div, half_width + (div + mod)
+        # center text on background
+        overlaid = background[:idx[0]] + text + background[idx[1]:]
+
+    return overlaid
+
+
+def wideness(s, raw=False):  # rename width ??
+    """
+    For multi-line string `s` get the character width of the widest line.
+
+    Parameters
+    ----------
+    s
+    raw
+
+    Returns
+    -------
+
+    """
+    length = ftl.partial(ansi.length, raw=raw)
+    # deal with cell elements that contain newlines
+    return max(map(length, s.split(os.linesep)))
 
 
 def banner(obj, width=None, swoosh='=', align='<', **props):
@@ -61,6 +127,8 @@ def rainbow(words, effects=(), **kws):
 class ConditionalFormatter(object):
     def __init__(self, properties, test, test_args, formatter=str, **kws):
         self.test = test
+        if not isinstance(test_args, tuple):
+            test_args = test_args,
         self.args = test_args
         self.properties = properties
         self._kws = kws
@@ -71,9 +139,6 @@ class ConditionalFormatter(object):
         if self.test(val, *self.args):
             return codes.apply(out, self.properties, **self._kws)
         return out
-
-
-
 
 # def _prop_dict_gen(*effects, **kws):
 #     # if isinstance()

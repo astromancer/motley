@@ -3,10 +3,14 @@ Tools for recognising and stripping ANSI codes
 """
 
 import re
+from collections import namedtuple
 
 import more_itertools as mit
 
-RE_END = r'\x1b\[0?m'  # the ANSI reset pattern
+# the ANSI reset pattern
+RE_END = r'\x1b\[0?m'
+
+# matches any ANSI code pattern
 RE_ANSI_CODE = r'''
 (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
 (?P<params>[\d;]*)          # Parameters                    eg: '31;1;43'
@@ -14,6 +18,7 @@ RE_ANSI_CODE = r'''
 '''
 SRE_ANSI_CODE = re.compile(RE_ANSI_CODE, re.X)
 
+# matches any ANSI code pattern that is not the RESET code
 RE_ANSI_NOT_END = r'''
 (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
 (?P<params>[^0][\d;]*)      # Parameters                    eg: '31;1;43'
@@ -21,13 +26,13 @@ RE_ANSI_NOT_END = r'''
 '''  # this one will not match the reset code
 SRE_ANSI_NOT_RESET = re.compile(RE_ANSI_NOT_END, re.X)
 
+# matches any
 RE_ANSI_VALID = fr'''
 (?P<code>{RE_ANSI_NOT_END})   # the ANSI code
 (?P<s>.*?)                      # the string to which the code applies
 (?P<end>{RE_END})               # the ANSI reset code
 '''
 SRE_ANSI_VALID = re.compile(RE_ANSI_VALID, re.X)
-
 
 # RE_ANSI_OPEN = fr'(?P<code>{RE_ANSI_CODE})(?P<s>.*?)(?!{RE_END})'
 
@@ -38,8 +43,7 @@ SRE_ANSI_VALID = re.compile(RE_ANSI_VALID, re.X)
 #  in order to make missing parameters useful.[18]:F.4.2 Bytes other than
 #  digits and semicolon seem to not be used."
 
-
-# sre_end = re.compile(re.escape(END))
+ansiCode = namedtuple('ansiCode', ('csi', 'params', 'final_byte', 's', 'end'))
 
 
 # TODO:
@@ -49,6 +53,9 @@ SRE_ANSI_VALID = re.compile(RE_ANSI_VALID, re.X)
 #
 #     def __str__(self):
 #         return ''.join(self.codes + [self.s + self.end])
+
+def echo(*_):
+    return _
 
 
 def has_ansi(s):
@@ -65,21 +72,27 @@ def pull(s):
     return SRE_ANSI_CODE.findall(s)
 
 
-def parse(s):
+def parse(s, named=False):
     """
     A generator that parses the string `s` to separate the ANSI code bits
     from the regular string parts.
-    Yields successive 3-tuples of str (code, string, END) where
-        - The ANSI code sequence eg: '\x1b[31;1;43m'
-        - The enclosed str: That which would be rendered with effect.
-        - END is the reset code: '\x1b[0m' or '\x1b[m'
+    Yields successive 5-tuples of str
+        (csi, params, final_byte, string, END) where
+            - The ANSI code sequence eg: '\x1b[31;1;43m'
+            - The enclosed str: That which would be rendered with effect.
+            - END is the reset code: '\x1b[0m' or '\x1b[m'
     For parts of the string that do not have any ANSI codes applied to them,
     the CSI and END parts of the tuple will be empty strings.
 
     Parameters
     ----------
-    s
-    groups
+    s: str
+        The string to parse
+    named: bool
+        If True, returned items will be `namedtuple`.  This allows you to
+        retrieve different parts of each successive coded string by attribute
+        lookup on the returned objects.
+        >>> next(ansi.parse(motley.red('hello'), True)).params  #  ';31'
 
     Examples
     --------
@@ -88,17 +101,19 @@ def parse(s):
     -------
 
     """
+
+    wrapper = ansiCode if named else echo
     idx = 0
     for mo in SRE_ANSI_VALID.finditer(s):
         start = mo.start()
         if start != idx:
-            yield '', '', '', s[idx:start], ''
-        yield mo.group('csi', 'params', 'final_byte', 's', 'end')
+            yield wrapper('', '', '', s[idx:start], '')
+        yield wrapper(*mo.group('csi', 'params', 'final_byte', 's', 'end'))
         idx = mo.end()
 
     if (len(s) == 0) or (idx != len(s)):
         # last part of str
-        yield '', '', '', s[idx:], ''
+        yield wrapper('', '', '', s[idx:], '')
 
 
 def _gen_index_csi(s):
@@ -107,16 +122,16 @@ def _gen_index_csi(s):
         yield match.start()
         yield match.end()
 
-    if match and (match.end() != len(s)):
-        yield len(s)
+    if (match is None) or (match.end() != len(s)):
+        yield None
 
 
 def _gen_index_split(s):
+    yield 0
     itr = _gen_index_csi(s)
     i0 = next(itr)
-    if not i0 == 0:
-        yield 0
-    yield i0
+    if i0 != 0:
+        yield i0
     yield from itr
 
 
@@ -151,17 +166,20 @@ def length(s, raw=True):
     """Length of the string, either raw, or as it would be displayed."""
     if raw:
         return len(s)
-    return length_raw(s)
+    return length_seen(s)
 
 
 def length_codes(s):
     """length of the ANSI codes in the str"""
-    return sum(map(len, pull(s)))
+    return sum((sum(map(len, part)) for part in pull(s)))
 
 
-def length_raw(s):
+def length_seen(s):
     """
-    length of the string as it would be displayed on screen
+    length of the string as it would be seen when displayed on screen
     i.e. all ANSI codes resolved / removed
     """
     return len(strip(s))
+
+
+

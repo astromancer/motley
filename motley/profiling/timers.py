@@ -4,7 +4,7 @@ import functools
 import traceback
 import inspect
 from collections import defaultdict  # , OrderedDict
-from recipes.dict import DefaultOrderedDict
+from recipes.containers.dict_ import DefaultOrderedDict
 from recipes import pprint
 
 from .. import codes
@@ -89,8 +89,6 @@ class Chrono():
 #
 
 
-
-
 def timer(f):
     @functools.wraps(f)
     def wrapper(*args, **kw):
@@ -137,7 +135,6 @@ def timer_extra(postscript, *psargs):
         return wrapper
 
     return timer
-
 
 
 def first_non_zero(a):

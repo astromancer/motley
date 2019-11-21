@@ -116,7 +116,7 @@ class LineProfiler(lp.LineProfiler):
         from shutil import get_terminal_size
 
         import numpy as np
-        from recipes.list import sortmore
+        from recipes.containers.list_ import sortmore
 
         from motley.table import Table
         # from recipes.misc import get_terminal_size
@@ -141,7 +141,7 @@ class LineProfiler(lp.LineProfiler):
         table = Table(list(zip(names, totals)),
                       col_headers=col_headers,
                       formatters={1: fmtr},
-                      total=[1])
+                      totals=[1])
 
         termwidth = get_terminal_size()[0]
         hwidth = termwidth - table.get_width() - 1

@@ -6,7 +6,7 @@ import warnings
 
 import more_itertools as mit
 
-from recipes.dict import Many2OneMap
+from recipes.containers.dict_ import Many2OneMap
 from .ansi import parse
 
 import functools as ftl
@@ -368,19 +368,20 @@ def apply(s, *properties, **kws):
     # This means previous colours are replaced, but effects like 'bold' or
     # 'italic' will stack for recursive invocations.  This also means we get
     # the shortest representation of the string given the parameters which is
-    # nice and optimal.  If we were to apply blindly our string would be
-    # longer than needed by a few (non-display) characters.  This might seem
-    # insignificant but becomes deadly once you start doing more complicated
+    # nice and optimal. If we were to apply blindly our string would be
+    # longer than needed by a few (non-display) characters. This might seem
+    # innocuous but becomes deadly once you start doing more complicated
     # effects on longer strings
     # note: final byte 'm' only valid for SGR (Select Graphic Rendition) and
     #  not other codes, but this is all we support for now
     return ''.join(''.join((CSI, params, ';', new_codes, 'm', w, END))
-                   for csi, params, fb, w, _ in parse(s))
+                   for _, params, _, w, _ in parse(s))
 
 
 def apply_naive(s, *properties, **kws):
     """
-    set the ANSI codes for a string given the properties and kws descriptors
+    Initial naive implementation of `apply` that blindly wraps the string with
+    the ANSI codes.  Use `apply` instead of this function.
     """
 
     # get code string eg: '34;48;5;22'

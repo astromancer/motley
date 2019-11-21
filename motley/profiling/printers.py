@@ -47,8 +47,7 @@ def func2str(func):
         return '.'.join((cls.__name__, func.__name__))
 
 
-# ====================================================================================================
-def truncateBlockGen(block, width, dots='...'):
+def truncate_block_gen(block, width, dots='...'):
     """
     Truncate a block of text at given *width* adding ellipsis to indicate missing
     text
@@ -61,8 +60,8 @@ def truncateBlockGen(block, width, dots='...'):
             yield '{0:<{1:d}}'.format(line, width)
 
 
-def truncateBlock(block, width, dots='...'):
-    return list(truncateBlockGen(block, width, dots))
+def truncate_block(block, width, dots='...'):
+    return list(truncate_block_gen(block, width, dots))
 
 
 def make_bar(line, fraction, line_width, colour):
@@ -316,7 +315,7 @@ class ReportStatsTable(ReportStats):
         # fraction of total execution time. In the example above lines that
         # took less than 1000th of total execution time of the function will
         # not be shown in the report
-        strip = kws.get('strip', ('#', '', '"""',))
+        strip = set(kws.get('strip', ('#', '', '"""')))
 
         # To keep source verbatim in report use strip=False or strip=None
         if strip in (None, False):
@@ -429,7 +428,7 @@ class ReportStatsTable(ReportStats):
         self.ignoreLines = ignore
         # truncate and fill lines with whitespace to create block text
         if self.max_line_width:
-            self.sourceCodeLines = truncateBlock(source_lines,
+            self.sourceCodeLines = truncate_block(source_lines,
                                                  self.max_line_width,
                                                  self.dots)
 

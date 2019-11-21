@@ -10,6 +10,7 @@ from .ansi import *
 
 hue = codes.apply
 
+
 class ConvenienceFunction(object):
     _doc_tmp = textwrap.dedent(
             """
@@ -21,7 +22,7 @@ class ConvenienceFunction(object):
 
     def __init__(self, fg, bg=None):
         """
-        Api function for applying ANSI codes to strings
+        API function for applying ANSI codes to strings
         """
 
         # postfix = 'bg'
