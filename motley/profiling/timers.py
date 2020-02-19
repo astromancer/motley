@@ -4,7 +4,7 @@ import functools
 import traceback
 import inspect
 from collections import defaultdict  # , OrderedDict
-from recipes.containers.dict_ import DefaultOrderedDict
+from recipes.containers.dicts import DefaultOrderedDict
 from recipes import pprint
 
 from .. import codes

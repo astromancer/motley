@@ -6,7 +6,7 @@ import warnings
 
 import more_itertools as mit
 
-from recipes.containers.dict_ import Many2OneMap
+from recipes.containers.dicts import Many2OneMap
 from .ansi import parse
 
 import functools as ftl
