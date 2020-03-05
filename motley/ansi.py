@@ -28,7 +28,7 @@ SRE_ANSI_NOT_RESET = re.compile(RE_ANSI_NOT_END, re.X)
 
 # matches any
 RE_ANSI_VALID = fr'''
-(?P<code>{RE_ANSI_NOT_END})   # the ANSI code
+(?P<code>{RE_ANSI_NOT_END})     # the ANSI code
 (?P<s>.*?)                      # the string to which the code applies
 (?P<end>{RE_END})               # the ANSI reset code
 '''
@@ -54,7 +54,7 @@ ansiCode = namedtuple('ansiCode', ('csi', 'params', 'final_byte', 's', 'end'))
 #     def __str__(self):
 #         return ''.join(self.codes + [self.s + self.end])
 
-def echo(*_):
+def _echo(*_):
     return _
 
 
@@ -102,7 +102,7 @@ def parse(s, named=False):
 
     """
 
-    wrapper = ansiCode if named else echo
+    wrapper = ansiCode if named else _echo
     idx = 0
     for mo in SRE_ANSI_VALID.finditer(s):
         start = mo.start()

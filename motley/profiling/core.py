@@ -116,7 +116,7 @@ class LineProfiler(lp.LineProfiler):
         from shutil import get_terminal_size
 
         import numpy as np
-        from recipes.containers.list_ import sortmore
+        from recipes.containers.lists import sortmore
 
         from motley.table import Table
         # from recipes.misc import get_terminal_size

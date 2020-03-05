@@ -217,7 +217,7 @@ class CodeResolver(Many2OneMap):
         # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
         self.add_vocab(mplShortsMap)
         # add a layer that maps to lower case: 'REd' --> 'red'
-        self.add_map(str.lower)
+        self.add_mapping(str.lower)
 
     def __getitem__(self, key):
         # make sure we always return a str
@@ -316,9 +316,9 @@ def _gen_codes(*properties, **kws):
     properties
     kws
 
-    Returns
+    Yields
     -------
-
+    code: int
     """
 
     yield from resolve(properties)
@@ -355,6 +355,19 @@ def from_list(fg=None, bg=None):
 
 
 def apply(s, *properties, **kws):
+    """
+    Apply the ANSI codes mapped to by `properties` and `kws` to the string `s`
+
+    Parameters
+    ----------
+    s
+    properties
+    kws
+
+    Returns
+    -------
+
+    """
     # first convert to str
     # string = str(s)
 
@@ -368,14 +381,19 @@ def apply(s, *properties, **kws):
     # This means previous colours are replaced, but effects like 'bold' or
     # 'italic' will stack for recursive invocations.  This also means we get
     # the shortest representation of the string given the parameters which is
-    # nice and optimal. If we were to apply blindly our string would be
+    # nice and efficient. If we were to apply blindly our string would be
     # longer than needed by a few (non-display) characters. This might seem
     # innocuous but becomes deadly once you start doing more complicated
     # effects on longer strings
     # note: final byte 'm' only valid for SGR (Select Graphic Rendition) and
     #  not other codes, but this is all we support for now
+
     return ''.join(''.join((CSI, params, ';', new_codes, 'm', w, END))
-                   for _, params, _, w, _ in parse(s))
+                   for _, params, _, w, _ in parse(s)
+                   )  # .replace('\n', f'{END}\n{CSI}{new_codes}m'
+    #
+    # Finally, terminate and restart all codes at a newline boundary so that
+    # we can more easily stack text blocks horizontally
 
 
 def apply_naive(s, *properties, **kws):
