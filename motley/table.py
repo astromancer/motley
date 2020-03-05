@@ -5,18 +5,15 @@ Pretty printed tables for small data sets
 import itertools as itt
 import os, logging
 import warnings
-from collections import defaultdict
 from shutil import get_terminal_size
 
 import numpy as np
-
-from recipes.array.misc import vectorize
 
 # from recipes.pprint import PrettyPrinter
 from recipes.logging import LoggingMixin
 from . import ansi
 from . import codes
-from .utils import wideness, get_alignment
+from . import wideness, get_alignment
 
 import numbers, functools as ftl
 from recipes import pprint
@@ -323,99 +320,13 @@ def dict_to_list(dic, ignore_keys, order):
     row_headers = col_headers = None
     if order.startswith('r'):
         col_headers = headers
+        data = np.transpose(data)
     elif order.startswith('c'):
         row_headers = headers
     else:
         raise ValueError('Invalid order: %s' % order)
 
     return row_headers, col_headers, data
-
-
-def hstack(tables, spacing=0, offset=()):
-    """plonk two or more tables together horizontally"""
-
-    assert len(tables), 'tables must be non-empty sequence'
-
-    if isinstance(offset, numbers.Integral):
-        offset = [0] + [offset] * (len(tables) - 1)
-
-    #
-    widths = []
-    lines_list = []
-    max_length = 0
-    for i, (tbl, off) in enumerate(
-            itt.zip_longest(tables, offset, fillvalue=None)):
-        if off is None:
-            nl = tbl.n_head_nl if isinstance(tbl, Table) else 0
-            if i == 0:
-                nl0 = nl
-            off = nl0 - nl
-
-        lines = ([''] * off) + str(tbl).splitlines()
-        lines_list.append(lines)
-        max_length = max(len(lines), max_length)
-        widths.append(ansi.length_seen(lines[0]))
-        if spacing:
-            lines_list.append([])
-            widths.append(spacing)
-
-    #
-    for i, lines in enumerate(lines_list):
-        fill = ' ' * (widths[i])
-        m = max_length - len(lines)
-        lines_list[i].extend([fill] * m)
-
-    return '\n'.join(map(''.join, zip(*lines_list)))
-
-
-def vstack(tables, strip_heads=True):
-    """
-
-    Parameters
-    ----------
-    tables
-    strip_heads: bool
-        If True, all but the first table will have title, column group
-        headings and column headings stripped.
-
-    Returns
-    -------
-
-    """
-    # check that all tables have same number of columns
-    assert len(set(tbl.shape[1] for tbl in tables)) == 1
-
-    w = np.max([tbl.col_widths for tbl in tables], 0)
-    s = ''
-    for i, tbl in enumerate(tables):
-        tbl.col_widths = w  # set all column widths equal
-        r = str(tbl)
-        nnl = tbl.frame
-        if strip_heads:
-            nnl += (tbl.n_head_rows + tbl.has_title)
-        if i:
-            *_, r = r.split('\n', nnl)
-        s += ('\n' + r)
-
-    return s.lstrip('\n')
-
-
-def vstack_compact(tables):
-    # figure out which columns can be compactified
-    # note. the same thing can probs be accomplished with table groups ...
-    assert len(tables)
-    varies = set()
-    ok_size = tables[0].data.shape[1]
-    for i, tbl in enumerate(tables):
-        size = tbl.data.shape[1]
-        if size != ok_size:
-            raise ValueError('Table %d has %d columns while the preceding %d '
-                             'tables have %d columns.'
-                             % (i, size, i - 1, ok_size))
-        # check compactable
-        varies |= set(tbl.compactable())
-
-    return varies
 
 
 def _rindex(s, char):
@@ -462,14 +373,129 @@ def truncate(item, width):
     return s
 
 
-class Table(LoggingMixin):
-    """
-    An ascii table formatter. Mostly for display, not data manipulation.
-    Plays nicely with ANSI colours.
+# TODO: check out wcwidth lib
+
+
+from recipes.string import match_brackets
+
+import re
+
+
+class TerseKws(object):
     """
 
-    # map to alignment format characters
-    ALLOWED_KWARGS = []  # TODO
+    """
+
+    def __init__(self, pattern, answer=None):
+        """
+
+        Parameters
+        ----------
+        pattern
+        answer
+        """
+        regex = ''
+        self.answer = ''
+        self.pattern = pattern
+        sub = pattern
+        while 1:
+            s, (i0, i1) = match_brackets(sub, '[]', return_index=True)
+            # print(s, i0, i1)
+            if s is None:
+                regex += sub
+                break
+
+            regex += f'{sub[:i0]}[{s}]{{0,{len(s)}}}'
+            self.answer += sub[:i0]
+            sub = sub[i1 + 1:]
+
+            # print(sub, regex)
+            # i += 1
+        self.regex = re.compile(regex)
+
+        if answer:
+            self.answer = str(answer)
+
+    def __call__(self, s):
+        if self.regex.match(s):
+            return self.answer
+
+    def __repr__(self):
+        return f'{self.pattern} --> {self.answer}'
+
+
+import types
+
+
+# from recipes.containers.dicts import Many2OneMap
+class KeywordResolver(object):
+    """Helper class for resolving terse keywords"""
+
+    def __init__(self, mappings):
+        self.mappings = []
+        for k, v in mappings.items():
+            self.mappings.append(TerseKws(k, v))
+
+    def resolve(self, func, kws, namespace):
+
+        # get arg names and defaults
+        code = func.__code__
+        defaults = func.__defaults__
+        arg_names = code.co_varnames[1:code.co_argcount]
+
+        # load the defaults / passed args
+        n_req_args = len(arg_names) - len(defaults)
+        # opt_arg_names = arg_names[n_req_args:]
+        # now get non-default arguments (those passed by user)
+        args_dict = {}
+        for i, o in enumerate(arg_names[n_req_args:]):
+            v = namespace[o]
+            if v is not defaults[i]:
+                args_dict[o] = v
+
+        # resolve terse kws and add to dict
+        for k, v in kws.items():
+            if k not in arg_names:
+                for m in self.mappings:
+                    if m(k) in arg_names:
+                        args_dict[m(k)] = v
+                        break
+                else:
+                    # get name
+                    name = func.__name__
+                    if isinstance(func, types.MethodType):
+                        name = '.'.join((func.__self__.__class__.__name__,
+                                         name))
+                    raise KeyError(
+                            f'{k!r} is not a valid keyword for {name!r}')
+
+        return args_dict
+
+
+class Table(LoggingMixin):
+    """
+    An ascii table formatter. Good for displaying data, definitely not for data
+    manipulation.  Plays nicely with ANSI colours and multi-line cell elements.
+    """
+
+    # mappings for terse kws
+    _mappings = {'unit[s]': 'units',
+                 'footnote[s]': 'footnotes',
+                 'formatter[s]': 'formatters',
+                 'cell_white[space]': 'cell_whitespace',
+                 'minimal[ist]': ' minimalist',
+                 '[column_]width[s]': '',
+                 'c[olumn_]groups': 'col_groups',
+                 '[row_]nrs': 'row_nrs',
+                 'total[s]': ''}
+    for rc, p in {'row': 'r[ow_]', 'col': 'c[olumn_]'}.items():
+        _mappings.update({f'{p}head[ers]': f'{rc}_headers',
+                          f'{p}head[er]_prop[erties]': f'{rc}_head_props',
+                          f'{p}borders': 'col_borders'})
+    #
+    _kw_map = KeywordResolver(_mappings)
+
+    #
     _default_border = BORDER
 
     # The column format specification:
@@ -480,9 +506,24 @@ class Table(LoggingMixin):
 
     @classmethod
     def from_columns(cls, *columns, **kws):
+        """
+        Construct the table from a list of columns
+
+        Parameters
+        ----------
+        columns
+        kws
+
+        Returns
+        -------
+
+        """
         # keep native types by making columns object arrays
         return cls(np.ma.column_stack([np.ma.array(a, 'O') for a in columns]),
                    **kws)
+
+    # @classmethod
+    # def from_dict(cls, *columns, **kws):
 
     def __init__(self, data,
                  title=None, title_align='center', title_props=('underline',),
@@ -506,9 +547,12 @@ class Table(LoggingMixin):
                  flags=None,
                  insert=None,
                  highlight=None,
-                 footnotes=''):
+                 footnotes='', **kws):
         # todo: **kws with some aliases since there are so many parameters,
         #  the names of which may be hard to remember for the average user
+
+        # TODO: style='matrix', 'bare', 'spreadsheet'
+
         """
         A table representation of `data`.
 
@@ -534,22 +578,28 @@ class Table(LoggingMixin):
         col_headers, row_headers  : array_like
             column -, row headers as sequence of str objects.
         col_head_props, row_head_props : str or dict or array_like
-            with ANSICodes property descriptors to use as global column header
-            properties.  If `row_nrs` is True, the row_head_props will be
-            applied to the number column as well
+            Column header properties.  If `row_nrs` is True,
+            the row_head_props will be applied to the number column as well
             TODO: OR a sequence of these, one for each column
+        TODO: column head align
 
-        col_borders : str, TODO: dict: {0j: '|', 3: '!', 6: '…'}
+
+        col_borders : str,
+            TODO: dict: {0j: '|', 3: '!', 6: '…'}
             character(s) used as column separator. ie column rhs borders
             The table border can be toggled using the `frame' parameter
         col_groups: array-like
             sequence of strings giving column group names. If given, a group
             header will be added above the columns sharing a common group name.
 
-        hlines, vlines: array-like, optional
-            Sequence with row numbers below which a solid border will be drawn.
+        hlines, vlines: array-like, Ellipsis, optional
+            Sequence with row line numbers below which a solid border will be
+            drawn.
             Default is after column headers, and after last data line and after
             totals line if any.
+            If an `Ellipsis` ... is given, draw a line after every row.
+            TODO: dict: {0j: '|', 3: '!', 6: '…'}
+            Similarly for `vlines`.
 
         row_nrs : bool, int
            Number the rows. Start from this number if int
@@ -642,14 +692,25 @@ class Table(LoggingMixin):
                 - alignment character (default '<')
                 - properties to apply to the string (default None)
 
-        highlight: dict
-            highlight these rows by applying the given effects to the entire row
+        highlight: dict, optional
+            Highlight these rows by applying the given effects to the entire
+            row.  The dict should be keyed on integer which is the line number
 
-        footnotes: str
+        footnotes: strco_
             Any footnote that will be added to the bottom of the table
 
         #TODO: list attributes here
         """
+
+        # FIXME: precision etc ignored when init from dict
+        # FIXME: hlines with cell elements that have ansi ... effects don't
+        #  stack...
+
+        # resolve kws
+        if kws:
+            kws = self._kw_map.resolve(self.__init__, kws, locals())
+            self.__init__(data, **kws)
+            return
 
         # save a backup of the original data
         # self.original_data = data
@@ -704,17 +765,22 @@ class Table(LoggingMixin):
         self.has_col_head = hch = (col_headers is not None)
         self.n_head_col = nhc = hrh + hrn
 
-        # column formatters
-        self.formatters = resolve_input(
-                formatters, data, col_headers, 'formatters',
-                default_factory=self.get_default_formatter,
-                args=(precision, minimalist))
-
         # FIXME: headers should be left aligned even when column values are
         #  right aligned.
         align = resolve_input(align, data, col_headers, 'alignment',
                               get_alignment,
                               self.get_default_align)
+        # make align an array with same size as nr of columns in table
+        n_cols = data.shape[1] + self.n_head_col
+        self.align = np.empty(n_cols, 'U1')
+        self.align[:self.n_head_col] = '<'  # row headers are left aligned
+        self.align[self.n_head_col:] = list(align.values())
+
+        # column formatters
+        self.formatters = resolve_input(
+                formatters, data, col_headers, 'formatters',
+                default_factory=self.get_default_formatter,
+                args=(precision, minimalist))
 
         # get flags
         flags = resolve_input(flags, data, col_headers, 'flags')
@@ -733,12 +799,6 @@ class Table(LoggingMixin):
             totals = self._apply_format(self.totals, self.formatters, '')
             data = np.vstack((data, totals))
 
-        # make align an array with same size as nr of columns in table
-        n_cols = data.shape[1] + self.n_head_col
-        self.align = np.empty(n_cols, 'U1')
-        self.align[:self.n_head_col] = '<'  # row headers are left aligned
-        self.align[self.n_head_col:] = list(align.values())
-
         # col borders (rhs)
         borders = resolve_borders(col_borders, vlines, n_cols, frame)
 
@@ -746,8 +806,8 @@ class Table(LoggingMixin):
         # Add row / column headers
         # self._col_headers = col_headers  # May be None
         # self.row_headers = row_headers
-        self.col_head_props = col_head_props  # todo : don't really need this
-        # since we have highlight
+        self.col_head_props = col_head_props
+        # todo : don't really need this since we have self.highlight
         self.row_head_props = row_head_props
 
         # add the (row/column) headers / row numbers / totals
@@ -791,6 +851,8 @@ class Table(LoggingMixin):
         # note: headers are index -1
         if hlines is None:
             hlines = []
+        elif hlines is ...:
+            hlines = np.arange(len(data))
         else:
             hlines = np.array(hlines)
             hlines[hlines < 0] += n_rows
@@ -904,7 +966,7 @@ class Table(LoggingMixin):
         self._max_width = int(value)
 
     @property
-    def n_head_nl(self):
+    def n_head_lines(self):
         """number of newlines in the table header"""
         n = (self.title.count('\n') + 1) if self.has_title else 0
         m = 0
@@ -945,9 +1007,14 @@ class Table(LoggingMixin):
                 return ftl.partial(pprint.decimal, precision=0)
 
             elif issubclass(typ, numbers.Real):
+                right_pad = 0
+                if minimalist and self.align[col_idx] == '>':
+                    right_pad = precision
+
                 return ftl.partial(pprint.decimal,
                                    precision=precision,
-                                   compact=minimalist)
+                                   compact=minimalist,
+                                   right_pad=right_pad)
 
         return pprint.PrettyPrinter(precision=precision,
                                     minimalist=minimalist).pformat
@@ -1212,21 +1279,7 @@ class Table(LoggingMixin):
                 row_headers = [''] + list(row_headers)
 
         if has_col_head:
-            try:
-                data = np.ma.vstack((col_headers, data))
-            except Exception as err:
-                from IPython import embed
-                import traceback
-                import textwrap
-                embed(header=textwrap.dedent(
-                        """\
-                        Caught the following %s:
-                        ------ Traceback ------
-                        %s
-                        -----------------------
-                        Exception will be re-raised upon exiting this embedded interpreter.
-                        """) % (err.__class__.__name__, traceback.format_exc()))
-                raise
+            data = np.ma.vstack((col_headers, data))
 
             # NOTE: when both are given, the 0,0 table position is ambiguously
             #  both column and row header
@@ -1491,6 +1544,7 @@ class Table(LoggingMixin):
             line = self._default_border
             lbl = self.col_groups[column_indices[0]]  # name of current group
             gw = 0  # width of current column group header
+
             # FIXME: this code below in `format cell??`
             for i, j in enumerate(column_indices):
                 name = self.col_groups[j]
@@ -1501,13 +1555,15 @@ class Table(LoggingMixin):
                     if len(lbl) >= gw:
                         lbl = truncate(lbl, gw - 1)
 
-                    line += '{: ^{:}s}{:}'.format(lbl, gw - 1, self.borders[j])
+                    # line += '{: ^{:}s}{:}'.format(lbl, gw - 1, self.borders[j])
+                    line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
                     gw = w
                     lbl = name
 
             # last bit
             if gw:
-                line += '{: ^{:}s}{:}'.format(lbl, gw - 1, self.borders[j])
+                line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
+                # line += '{: ^{:}s}{:}'.format(lbl, gw - 1, self.borders[j])
 
             # table.append(_underline(self.borders[0] +
             #                         ' ' * (table_width - lcb) +
