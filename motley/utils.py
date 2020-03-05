@@ -1,9 +1,12 @@
 """
 Utility functions and classes
 """
-
+import numbers
 import os
+
+import numpy as np
 from recipes.misc import get_terminal_size
+
 from . import codes
 from . import ansi
 
@@ -20,6 +23,108 @@ def get_alignment(align):
     if align not in '<^>':
         raise ValueError('Unrecognised alignment {!r}'.format(align))
     return align
+
+
+def hstack(tables, spacing=0, offset=()):
+    """
+    Stick two or more tables (or multi-line strings) together horizontally
+
+    Parameters
+    ----------
+    tables
+    spacing
+    offset
+
+    Returns
+    -------
+
+    """
+
+    assert len(tables), 'tables must be non-empty sequence'
+
+    from motley.table import Table
+
+    #
+    if isinstance(offset, numbers.Integral):
+        offset = [0] + [offset] * (len(tables) - 1)
+
+    #
+    widths = []
+    lines_list = []
+    max_length = 0
+    for i, (tbl, off) in enumerate(
+            itt.zip_longest(tables, offset, fillvalue=None)):
+        if off is None:
+            nl = tbl.n_head_lines if isinstance(tbl, Table) else 0
+            if i == 0:
+                nl0 = nl
+            off = nl0 - nl
+
+        lines = ([''] * off) + str(tbl).splitlines()
+        lines_list.append(lines)
+        max_length = max(len(lines), max_length)
+        widths.append(ansi.length_seen(lines[0]))
+        if spacing:
+            lines_list.append([])
+            widths.append(spacing)
+
+    #
+    for i, lines in enumerate(lines_list):
+        fill = ' ' * (widths[i])
+        m = max_length - len(lines)
+        lines_list[i].extend([fill] * m)
+
+    return '\n'.join(map(''.join, zip(*lines_list)))
+
+
+def vstack(tables, strip_heads=True):
+    """
+
+    Parameters
+    ----------
+    tables
+    strip_heads: bool
+        If True, all but the first table will have title, column group
+        headings and column headings stripped.
+
+    Returns
+    -------
+
+    """
+    # check that all tables have same number of columns
+    assert len(set(tbl.shape[1] for tbl in tables)) == 1
+
+    w = np.max([tbl.col_widths for tbl in tables], 0)
+    s = ''
+    for i, tbl in enumerate(tables):
+        tbl.col_widths = w  # set all column widths equal
+        r = str(tbl)
+        nnl = tbl.frame
+        if strip_heads:
+            nnl += (tbl.n_head_rows + tbl.has_title)
+        if i:
+            *_, r = r.split('\n', nnl)
+        s += ('\n' + r)
+
+    return s.lstrip('\n')
+
+
+def vstack_compact(tables):
+    # figure out which columns can be compactified
+    # note. the same thing can probs be accomplished with table groups ...
+    assert len(tables)
+    varies = set()
+    ok_size = tables[0].data.shape[1]
+    for i, tbl in enumerate(tables):
+        size = tbl.data.shape[1]
+        if size != ok_size:
+            raise ValueError('Table %d has %d columns while the preceding %d '
+                             'tables have %d columns.'
+                             % (i, size, i - 1, ok_size))
+        # check compactable
+        varies |= set(tbl.compactable())
+
+    return varies
 
 
 def overlay(text, background='', align='^', width=None):
