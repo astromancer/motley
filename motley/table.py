@@ -19,15 +19,14 @@ import numbers, functools as ftl
 from recipes import pprint
 from recipes.introspection.utils import get_module_name
 
+# from .utils import formatter
+
 # TODO: unit tests!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # TODO: GIST
-# TODO: UNITS ...
-
 # TODO: possibly integrate with astropy.table ...........................
 # TODO: HIGHLIGHT COLUMNS
 # TODO: OPTION for plain text row borders?
 
-# FIXME: case title wider than table ....
 # FIXME: alignment not nice when mixed negative positive....
 #  or mixed float decimal (minimalist)
 
@@ -53,6 +52,10 @@ BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
 
 # defines vectorized length
 lengths = np.vectorize(len, [int])
+
+
+def _echo(_):
+    return _
 
 
 def str2tup(keys):
@@ -436,6 +439,9 @@ class KeywordResolver(object):
         for k, v in mappings.items():
             self.mappings.append(TerseKws(k, v))
 
+    def __repr__(self):
+        return repr(self.mappings)
+
     def resolve(self, func, kws, namespace):
 
         # get arg names and defaults
@@ -548,8 +554,6 @@ class Table(LoggingMixin):
                  insert=None,
                  highlight=None,
                  footnotes='', **kws):
-        # todo: **kws with some aliases since there are so many parameters,
-        #  the names of which may be hard to remember for the average user
 
         # TODO: style='matrix', 'bare', 'spreadsheet'
 
@@ -625,12 +629,15 @@ class Table(LoggingMixin):
             Used when table is initialized from dict, or when data is 1
             dimensional to know whether values should be interpreted as
             rows or columns. Defualt is to interpret 1D data as a column with
-            row headers
+            row headers.
+            note that for 2d data this argument is ignored. To create a
+            `Table` from a set of columns use the `Table.from_columns`
+            constructor.
 
         width : int, range, array_like
             Required table (column) width(s)
                 If int: The table width.
-                If range: The minimum and maximum table width
+                If range: The minimum and maximum table width # TODO
                 If array_like: One int per column specifying each width
         too_wide: {'split', 'truncate', 'ignore'}
             How to handle case in which table is too wide for display.
@@ -696,8 +703,9 @@ class Table(LoggingMixin):
             Highlight these rows by applying the given effects to the entire
             row.  The dict should be keyed on integer which is the line number
 
-        footnotes: strco_
-            Any footnote that will be added to the bottom of the table
+        footnotes: str
+            Any footnote that will be added to the bottom of the table.
+            Useful to explain the meaning of `flags`
 
         #TODO: list attributes here
         """
@@ -708,8 +716,8 @@ class Table(LoggingMixin):
 
         # resolve kws
         if kws:
-            kws = self._kw_map.resolve(self.__init__, kws, locals())
-            self.__init__(data, **kws)
+            kws_ = self._kw_map.resolve(self.__init__, kws, locals())
+            self.__init__(data, **kws_)
             return
 
         # save a backup of the original data
@@ -727,12 +735,16 @@ class Table(LoggingMixin):
         # convert to object array
         data = np.asanyarray(data, 'O')
 
-        # check data shape
+        # check data shape / dimensions
         dim = data.ndim
         if dim == 1:
             # default for 1D data is to display in a column with row_headers
             if order.startswith('c'):
                 data = data[None].T
+        # TODO: deprecate order='c' / order='r' in favour o
+        # elif dim == 2 and order.startswith('r'):
+        #     data = data.T
+
         if dim > 2:
             raise ValueError('Only 2D data can be tabled! Data is %iD' % dim)
 
@@ -765,8 +777,8 @@ class Table(LoggingMixin):
         self.has_col_head = hch = (col_headers is not None)
         self.n_head_col = nhc = hrh + hrn
 
-        # FIXME: headers should be left aligned even when column values are
-        #  right aligned.
+        # FIXME: column headers should be left aligned even when column values
+        #  are right aligned.
         align = resolve_input(align, data, col_headers, 'alignment',
                               get_alignment,
                               self.get_default_align)
@@ -780,18 +792,16 @@ class Table(LoggingMixin):
         self.formatters = resolve_input(
                 formatters, data, col_headers, 'formatters',
                 default_factory=self.get_default_formatter,
-                args=(precision, minimalist))
+                args=(precision, minimalist, data))
 
         # get flags
         flags = resolve_input(flags, data, col_headers, 'flags')
-        # TODO: provide a post_script explaining what this is..
 
         # calculate column totals if required
         self.totals = self.get_totals(data, totals)
         self.has_totals = (self.totals is not None)
 
         # do formatting
-        # self.masked = str(masked)
         data = self._apply_format(data, self.formatters, str(masked), flags)
 
         # add totals row
@@ -800,7 +810,8 @@ class Table(LoggingMixin):
             data = np.vstack((data, totals))
 
         # col borders (rhs)
-        borders = resolve_borders(col_borders, vlines, n_cols, frame)
+        self.borders = resolve_borders(col_borders, vlines, n_cols, frame)
+        self.lcb = lengths(self.borders)
 
         # TODO: row / col sort here
         # Add row / column headers
@@ -816,8 +827,6 @@ class Table(LoggingMixin):
         # note `pre_table` is dtype='O'
 
         self.cell_white = int(cell_whitespace)
-        self.col_widths = get_column_widths(self.pre_table) + self.cell_white
-        requested_width = self.resolve_width(width)
 
         # handle group headers
         if col_groups is not None:
@@ -836,14 +845,49 @@ class Table(LoggingMixin):
             # requested_width = requested_width[shown]
             # borders = borders[shown]
 
-        # if requested widths are smaller than that required to fully display
-        # widest item in the column, truncate all too-wide items in that column
-        self.truncate_cells(requested_width)
-        self.col_widths = requested_width
+        # get column widths (without borders)
+        # these are either those input by the user, or determined from the
+        # content of the columns
+        # FIXME: too-wide columns in compact table!!
+        self.col_widths = get_column_widths(self.pre_table) + self.cell_white
+
+        # next block needs to happen after `self.col_widths` assigned
+        self._compact_table = None
+        has_compact = compact and np.size(self.compacted)
+        if has_compact:
+            # this is an instance of `Table`!!
+            self._compact_table = self._get_compact_table()
+
+        # check for too-wide title or compacted lines, and amend column widths
+        # to match
+        tw = 0
+        if self.has_title or has_compact:
+            if has_compact:
+                tw = self._compact_table.get_width()
+
+            # use explicit split('\n') below instead of splitlines since the
+            # former yields a non-empty sequence for title=''
+            tw = max(lengths(self.title.split('\n')).max(), tw)
+            w = self.get_width() - 1  # -1 to exclude lhs / rhs borders
+            cw = self.col_widths[self._idx_shown]
+            if tw > w:
+                d = tw - w
+                idx = itt.cycle(self._idx_shown)
+                while d:
+                    self.col_widths[next(idx)] += 1
+                    d -= 1
+
+        if width is not None:
+            requested_widths = self.resolve_widths(width)
+            # if requested widths are smaller than that required to fully
+            # display widest item in the column, truncate all too-wide items
+            # in that column
+            self.truncate_cells(requested_widths)
+            self.col_widths = requested_widths
 
         # column borders
-        self.borders = borders
-        self.lcb = lengths(self.borders)
+        # self.borders = borders
+        # self.col_widths = requested_widths
         # otypes=[int] in case borders are empty
 
         # row borders
@@ -906,6 +950,8 @@ class Table(LoggingMixin):
         # self.max_column_width = self.handle_too_wide.get('columns')
 
         self.show_colourbar = False
+        if footnotes is None:
+            footnotes = []
         if isinstance(footnotes, str):
             footnotes = footnotes.splitlines()
 
@@ -994,27 +1040,56 @@ class Table(LoggingMixin):
                      width=self.get_column_widths()[self._idx_shown],
                      **kws)
 
-    def get_default_formatter(self, col_idx, precision, minimalist):
-        # TODO: check if object has pprint, and if so, use that!!!
-        ts = self.col_data_types[col_idx]
-        if len(ts) == 1:
+    def get_default_formatter(self, col_idx, precision, minimalist, data):
+        """
+
+        Parameters
+        ----------
+        col_idx
+        precision
+        minimalist
+
+        Returns
+        -------
+
+        """
+        types_ = self.col_data_types[col_idx]
+
+        if len(types_) == 1:
+            type_, = types_  # nb since it's a set, don't try types_[0]
             # all data in this column is of the same type
-            typ, = ts
-            if typ is str:
-                return None
+            if issubclass(type_, str):  # this includes np.str_!
+                return _echo
 
-            elif issubclass(typ, numbers.Integral):
-                return ftl.partial(pprint.decimal, precision=0)
+            if not issubclass(type_, numbers.Real):
+                return str
 
-            elif issubclass(typ, numbers.Real):
-                right_pad = 0
+            #
+            right_pad = 0
+            sign = ''
+            if issubclass(type_, numbers.Integral):
+                if minimalist:
+                    precision = 0
+
+            else:  # real numbers
                 if minimalist and self.align[col_idx] == '>':
                     right_pad = precision
+                sign = (' ' * np.any(data[:, col_idx] < 0))
 
-                return ftl.partial(pprint.decimal,
-                                   precision=precision,
-                                   compact=minimalist,
-                                   right_pad=right_pad)
+            # print(col_idx,type_, precision, minimalist, sign, right_pad)
+
+            return ftl.partial(pprint.decimal,
+                               precision=precision,
+                               compact=minimalist,
+                               sign=sign,
+                               right_pad=right_pad)
+
+            #  NOTE: single dispatch not a good option here due to formatting
+            #   subtleties
+            # return formatter.registry[type_](None, precision=precision,
+            #                                  compact=minimalist,
+            #                                  sign=sign,
+            #                                  right_pad=right_pad)
 
         return pprint.PrettyPrinter(precision=precision,
                                     minimalist=minimalist).pformat
@@ -1044,7 +1119,7 @@ class Table(LoggingMixin):
             try:
                 data[use, i] = np.vectorize(fmt, (str,))(col[use])
             except Exception as err:
-                logger.warning('Could not format column %i with %r due to'
+                logger.warning('Could not format column %i with %r due to '
                                'the following exception:\n%s', i, fmt, err)
                 data[use, i] = np.vectorize(str, (str,))(col[use])
 
@@ -1059,9 +1134,6 @@ class Table(LoggingMixin):
                             'Could not append flags to formatted data for '
                             'column %i due to the following  exception:\n%s',
                             i, err)
-
-                    from IPython import embed
-                    embed()
 
         # finally set masked str for entire table
         if np.ma.is_masked(data):
@@ -1081,12 +1153,18 @@ class Table(LoggingMixin):
 
         return '<'
 
-    def resolve_width(self, width):
+    def resolve_widths(self, width):
         width_min = 0
         width_max = None
-        if width is None:
-            # each column will be as wide as the widest data element it contains
-            return self.col_widths
+        # if width is None:
+        #     # each column will be as wide as the widest data element it contains
+        #     widths =
+        #     #
+        #     get_column_widths(self.pre_table)
+
+        if np.size(width) == self.shape[1]:
+            # each column width specified
+            return width
 
         elif np.size(width) == 1:
             # The table will be made exactly this wide
@@ -1098,10 +1176,6 @@ class Table(LoggingMixin):
             # each column width specified
             hcw = self.col_widths[:self.n_head_col]
             return np.r_[hcw, width]
-
-        elif np.size(width) == self.shape[1]:
-            # each column width specified
-            return width
 
         elif isinstance(width, range):
             # maximum table width given.
@@ -1210,25 +1284,20 @@ class Table(LoggingMixin):
             w += self.lcb
         return w
 
-        # def get_width(self, data=None):
-
-    #     w = self.get_column_widths(data, raw=True, with_borders=True)
-    #     return sum(w)  # total column width
-
     def get_width(self, indices=None):
-        # FIXME: this function doesn't return the right width.
-        #  not the same as sum(self.col_widths[column_indices] +
-        #                      self.lcb[column_indices])
-        #  for some retarded reason...
+        """get table width"""
         if indices is None:
             indices = self._idx_shown
-        return (self.get_column_widths(self.pre_table[:, indices]) +
-                self.lcb[indices]).sum()
+        # this excludes the lhs starting border
+        return (self.col_widths[indices] + self.lcb[indices]).sum()
 
     def get_totals(self, data, col_indices):
 
         # suppress totals for tables with single row
         if data.shape[0] <= 1:
+            if col_indices is not None:
+                self.logger.info('Suppressing totals line since table has only '
+                                 'a single row of data.')
             return
 
         if col_indices in (None, False):
@@ -1511,9 +1580,7 @@ class Table(LoggingMixin):
             column_indices = self._idx_shown
 
         part_table = self.pre_table[:, column_indices]
-        # table_width = self.get_width(column_indices) # NO!!!!
-        table_width = sum(self.col_widths[column_indices] +
-                          self.lcb[column_indices])
+        table_width = self.get_width(column_indices)
         lcb = len(self._default_border)
 
         if self.frame:
@@ -1534,8 +1601,8 @@ class Table(LoggingMixin):
         # compacted columns
         if np.size(self.compacted):
             # display compacted columns in single row
-            compact = self._get_compact_table()
-            compact_rows = self.build_long_line(str(compact), table_width,
+            compact_rows = self.build_long_line(str(self._compact_table),
+                                                table_width,
                                                 props=['underline'])
             table.append(compact_rows)
 
@@ -1555,7 +1622,6 @@ class Table(LoggingMixin):
                     if len(lbl) >= gw:
                         lbl = truncate(lbl, gw - 1)
 
-                    # line += '{: ^{:}s}{:}'.format(lbl, gw - 1, self.borders[j])
                     line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
                     gw = w
                     lbl = name
@@ -1608,7 +1674,7 @@ class Table(LoggingMixin):
 
         n_cols = int(n_cols)
         n_comp = len(self.compacted[0])
-        tw = self.get_width()
+        table_width = self.get_width()  # excludes lhs border
         if n_cols is None:
             # find optimal shape for table                  # +3 for ' = '
             widths = np.vectorize(len)(self.compacted)
@@ -1618,7 +1684,7 @@ class Table(LoggingMixin):
                 ccw = np.hstack([_2widths, [0] * pad]).reshape(n_cols, -1).max(
                         1)
                 # +3 for column spacing
-                if sum(ccw + 3) > tw:
+                if sum(ccw + 3) > table_width:
                     if np.any(ccw == 0):
                         continue
                     n_cols -= 1
@@ -1637,7 +1703,7 @@ class Table(LoggingMixin):
         col_borders[-1] = ''
 
         # justified spacing
-        w = apportion(tw, n_cols)
+        w = apportion(table_width, n_cols)
         widths = np.vectorize(len)(data).max(0)
         widths[0::2] += 1
         extra = sum(w - widths.reshape(2, -1).sum(0) - 3)  # '= ' borders
@@ -1649,10 +1715,12 @@ class Table(LoggingMixin):
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes
     #     _, type_, size = re.split('([^0-9]+)', data.dtype.str)
-    #     if int(size) < self.col_widths.max() + 20:
+    #     if int(size) < self.col_widths.max() + 20:high
     #         dtype = type_ + str(int(size) + 20)
     #         data = data.astype(dtype)
     #     return data
+
+    # def highlight_columns(self,  colours, background=()):
 
     def highlight_cells(self, states, colours, background=()):
         """
@@ -1677,7 +1745,7 @@ class Table(LoggingMixin):
         #  all remaining higher states will be assigned the same colour
         #
 
-        # increase itemsize of array dtype to accommodate ansi codes
+        # increase item size of array dtype to accommodate ansi codes
         x = self.pre_table.dtype.itemsize // 4
         dtype = 'U%i' % (x + 15)
         self.pre_table = self.pre_table.astype(dtype)
@@ -1700,32 +1768,32 @@ class Table(LoggingMixin):
 
         return self.data
 
-    def flag_headers(self, states, *colours, **kws):
+    # def flag_headers(self, states, *colours, **kws):
+    #
+    #     states = np.asarray(states, int)
+    #     propList = ansi.get_state_dicts(states, *colours, **kws)
+    #
+    #     # apply colours implied by maximal states sequentially to headers
+    #     for i, s in enumerate(('col', 'row')):
+    #         h = getattr(self, '%s_headers' % s)
+    #         if h is not None:
+    #             flags = np.take(propList, states.max(
+    #                     i))  # operator.itemgetter(*states.max(0))(propList)
+    #             h = ansi.rainbow(h.ravel(), flags)
+    #             setattr(self, '%s_headers' % s, h)
 
-        states = np.asarray(states, int)
-        propList = ansi.get_state_dicts(states, *colours, **kws)
-
-        # apply colours implied by maximal states sequentially to headers
-        for i, s in enumerate(('col', 'row')):
-            h = getattr(self, '%s_headers' % s)
-            if h is not None:
-                flags = np.take(propList, states.max(
-                        i))  # operator.itemgetter(*states.max(0))(propList)
-                h = ansi.rainbow(h.ravel(), flags)
-                setattr(self, '%s_headers' % s, h)
-
-                # if self.has_row_head:
-        #     rflags = np.take(propList, states.max(0))
-        #     self.row_headers = ansi.rainbow(self.row_headers, rflags)
-        #
-        # if self.has_col_head:
-        #     cflags = np.take(propList, states.max(1))
-        #     self.row_headers = ansi.rainbow(self.row_headers, cflags)
-        #
-        # if self.has_row_head:
-        #     rflags = np.take(colours, states.max(0))
-        #
-        #     self.col_headers = as_ansi(self.col_headers, cflags)
+    # if self.has_row_head:
+    #     rflags = np.take(propList, states.max(0))
+    #     self.row_headers = ansi.rainbow(self.row_headers, rflags)
+    #
+    # if self.has_col_head:
+    #     cflags = np.take(propList, states.max(1))
+    #     self.row_headers = ansi.rainbow(self.row_headers, cflags)
+    #
+    # if self.has_row_head:
+    #     rflags = np.take(colours, states.max(0))
+    #
+    #     self.col_headers = as_ansi(self.col_headers, cflags)
 
     def add_colourbar(self, table, labels=None):
         # ignore default state in colourbar
