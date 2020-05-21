@@ -2,8 +2,12 @@
 Pretty printed tables for small data sets
 """
 
+import types
+import re
+from recipes.string import match_brackets
 import itertools as itt
-import os, logging
+import os
+import logging
 import warnings
 from shutil import get_terminal_size
 
@@ -13,9 +17,10 @@ import numpy as np
 from recipes.logging import LoggingMixin
 from . import ansi
 from . import codes
-from . import wideness, get_alignment
+from .utils import wideness, get_alignment
 
-import numbers, functools as ftl
+import numbers
+import functools as ftl
 from recipes import pprint
 from recipes.introspection.utils import get_module_name
 
@@ -29,7 +34,6 @@ from recipes.introspection.utils import get_module_name
 
 # FIXME: alignment not nice when mixed negative positive....
 #  or mixed float decimal (minimalist)
-
 
 # NOTE: IPython does not support ansi underline, while unix term does
 # Use unicode underline for qtconsole sessions. However, unicode underline does
@@ -46,12 +50,31 @@ from recipes.introspection.utils import get_module_name
 # module level logger
 logger = logging.getLogger(get_module_name(__file__))
 
-#
+# defaults as module constants
 TRUNC_CHR = '…'  # single character ellipsis u"\u2026" to indicate truncation
 BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
+HEADER_ALIGN = '^'
 
 # defines vectorized length
 lengths = np.vectorize(len, [int])
+
+
+def is_astropy_table(obj):
+    parents = [f'{kls.__module__}.{kls.__name__}' for kls in type(obj).mro()]
+    return 'astropy.table.table.Table' in parents
+
+
+def _convert_astropy_table(tbl):
+    data, heads, units = [], [], []
+    for name, col in tbl.columns.items():
+        data.append(col.data)
+        units.append(col.unit)
+        heads.append(name)
+
+    if set(units) == {None}:
+        units = None
+
+    return data, heads, units
 
 
 def _echo(_):
@@ -118,12 +141,18 @@ def resolve_width(width, data, headers=None):
         # each column width specified
         return width
     else:
-        raise ValueError('Cannot interpret width %r for data of shape %s'
-                         % (width, data.shape))
+        raise ValueError('Cannot interpret width %r for data of shape %s' %
+                         (width, data.shape))
 
 
-def resolve_input(obj, data, col_headers, what, converter=None,
-                  default_factory=None, args=(), raises=True,
+def resolve_input(obj,
+                  data,
+                  col_headers,
+                  what,
+                  converter=None,
+                  default_factory=None,
+                  args=(),
+                  raises=True,
                   **kws):
     """
     Resolve user input for parameters that need to have either
@@ -180,8 +209,9 @@ def resolve_input(obj, data, col_headers, what, converter=None,
         for key, val in obj.items():
             if isinstance(key, str):
                 if key not in col_headers:
-                    action('Could not assign %s. Key %r not in `column_headers`'
-                           % (what, key))
+                    action(
+                        'Could not assign %s. Key %r not in `column_headers`' %
+                        (what, key))
                     continue
                 #
                 new_key = col_headers.index(key)
@@ -203,56 +233,6 @@ def resolve_input(obj, data, col_headers, what, converter=None,
             obj[i] = default_factory(i, *args, **kws)
 
     return obj
-
-
-# def get_format_dict(data, formatters, col_headers, what, default_factory,
-#                     args, **kws):
-#     n_cols = data.shape[1]
-#     if formatters is None:
-#         formatters = {}
-#
-#     # convert formatters to dict
-#     if not isinstance(formatters, dict):
-#         if len(formatters) != n_cols:
-#             raise ValueError('Incorrect number of specifiers (%i) for column %r'
-#                              ' in table with %i columns' %
-#                              (len(formatters), what, n_cols))
-#         formatters = dict(enumerate(formatters))
-#
-#     keys = list(formatters.keys())
-#     if (str in set(map(type, keys))) and col_headers is None:
-#         raise ValueError('Could not assign %r due to missing `column_headers`'
-#                          % what)
-#
-#     # convert all keys in format dict to int
-#     if col_headers is not None:
-#         col_headers = list(col_headers)
-#         for key in keys:
-#             if isinstance(key, str):
-#                 if key not in col_headers:
-#                     raise ValueError('Could not assign formatter %r. Key '
-#                                      'not in `column_headers`' % key)
-#                 #
-#                 new_key = col_headers.index(key)
-#                 # at this point key should be int
-#                 formatters[new_key] = formatters.pop(key)
-#
-#             elif not isinstance(key, numbers.Integral):
-#                 raise ValueError('Key %r invalid type for mapping to '
-#                                  'column' % key)
-#
-#     # get default formatters
-#     idx_no_fmt = set(range(n_cols)) - set(formatters.keys())
-#     for i in idx_no_fmt:
-#         formatters[i] = default_factory(i, *args, **kws)
-#
-#     return formatters
-
-
-#
-# def get_default_alignment(col):
-#     use = ~col.mask if np.ma.is_masked(col) else ...
-#     ts = set(map(type, col[use]))
 
 
 def resolve_borders(col_borders, where, ncols, frame):
@@ -297,14 +277,14 @@ def resolve_borders(col_borders, where, ncols, frame):
     return borders
 
 
-def dict_to_list(dic, ignore_keys, order):
+def dict_to_list(data, ignore_keys, order):
     """
     Convert input dict to list of values with keys as column / row_headers
     (depending on `order`)
 
     Parameters
     ----------
-    dic
+    data
     ignore_keys
     order
 
@@ -312,13 +292,15 @@ def dict_to_list(dic, ignore_keys, order):
     -------
 
     """
-    _dic = dic.copy()
+    assert isinstance(data, dict)
+
+    dic = data.copy()
     if ignore_keys is not None:
         for key in ignore_keys:
-            _dic.pop(key, None)
+            dic.pop(key, None)
 
-    headers = list(_dic.keys())
-    data = list(_dic.values())
+    headers = list(dic.keys())
+    data = list(dic.values())
 
     row_headers = col_headers = None
     if order.startswith('r'):
@@ -349,12 +331,12 @@ def _underline(s):
 
 
 def highlight(array, condition, props, formatter=pprint.numeric, **kws):
-    out = np.vectorize(formatter, (str,))(array, **kws)
+    out = np.vectorize(formatter, (str, ))(array, **kws)
     if condition in (all, ...):
         condition = np.ones_like(array, bool)
 
     if condition.any():
-        tmp = np.vectorize(codes.apply, (str,))(out[condition], props)
+        tmp = np.vectorize(codes.apply, (str, ))(out[condition], props)
         dtype = 'U%i' % (max(tmp.itemsize, out.itemsize) / 4)
         out = out.astype(dtype)
         out[condition] = tmp
@@ -377,11 +359,6 @@ def truncate(item, width):
 
 
 # TODO: check out wcwidth lib
-
-
-from recipes.string import match_brackets
-
-import re
 
 
 class TerseKws(object):
@@ -420,17 +397,13 @@ class TerseKws(object):
             self.answer = str(answer)
 
     def __call__(self, s):
-        if self.regex.match(s):
+        if self.regex.fullmatch(s):
             return self.answer
 
     def __repr__(self):
         return f'{self.pattern} --> {self.answer}'
 
 
-import types
-
-
-# from recipes.containers.dicts import Many2OneMap
 class KeywordResolver(object):
     """Helper class for resolving terse keywords"""
 
@@ -442,8 +415,13 @@ class KeywordResolver(object):
     def __repr__(self):
         return repr(self.mappings)
 
-    def resolve(self, func, kws, namespace):
-
+    def resolve(self, func, kws, namespace=None):
+        """
+        map terse keywords in `kws` to their full form. 
+        If given, values from the `namespace` dict replace those in kws
+        if their corresponging keywords are valid parameter names for `func` 
+        and they are non-default values
+        """
         # get arg names and defaults
         code = func.__code__
         defaults = func.__defaults__
@@ -452,12 +430,14 @@ class KeywordResolver(object):
         # load the defaults / passed args
         n_req_args = len(arg_names) - len(defaults)
         # opt_arg_names = arg_names[n_req_args:]
-        # now get non-default arguments (those passed by user)
+
         args_dict = {}
-        for i, o in enumerate(arg_names[n_req_args:]):
-            v = namespace[o]
-            if v is not defaults[i]:
-                args_dict[o] = v
+        # now get non-default arguments (those passed by user)
+        if namespace is not None:
+            for i, o in enumerate(arg_names[n_req_args:]):
+                v = namespace[o]
+                if v is not defaults[i]:
+                    args_dict[o] = v
 
         # resolve terse kws and add to dict
         for k, v in kws.items():
@@ -470,39 +450,44 @@ class KeywordResolver(object):
                     # get name
                     name = func.__name__
                     if isinstance(func, types.MethodType):
-                        name = '.'.join((func.__self__.__class__.__name__,
-                                         name))
+                        name = f'{func.__self__.__class__.__name__}.{name}'
                     raise KeyError(
-                            f'{k!r} is not a valid keyword for {name!r}')
+                        f'{k!r} is not a valid keyword for {name!r}')
 
         return args_dict
 
 
 class Table(LoggingMixin):
     """
-    An ascii table formatter. Good for displaying data, definitely not for data
+    An ascii table formatter. Good for displaying data. Definitely not for data
     manipulation.  Plays nicely with ANSI colours and multi-line cell elements.
     """
 
+    # TODO: test mappings!!
+
     # mappings for terse kws
-    _mappings = {'unit[s]': 'units',
-                 'footnote[s]': 'footnotes',
-                 'formatter[s]': 'formatters',
-                 'cell_white[space]': 'cell_whitespace',
-                 'minimal[ist]': ' minimalist',
-                 '[column_]width[s]': '',
-                 'c[olumn_]groups': 'col_groups',
-                 '[row_]nrs': 'row_nrs',
-                 'total[s]': ''}
+    _mappings = {
+        'unit[s]': 'units',
+        'footnote[s]': 'footnotes',
+        'formatter[s]': 'formatters',
+        'cell_white[space]': 'cell_whitespace',
+        'minimal[ist]': ' minimalist',
+        '[column_]width[s]': '',
+        'c[olumn_]groups': 'col_groups',
+        '[row_]nrs': 'row_nrs',
+        'total[s]': 'totals'
+    }
     for rc, p in {'row': 'r[ow_]', 'col': 'c[olumn_]'}.items():
-        _mappings.update({f'{p}head[ers]': f'{rc}_headers',
-                          f'{p}head[er]_prop[erties]': f'{rc}_head_props',
-                          f'{p}borders': 'col_borders'})
+        _mappings.update({
+            f'{p}head[ers]': f'{rc}_headers',
+            f'{p}head[er]_prop[erties]': f'{rc}_head_props',
+            f'{p}borders': 'col_borders'
+        })
     #
     _kw_map = KeywordResolver(_mappings)
 
     #
-    _default_border = BORDER
+    _default_border = BORDER  # TODO odo move to module scope
 
     # The column format specification:
     #  0 - item; 1 - fill width; 2 - align; 3 - border (rhs); 4 - border (lhs)
@@ -528,24 +513,54 @@ class Table(LoggingMixin):
         return cls(np.ma.column_stack([np.ma.array(a, 'O') for a in columns]),
                    **kws)
 
-    # @classmethod
-    # def from_dict(cls, *columns, **kws):
+    @classmethod
+    def from_dict(cls, data, ignore_keys=(), order='r', **kws):
+        # note that the terse kws will not be replaced here, so you may end up
+        # with things like dict(chead=['user given'],
+        #                       col_headers=['key in `data` dict'])
+        # in which case chead will silently be ignored
+        # eg: Table({'hi': [1, 2, 3]}, chead=['haha'])
+        data, kws = cls._from_dict(data, ignore_keys=(), order='r', **kws)
+        return cls(data, **kws)
 
-    def __init__(self, data,
-                 title=None, title_align='center', title_props=('underline',),
-                 col_headers=None, col_head_props='bold',
+    @staticmethod
+    def _from_dict(data, ignore_keys=(), order='r', **kws):
+        # helper for initialization from dict
+
+        # check arguments valid
+        assert isinstance(data, dict)
+        assert order in 'rc', 'Invalid order: %s' % order
+
+        row_headers, col_headers, data = dict_to_list(
+            data, ignore_keys, order)
+
+        kws.setdefault('row_headers', row_headers)
+        kws.setdefault('col_headers', col_headers)
+        return data, kws
+
+    def __init__(self,
+                 data,
+                 title=None,
+                 title_align='center',
+                 title_props=('underline', ),
+                 col_headers=None,
+                 col_head_props='bold',
+                 col_head_align='^',
                  units=None,
-                 col_borders=_default_border, vlines=None,
+                 col_borders=_default_border,
+                 vlines=None,
                  col_groups=None,
-                 row_headers=None, row_head_props='bold',
+                 row_headers=None,
+                 row_head_props='bold',
                  row_nrs=False,
                  hlines=None,
                  frame=True,
                  align=None,
-                 precision=2, minimalist=False,
+                 precision=2,
+                 minimalist=False,
                  compact=False,
-                 ignore_keys=None, order='c',
-                 width=None, too_wide='split',
+                 width=None,
+                 too_wide='split',
                  cell_whitespace=1,
                  totals=None,
                  formatters=None,
@@ -553,10 +568,10 @@ class Table(LoggingMixin):
                  flags=None,
                  insert=None,
                  highlight=None,
-                 footnotes='', **kws):
+                 footnotes='',
+                 **kws):
 
         # TODO: style='matrix', 'bare', 'spreadsheet'
-
         """
         A table representation of `data`.
 
@@ -628,7 +643,7 @@ class Table(LoggingMixin):
         order : {'r', 'c', 'row', 'col'}
             Used when table is initialized from dict, or when data is 1
             dimensional to know whether values should be interpreted as
-            rows or columns. Defualt is to interpret 1D data as a column with
+            rows or columns. Default is to interpret 1D data as a column with
             row headers.
             note that for 2d data this argument is ignored. To create a
             `Table` from a set of columns use the `Table.from_columns`
@@ -714,23 +729,35 @@ class Table(LoggingMixin):
         # FIXME: hlines with cell elements that have ansi ... effects don't
         #  stack...
 
+        # special case: dict
+        if isinstance(data, dict):
+            data, kws = self._from_dict(data, **kws)
+            self.__init__(data, **kws)
+            return
+
         # resolve kws
         if kws:
+            # remap terse keywords
             kws_ = self._kw_map.resolve(self.__init__, kws, locals())
+            # `kws_` now has all the allowed parameters for this function as
+            # keywords with either the default or user input as values
             self.__init__(data, **kws_)
             return
 
-        # save a backup of the original data
-        # self.original_data = data
-        self._col_headers = col_headers
-
-        # check arguments valid
-        assert order in 'rc', 'Invalid order: %s' % order
-
-        # convert dict
-        if isinstance(data, dict):
-            row_headers, col_headers, data = dict_to_list(data, ignore_keys,
-                                                          order)
+        # special case: astropy.table.Table
+        if is_astropy_table(data):
+            # FIXME: can you do this with from_dict???
+            data, col_headers_, units_ = _convert_astropy_table(data)
+            # remap terse keywords
+            kws_ = self._kw_map.resolve(self.__init__, kws, locals())
+            # replace defaults with those from the astropy table
+            if kws_['col_headers'] is None:
+                kws_['col_headers'] = col_headers_
+            if kws_['units'] is None:
+                kws_['units'] = units_
+            # init
+            self.__init__(data, **kws_)
+            return
 
         # convert to object array
         data = np.asanyarray(data, 'O')
@@ -738,15 +765,13 @@ class Table(LoggingMixin):
         # check data shape / dimensions
         dim = data.ndim
         if dim == 1:
-            # default for 1D data is to display in a column with row_headers
-            if order.startswith('c'):
-                data = data[None].T
-        # TODO: deprecate order='c' / order='r' in favour o
-        # elif dim == 2 and order.startswith('r'):
-        #     data = data.T
+            data = data[None]
 
         if dim > 2:
             raise ValueError('Only 2D data can be tabled! Data is %iD' % dim)
+
+        # column headers
+        self._col_headers = col_headers
 
         # units
         self.has_units = (units not in (None, {}))
@@ -774,25 +799,23 @@ class Table(LoggingMixin):
         self.frame = bool(frame)
         self.has_row_nrs = hrn = (row_nrs is not False)
         self.has_row_head = hrh = (row_headers is not None)
-        self.has_col_head = hch = (col_headers is not None)
-        self.n_head_col = nhc = hrh + hrn
-
-        # FIXME: column headers should be left aligned even when column values
-        #  are right aligned.
-        align = resolve_input(align, data, col_headers, 'alignment',
-                              get_alignment,
-                              self.get_default_align)
-        # make align an array with same size as nr of columns in table
+        self.has_col_head = (col_headers is not None)
+        self.n_head_col = hrh + hrn
         n_cols = data.shape[1] + self.n_head_col
-        self.align = np.empty(n_cols, 'U1')
-        self.align[:self.n_head_col] = '<'  # row headers are left aligned
-        self.align[self.n_head_col:] = list(align.values())
+
+        # get alignment based on column data types
+        self.align = self.get_alignment(
+            align, data, col_headers, self.get_default_align)
+
+        # column headers will be center aligned unless requested otherwise.
+        self.col_head_align = self.get_alignment(
+            align, data, col_headers, lambda _: HEADER_ALIGN)
 
         # column formatters
         self.formatters = resolve_input(
-                formatters, data, col_headers, 'formatters',
-                default_factory=self.get_default_formatter,
-                args=(precision, minimalist, data))
+            formatters, data, col_headers, 'formatters',
+            default_factory=self.get_default_formatter,
+            args=(precision, minimalist, data))
 
         # get flags
         flags = resolve_input(flags, data, col_headers, 'flags')
@@ -822,8 +845,8 @@ class Table(LoggingMixin):
         self.row_head_props = row_head_props
 
         # add the (row/column) headers / row numbers / totals
-        self.pre_table = self.add_headers(
-                data, row_headers, col_headers, row_nrs)
+        self.pre_table = self.add_headers(data, row_headers, col_headers,
+                                          row_nrs)
         # note `pre_table` is dtype='O'
 
         self.cell_white = int(cell_whitespace)
@@ -860,6 +883,7 @@ class Table(LoggingMixin):
 
         # check for too-wide title or compacted lines, and amend column widths
         # to match
+        # todo method here
         tw = 0
         if self.has_title or has_compact:
             if has_compact:
@@ -999,7 +1023,7 @@ class Table(LoggingMixin):
 
     @property
     def n_head_rows(self):
-        return sum(((self.col_groups is not None),
+        return sum((self.col_groups is not None,
                     self.has_col_head,
                     self.has_units))
 
@@ -1072,7 +1096,7 @@ class Table(LoggingMixin):
                     precision = 0
 
             else:  # real numbers
-                if minimalist and self.align[col_idx] == '>':
+                if minimalist and (self.align[col_idx] == '>'):
                     right_pad = precision
                 sign = (' ' * np.any(data[:, col_idx] < 0))
 
@@ -1101,7 +1125,8 @@ class Table(LoggingMixin):
         flags = flags or {}
 
         # format custom columns
-        for i, fmt in formatters.items():  # Todo: formatting for row_headers...
+        for i, fmt in formatters.items(
+        ):  # Todo: formatting for row_headers...
             if fmt is None:
                 # null format means convert to str, need everything in array
                 # to be str to prevent errors downstream
@@ -1117,11 +1142,12 @@ class Table(LoggingMixin):
             # wrap the formatting in try, except since it's usually not
             # critical and getting some info is better than none
             try:
-                data[use, i] = np.vectorize(fmt, (str,))(col[use])
+                data[use, i] = np.vectorize(fmt, (str, ))(col[use])
             except Exception as err:
-                logger.warning('Could not format column %i with %r due to '
-                               'the following exception:\n%s', i, fmt, err)
-                data[use, i] = np.vectorize(str, (str,))(col[use])
+                logger.warning(
+                    'Could not format column %i with %r due to '
+                    'the following exception:\n%s', i, fmt, err)
+                data[use, i] = np.vectorize(str, (str, ))(col[use])
 
             # concatenate data with flags
             # flags = flags.get(i)
@@ -1131,9 +1157,9 @@ class Table(LoggingMixin):
                                                flags[i])
                 except Exception as err:
                     logger.warning(
-                            'Could not append flags to formatted data for '
-                            'column %i due to the following  exception:\n%s',
-                            i, err)
+                        'Could not append flags to formatted data for '
+                        'column %i due to the following  exception:\n%s', i,
+                        err)
 
         # finally set masked str for entire table
         if np.ma.is_masked(data):
@@ -1266,8 +1292,7 @@ class Table(LoggingMixin):
         for l, j, in zip(ix.T, ict):
             w = requested_width[j]
             for i in np.where(l)[0]:
-                item = self.pre_table[i, j]
-                self.pre_table[i, j] = truncate(item, w)
+                self.pre_table[i, j] = truncate(self.pre_table[i, j], w)
 
     def get_column_widths(self, data=None, raw=False, with_borders=False):
         """data should be string type array"""
@@ -1291,13 +1316,25 @@ class Table(LoggingMixin):
         # this excludes the lhs starting border
         return (self.col_widths[indices] + self.lcb[indices]).sum()
 
-    def get_totals(self, data, col_indices):
+    def get_alignment(self, align, data, col_headers, default_factory):
+        """get alignment array for columns"""
+        align = resolve_input(align, data, col_headers, 'alignment',
+                              get_alignment, default_factory)
+        # make align an array with same size as nr of columns in table
+        n_cols = data.shape[1] + self.n_head_col
+        alignment = np.empty(n_cols, 'U1')
+        alignment[:self.n_head_col] = '<'  # row headers are left aligned
+        alignment[self.n_head_col:] = list(align.values())
+        return alignment
 
+    def get_totals(self, data, col_indices):
+        """compute totals for columns at `col_indices`"""
         # suppress totals for tables with single row
         if data.shape[0] <= 1:
             if col_indices is not None:
-                self.logger.info('Suppressing totals line since table has only '
-                                 'a single row of data.')
+                self.logger.info(
+                    'Suppressing totals line since table has only '
+                    'a single row of data.')
             return
 
         if col_indices in (None, False):
@@ -1330,7 +1367,10 @@ class Table(LoggingMixin):
 
     # @expose.args()
     # @staticmethod
-    def add_headers(self, data, row_headers=None, col_headers=None,
+    def add_headers(self,
+                    data,
+                    row_headers=None,
+                    col_headers=None,
                     row_nrs=False):
         """Add row and column headers to table data"""
 
@@ -1383,13 +1423,8 @@ class Table(LoggingMixin):
         return self.build_long_line(text, width, self.title_align,
                                     self.title_props)
 
-    def format_cell(self, text, width, align, border=_default_border, lhs=''):
-        # this is needed because the alignment formatting gets screwed up by the
-        # ANSI characters (which have length, but are not displayed)
-        pad_width = ansi.length_codes(text) + width
-        return self.cell_fmt.format(text, pad_width, align, border, lhs)
-
-    def gen_multiline_rows(self, cells, indices=..., underline=False):
+    def gen_multiline_rows(self, cells, widths, alignment, borders,
+                           underline=False):
         """
         handle multi-line cell elements, apply properties to each item in the
         list of columns create a single string
@@ -1397,7 +1432,9 @@ class Table(LoggingMixin):
         Parameters
         ----------
         cells
-        indices
+        widths
+        alignment
+        borders
         underline
 
         Returns
@@ -1413,16 +1450,15 @@ class Table(LoggingMixin):
         n_lines = max(map(len, lines))
 
         for i, row_items in enumerate(itt.zip_longest(*lines, fillvalue='')):
-            row = self.make_row(row_items, indices)
+            row = self.make_row(row_items, widths, alignment, borders)
             if (i + 1 == n_lines) and underline:
                 row = _underline(row)
             yield row
 
-    def make_row(self, cells, indices=...):
+    def make_row(self, cells, widths, alignment, borders):
 
         # format cells
-        cells = list(map(self.format_cell, cells, self.col_widths[indices],
-                         self.align[indices], self.borders[indices]))
+        cells = list(map(self.format_cell, cells, widths, alignment, borders))
 
         # Apply properties to whitespace filled row headers
         if self.has_row_head:
@@ -1435,6 +1471,12 @@ class Table(LoggingMixin):
         row = ''.join(cells)
         self.rows.append(row)
         return row
+
+    def format_cell(self, text, width, align, border=_default_border, lhs=''):
+        # this is needed because the alignment formatting gets screwed up by the
+        # ANSI characters (which have length, but are not displayed)
+        pad_width = ansi.length_codes(text) + width
+        return self.cell_fmt.format(text, pad_width, align, border, lhs)
 
     def build_long_line(self, text, width, align='<', props=None):
         # table row line that spans `width` of table.  use to build title
@@ -1501,7 +1543,10 @@ class Table(LoggingMixin):
             # if self.handle_too_wide == 'split':
             if self.title:
                 self.title += '\n'  # to indicate continuation under title line
+
+            #
             split_tables = self.split()
+
             if self.show_colourbar:
                 split_tables[-1] = self.add_colourbar(split_tables[-1])
             table = '\n\n'.join(split_tables)
@@ -1543,16 +1588,15 @@ class Table(LoggingMixin):
             # make a table using selection of columns
             idx_show = np.r_[self._idx_shown[:self.n_head_col],
                              self._idx_shown[splix:endix]]
-            tbl = self._build(idx_show, bool(splix))
-            tblstr = '\n'.join(map(str, tbl))
-            split_tables.append(tblstr)
+
+            split_tables.append(
+                '\n'.join(map(str, self._build(idx_show, bool(splix))))
+            )
 
             if endix is None:
                 break
             splix = endix
         return split_tables
-
-    # def _build(self, c0=0, c1=None, continued=False):
 
     def _build(self, column_indices=None, continued=False):
         """
@@ -1579,8 +1623,9 @@ class Table(LoggingMixin):
         if column_indices is None:
             column_indices = self._idx_shown
 
-        part_table = self.pre_table[:, column_indices]
-        table_width = self.get_width(column_indices)
+        idx = column_indices
+        part_table = self.pre_table[:, idx]
+        table_width = self.get_width(idx)
         lcb = len(self._default_border)
 
         if self.frame:
@@ -1595,7 +1640,6 @@ class Table(LoggingMixin):
             title = self.make_title(table_width, continued)
             table.append(title)
 
-        # FIXME; case if title wider than table!
         # FIXME: problems with too-wide column
 
         # compacted columns
@@ -1604,16 +1648,17 @@ class Table(LoggingMixin):
             compact_rows = self.build_long_line(str(self._compact_table),
                                                 table_width,
                                                 props=['underline'])
+
             table.append(compact_rows)
 
         # column groups
         if self.col_groups is not None:
             line = self._default_border
-            lbl = self.col_groups[column_indices[0]]  # name of current group
+            lbl = self.col_groups[idx[0]]  # name of current group
             gw = 0  # width of current column group header
 
             # FIXME: this code below in `format cell??`
-            for i, j in enumerate(column_indices):
+            for i, j in enumerate(idx):
                 name = self.col_groups[j]
                 w = self.col_widths[j] + self.lcb[j]
                 if name == lbl:  # still within the same group
@@ -1629,36 +1674,34 @@ class Table(LoggingMixin):
             # last bit
             if gw:
                 line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
-                # line += '{: ^{:}s}{:}'.format(lbl, gw - 1, self.borders[j])
-
-            # table.append(_underline(self.borders[0] +
-            #                         ' ' * (table_width - lcb) +
-            #                         self.borders[-1]))
-
+            #
             table.append(_underline(line))
 
         # make rows
         start = -(self.has_col_head + self.has_units)
+
+        widths = self.col_widths[idx]
+        alignment = itt.chain(itt.repeat(self.col_head_align[idx], -start),
+                              itt.repeat(self.align[idx]))
+        borders = self.borders[idx]
+
         used = set()
         for i, row_cells in enumerate(part_table, start):
-            underline = (i in self.hlines)
-            row_props = self.highlight.get(i)
             insert = self.insert.get(i, None)
             if insert is not None:
                 table.extend(self.insert_lines(insert, table_width))
                 used.add(i)
 
-            for row in self.gen_multiline_rows(row_cells, column_indices,
-                                               underline):
-                # if i == 0 and self.has_col_head:
-                #     row = codes.apply(row, self.col_head_props)
-                # fixme: maybe don't apply to border symbols
+            row_props = self.highlight.get(i)
+            underline = (i in self.hlines)
+            for row in self.gen_multiline_rows(
+                    row_cells, widths, next(alignment), borders, underline):
                 table.append(codes.apply(row, row_props))
+                # fixme: maybe don't apply to border symbols
 
         # check if all insert lines have been consumed
         unused = set(self.insert.keys()) - used
         for i in unused:
-            # underline = (i in self.hlines)
             table.extend(self.insert_lines(self.insert[i], table_width))
 
         # finally add any footnotes present
@@ -1669,20 +1712,20 @@ class Table(LoggingMixin):
 
     def _get_compact_table(self, n_cols=None, justify=False):
 
-        if isinstance(self.compact, numbers.Integral) and n_cols is None:
+        if isinstance(self.compact, numbers.Integral) and (n_cols is None):
             n_cols = self.compact
 
+        # decide how many columns the inset table will have
         n_cols = int(n_cols)
         n_comp = len(self.compacted[0])
         table_width = self.get_width()  # excludes lhs border
         if n_cols is None:
-            # find optimal shape for table                  # +3 for ' = '
-            widths = np.vectorize(len)(self.compacted)
-            _2widths = widths.sum(0) + 3
+            # find optimal shape for table           # +3 for ' = '
+            _2widths = lengths(self.compacted).sum(0) + 3
             for n_cols in range(1, 5):
                 pad = (n_comp // n_cols + (n_comp % n_cols)) * n_cols - n_comp
-                ccw = np.hstack([_2widths, [0] * pad]).reshape(n_cols, -1).max(
-                        1)
+                ccw = np.hstack([_2widths, [0] * pad]
+                                ).reshape(n_cols, -1).max(1)
                 # +3 for column spacing
                 if sum(ccw + 3) > table_width:
                     if np.any(ccw == 0):
@@ -1709,8 +1752,7 @@ class Table(LoggingMixin):
         extra = sum(w - widths.reshape(2, -1).sum(0) - 3)  # '= ' borders
         if justify:
             widths[1::2] += apportion(extra, n_cols)
-        return Table(data, col_borders=col_borders, frame=False,
-                     width=widths)
+        return Table(data, col_borders=col_borders, frame=False, width=widths)
 
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes
@@ -1806,6 +1848,7 @@ class Table(LoggingMixin):
 
         # cbar = ''.join(map(as_ansi, self.states[start:], self.colours[start:]))
         return '\n'.join((table, cbar))
+
     #
     # def hstack(self, other):
     #     """plonk two tables together horizontally"""
@@ -1845,6 +1888,7 @@ class Table(LoggingMixin):
     #     #FIXME!
 
     # return table
+
 
 # if __name__ == '__main__':
 # do Tests
