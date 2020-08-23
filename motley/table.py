@@ -23,14 +23,245 @@ import numbers
 import functools as ftl
 from recipes import pprint
 from recipes.introspection.utils import get_module_name
+from recipes.decor import raises as bork
+from recipes.containers.dicts import KeywordResolver
 
 # from .utils import formatter
 
+# TODO: dynamical set attributes like title/headers/nrs/data/totals
 # TODO: unit tests!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # TODO: GIST
-# TODO: possibly integrate with astropy.table ...........................
 # TODO: HIGHLIGHT COLUMNS
 # TODO: OPTION for plain text row borders?
+
+# # #  TODO: generate style sheet like this
+# #
+#                 ⎡___ConstellationModel___⎤
+#                 ⎪x_⎪_y_⎪_σₓ__⎪_σᵥ__⎪__A__⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎣ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎦
+
+#
+#                 ┌   ConstellationModel    ┐
+#                 ⎪ x   y   σₓ    σᵥ    A   ⎪
+#                 ⎪ 5  10   1     1     1   ⎪
+#                 ⎪ 5   6   2     2     2   ⎪
+#                 └ 8   2   3     3     3   ┘
+
+# #               __________________________
+#                 ⎪___ConstellationModel___⎪
+#                 ⎪x_⎪_y_⎪_σₓ__⎪_σᵥ__⎪__A__⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
+#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+# #               __________________________
+#                 ⎪   ConstellationModel   ⎪
+#                 ⎪------------------------⎪
+#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
+#                 ⎪--⎪---⎪-----⎪-----⎪-----⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
+#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+#
+# #               __________________________
+#                 ⎪   ConstellationModel   ⎪
+#                 ⎪________________________⎪
+#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
+#                 ⎪__⎪___⎪_____⎪_____⎪_____⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
+#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+
+# #               __________________________
+#                 ⎪   ConstellationModel   ⎪
+#                 ⎪————————————————————————⎪
+#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
+#                 ⎪——⎪———⎪—————⎪—————⎪—————⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
+#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+
+# #               __________________________
+#                 ⎪   ConstellationModel   ⎪
+#                 ⎪------------------------⎪
+#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
+#                 ⎪——＋——＋————＋—————＋————⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
+#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
+# #               __________________________
+#                 ⎪   ConstellationModel   ⎪
+#                 ⎪————————————————————————⎪
+#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
+#                 ⎪——⎪———⎪—————⎪—————⎪—————⎪
+#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
+#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
+#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
+#                 ———﬩——﬩—————﬩—————﬩—————
+
+# U+2500 	─ 	e2 94 80 	BOX DRAWINGS LIGHT HO­RI­ZON­TAL 	FORMS LIGHT HORIZONTAL
+# U+2501 	━ 	e2 94 81 	BOX DRAWINGS HEAVY HO­RI­ZON­TAL 	FORMS HEAVY HORIZONTAL
+# U+2502 	│ 	e2 94 82 	BOX DRAWINGS LIGHT VER­TI­CAL 	FORMS LIGHT VERTICAL
+# U+2503 	┃ 	e2 94 83 	BOX DRAWINGS HEAVY VER­TI­CAL 	FORMS HEAVY VERTICAL
+# U+2504 	┄ 	e2 94 84 	BOX DRAWINGS LIGHT TRIPLE DASH HO­RI­ZON­TAL 	FORMS LIGHT TRIPLE DASH HORIZONTAL
+# U+2505 	┅ 	e2 94 85 	BOX DRAWINGS HEAVY TRIPLE DASH HO­RI­ZON­TAL 	FORMS HEAVY TRIPLE DASH HORIZONTAL
+# U+2506 	┆ 	e2 94 86 	BOX DRAWINGS LIGHT TRIPLE DASH VER­TI­CAL 	FORMS LIGHT TRIPLE DASH VERTICAL
+# U+2507 	┇ 	e2 94 87 	BOX DRAWINGS HEAVY TRIPLE DASH VER­TI­CAL 	FORMS HEAVY TRIPLE DASH VERTICAL
+# U+2508 	┈ 	e2 94 88 	BOX DRAWINGS LIGHT QUAD­RU­PLE DASH HO­RI­ZON­TAL 	FORMS LIGHT QUADRUPLE DASH HORIZONTAL
+# U+2509 	┉ 	e2 94 89 	BOX DRAWINGS HEAVY QUAD­RU­PLE DASH HO­RI­ZON­TAL 	FORMS HEAVY QUADRUPLE DASH HORIZONTAL
+# U+250A 	┊ 	e2 94 8a 	BOX DRAWINGS LIGHT QUAD­RU­PLE DASH VER­TI­CAL 	FORMS LIGHT QUADRUPLE DASH VERTICAL
+# U+250B 	┋ 	e2 94 8b 	BOX DRAWINGS HEAVY QUAD­RU­PLE DASH VER­TI­CAL 	FORMS HEAVY QUADRUPLE DASH VERTICAL
+# U+250C 	┌ 	e2 94 8c 	BOX DRAWINGS LIGHT DOWN AND RIGHT 	FORMS LIGHT DOWN AND RIGHT
+# U+250D 	┍ 	e2 94 8d 	BOX DRAWINGS DOWN LIGHT AND RIGHT HEAVY 	FORMS DOWN LIGHT AND RIGHT HEAVY
+# U+250E 	┎ 	e2 94 8e 	BOX DRAWINGS DOWN HEAVY AND RIGHT LIGHT 	FORMS DOWN HEAVY AND RIGHT LIGHT
+# U+250F 	┏ 	e2 94 8f 	BOX DRAWINGS HEAVY DOWN AND RIGHT 	FORMS HEAVY DOWN AND RIGHT
+# U+2510 	┐ 	e2 94 90 	BOX DRAWINGS LIGHT DOWN AND LEFT 	FORMS LIGHT DOWN AND LEFT
+# U+2511 	┑ 	e2 94 91 	BOX DRAWINGS DOWN LIGHT AND LEFT HEAVY 	FORMS DOWN LIGHT AND LEFT HEAVY
+# U+2512 	┒ 	e2 94 92 	BOX DRAWINGS DOWN HEAVY AND LEFT LIGHT 	FORMS DOWN HEAVY AND LEFT LIGHT
+# U+2513 	┓ 	e2 94 93 	BOX DRAWINGS HEAVY DOWN AND LEFT 	FORMS HEAVY DOWN AND LEFT
+# U+2514 	└ 	e2 94 94 	BOX DRAWINGS LIGHT UP AND RIGHT 	FORMS LIGHT UP AND RIGHT
+# U+2515 	┕ 	e2 94 95 	BOX DRAWINGS UP LIGHT AND RIGHT HEAVY 	FORMS UP LIGHT AND RIGHT HEAVY
+# U+2516 	┖ 	e2 94 96 	BOX DRAWINGS UP HEAVY AND RIGHT LIGHT 	FORMS UP HEAVY AND RIGHT LIGHT
+# U+2517 	┗ 	e2 94 97 	BOX DRAWINGS HEAVY UP AND RIGHT 	FORMS HEAVY UP AND RIGHT
+# U+2518 	┘ 	e2 94 98 	BOX DRAWINGS LIGHT UP AND LEFT 	FORMS LIGHT UP AND LEFT
+# U+2519 	┙ 	e2 94 99 	BOX DRAWINGS UP LIGHT AND LEFT HEAVY 	FORMS UP LIGHT AND LEFT HEAVY
+# U+251A 	┚ 	e2 94 9a 	BOX DRAWINGS UP HEAVY AND LEFT LIGHT 	FORMS UP HEAVY AND LEFT LIGHT
+# U+251B 	┛ 	e2 94 9b 	BOX DRAWINGS HEAVY UP AND LEFT 	FORMS HEAVY UP AND LEFT
+# U+251C 	├ 	e2 94 9c 	BOX DRAWINGS LIGHT VER­TI­CAL AND RIGHT 	FORMS LIGHT VERTICAL AND RIGHT
+# U+251D 	┝ 	e2 94 9d 	BOX DRAWINGS VER­TI­CAL LIGHT AND RIGHT HEAVY 	FORMS VERTICAL LIGHT AND RIGHT HEAVY
+# U+251E 	┞ 	e2 94 9e 	BOX DRAWINGS UP HEAVY AND RIGHT DOWN LIGHT 	FORMS UP HEAVY AND RIGHT DOWN LIGHT
+# U+251F 	┟ 	e2 94 9f 	BOX DRAWINGS DOWN HEAVY AND RIGHT UP LIGHT 	FORMS DOWN HEAVY AND RIGHT UP LIGHT
+# U+2520 	┠ 	e2 94 a0 	BOX DRAWINGS VER­TI­CAL HEAVY AND RIGHT LIGHT 	FORMS VERTICAL HEAVY AND RIGHT LIGHT
+# U+2521 	┡ 	e2 94 a1 	BOX DRAWINGS DOWN LIGHT AND RIGHT UP HEAVY 	FORMS DOWN LIGHT AND RIGHT UP HEAVY
+# U+2522 	┢ 	e2 94 a2 	BOX DRAWINGS UP LIGHT AND RIGHT DOWN HEAVY 	FORMS UP LIGHT AND RIGHT DOWN HEAVY
+# U+2523 	┣ 	e2 94 a3 	BOX DRAWINGS HEAVY VER­TI­CAL AND RIGHT 	FORMS HEAVY VERTICAL AND RIGHT
+# U+2524 	┤ 	e2 94 a4 	BOX DRAWINGS LIGHT VER­TI­CAL AND LEFT 	FORMS LIGHT VERTICAL AND LEFT
+# U+2525 	┥ 	e2 94 a5 	BOX DRAWINGS VER­TI­CAL LIGHT AND LEFT HEAVY 	FORMS VERTICAL LIGHT AND LEFT HEAVY
+# U+2526 	┦ 	e2 94 a6 	BOX DRAWINGS UP HEAVY AND LEFT DOWN LIGHT 	FORMS UP HEAVY AND LEFT DOWN LIGHT
+# U+2527 	┧ 	e2 94 a7 	BOX DRAWINGS DOWN HEAVY AND LEFT UP LIGHT 	FORMS DOWN HEAVY AND LEFT UP LIGHT
+# U+2528 	┨ 	e2 94 a8 	BOX DRAWINGS VER­TI­CAL HEAVY AND LEFT LIGHT 	FORMS VERTICAL HEAVY AND LEFT LIGHT
+# U+2529 	┩ 	e2 94 a9 	BOX DRAWINGS DOWN LIGHT AND LEFT UP HEAVY 	FORMS DOWN LIGHT AND LEFT UP HEAVY
+# U+252A 	┪ 	e2 94 aa 	BOX DRAWINGS UP LIGHT AND LEFT DOWN HEAVY 	FORMS UP LIGHT AND LEFT DOWN HEAVY
+# U+252B 	┫ 	e2 94 ab 	BOX DRAWINGS HEAVY VER­TI­CAL AND LEFT 	FORMS HEAVY VERTICAL AND LEFT
+# U+252C 	┬ 	e2 94 ac 	BOX DRAWINGS LIGHT DOWN AND HO­RI­ZON­TAL 	FORMS LIGHT DOWN AND HORIZONTAL
+# U+252D 	┭ 	e2 94 ad 	BOX DRAWINGS LEFT HEAVY AND RIGHT DOWN LIGHT 	FORMS LEFT HEAVY AND RIGHT DOWN LIGHT
+# U+252E 	┮ 	e2 94 ae 	BOX DRAWINGS RIGHT HEAVY AND LEFT DOWN LIGHT 	FORMS RIGHT HEAVY AND LEFT DOWN LIGHT
+# U+252F 	┯ 	e2 94 af 	BOX DRAWINGS DOWN LIGHT AND HO­RI­ZON­TAL HEAVY 	FORMS DOWN LIGHT AND HORIZONTAL HEAVY
+# U+2530 	┰ 	e2 94 b0 	BOX DRAWINGS DOWN HEAVY AND HO­RI­ZON­TAL LIGHT 	FORMS DOWN HEAVY AND HORIZONTAL LIGHT
+# U+2531 	┱ 	e2 94 b1 	BOX DRAWINGS RIGHT LIGHT AND LEFT DOWN HEAVY 	FORMS RIGHT LIGHT AND LEFT DOWN HEAVY
+# U+2532 	┲ 	e2 94 b2 	BOX DRAWINGS LEFT LIGHT AND RIGHT DOWN HEAVY 	FORMS LEFT LIGHT AND RIGHT DOWN HEAVY
+# U+2533 	┳ 	e2 94 b3 	BOX DRAWINGS HEAVY DOWN AND HO­RI­ZON­TAL 	FORMS HEAVY DOWN AND HORIZONTAL
+# U+2534 	┴ 	e2 94 b4 	BOX DRAWINGS LIGHT UP AND HO­RI­ZON­TAL 	FORMS LIGHT UP AND HORIZONTAL
+# U+2535 	┵ 	e2 94 b5 	BOX DRAWINGS LEFT HEAVY AND RIGHT UP LIGHT 	FORMS LEFT HEAVY AND RIGHT UP LIGHT
+# U+2536 	┶ 	e2 94 b6 	BOX DRAWINGS RIGHT HEAVY AND LEFT UP LIGHT 	FORMS RIGHT HEAVY AND LEFT UP LIGHT
+# U+2537 	┷ 	e2 94 b7 	BOX DRAWINGS UP LIGHT AND HO­RI­ZON­TAL HEAVY 	FORMS UP LIGHT AND HORIZONTAL HEAVY
+# U+2538 	┸ 	e2 94 b8 	BOX DRAWINGS UP HEAVY AND HO­RI­ZON­TAL LIGHT 	FORMS UP HEAVY AND HORIZONTAL LIGHT
+# U+2539 	┹ 	e2 94 b9 	BOX DRAWINGS RIGHT LIGHT AND LEFT UP HEAVY 	FORMS RIGHT LIGHT AND LEFT UP HEAVY
+# U+253A 	┺ 	e2 94 ba 	BOX DRAWINGS LEFT LIGHT AND RIGHT UP HEAVY 	FORMS LEFT LIGHT AND RIGHT UP HEAVY
+# U+253B 	┻ 	e2 94 bb 	BOX DRAWINGS HEAVY UP AND HO­RI­ZON­TAL 	FORMS HEAVY UP AND HORIZONTAL
+# U+253C 	┼ 	e2 94 bc 	BOX DRAWINGS LIGHT VER­TI­CAL AND HO­RI­ZON­TAL 	FORMS LIGHT VERTICAL AND HORIZONTAL
+# U+253D 	┽ 	e2 94 bd 	BOX DRAWINGS LEFT HEAVY AND RIGHT VER­TI­CAL LIGHT 	FORMS LEFT HEAVY AND RIGHT VERTICAL LIGHT
+# U+253E 	┾ 	e2 94 be 	BOX DRAWINGS RIGHT HEAVY AND LEFT VER­TI­CAL LIGHT 	FORMS RIGHT HEAVY AND LEFT VERTICAL LIGHT
+# U+253F 	┿ 	e2 94 bf 	BOX DRAWINGS VER­TI­CAL LIGHT AND HO­RI­ZON­TAL HEAVY 	FORMS VERTICAL LIGHT AND HORIZONTAL HEAVY
+# U+2540 	╀ 	e2 95 80 	BOX DRAWINGS UP HEAVY AND DOWN HO­RI­ZON­TAL LIGHT 	FORMS UP HEAVY AND DOWN HORIZONTAL LIGHT
+# U+2541 	╁ 	e2 95 81 	BOX DRAWINGS DOWN HEAVY AND UP HO­RI­ZON­TAL LIGHT 	FORMS DOWN HEAVY AND UP HORIZONTAL LIGHT
+# U+2542 	╂ 	e2 95 82 	BOX DRAWINGS VER­TI­CAL HEAVY AND HO­RI­ZON­TAL LIGHT 	FORMS VERTICAL HEAVY AND HORIZONTAL LIGHT
+# U+2543 	╃ 	e2 95 83 	BOX DRAWINGS LEFT UP HEAVY AND RIGHT DOWN LIGHT 	FORMS LEFT UP HEAVY AND RIGHT DOWN LIGHT
+# U+2544 	╄ 	e2 95 84 	BOX DRAWINGS RIGHT UP HEAVY AND LEFT DOWN LIGHT 	FORMS RIGHT UP HEAVY AND LEFT DOWN LIGHT
+# U+2545 	╅ 	e2 95 85 	BOX DRAWINGS LEFT DOWN HEAVY AND RIGHT UP LIGHT 	FORMS LEFT DOWN HEAVY AND RIGHT UP LIGHT
+# U+2546 	╆ 	e2 95 86 	BOX DRAWINGS RIGHT DOWN HEAVY AND LEFT UP LIGHT 	FORMS RIGHT DOWN HEAVY AND LEFT UP LIGHT
+# U+2547 	╇ 	e2 95 87 	BOX DRAWINGS DOWN LIGHT AND UP HO­RI­ZON­TAL HEAVY 	FORMS DOWN LIGHT AND UP HORIZONTAL HEAVY
+# U+2548 	╈ 	e2 95 88 	BOX DRAWINGS UP LIGHT AND DOWN HO­RI­ZON­TAL HEAVY 	FORMS UP LIGHT AND DOWN HORIZONTAL HEAVY
+# U+2549 	╉ 	e2 95 89 	BOX DRAWINGS RIGHT LIGHT AND LEFT VER­TI­CAL HEAVY 	FORMS RIGHT LIGHT AND LEFT VERTICAL HEAVY
+# U+254A 	╊ 	e2 95 8a 	BOX DRAWINGS LEFT LIGHT AND RIGHT VER­TI­CAL HEAVY 	FORMS LEFT LIGHT AND RIGHT VERTICAL HEAVY
+# U+254B 	╋ 	e2 95 8b 	BOX DRAWINGS HEAVY VER­TI­CAL AND HO­RI­ZON­TAL 	FORMS HEAVY VERTICAL AND HORIZONTAL
+# U+254C 	╌ 	e2 95 8c 	BOX DRAWINGS LIGHT DOUBLE DASH HO­RI­ZON­TAL 	FORMS LIGHT DOUBLE DASH HORIZONTAL
+# U+254D 	╍ 	e2 95 8d 	BOX DRAWINGS HEAVY DOUBLE DASH HO­RI­ZON­TAL 	FORMS HEAVY DOUBLE DASH HORIZONTAL
+# U+254E 	╎ 	e2 95 8e 	BOX DRAWINGS LIGHT DOUBLE DASH VER­TI­CAL 	FORMS LIGHT DOUBLE DASH VERTICAL
+# U+254F 	╏ 	e2 95 8f 	BOX DRAWINGS HEAVY DOUBLE DASH VER­TI­CAL 	FORMS HEAVY DOUBLE DASH VERTICAL
+# U+2550 	═ 	e2 95 90 	BOX DRAWINGS DOUBLE HO­RI­ZON­TAL 	FORMS DOUBLE HORIZONTAL
+# U+2551 	║ 	e2 95 91 	BOX DRAWINGS DOUBLE VER­TI­CAL 	FORMS DOUBLE VERTICAL
+# U+2552 	╒ 	e2 95 92 	BOX DRAWINGS DOWN SINGLE AND RIGHT DOUBLE 	FORMS DOWN SINGLE AND RIGHT DOUBLE
+# U+2553 	╓ 	e2 95 93 	BOX DRAWINGS DOWN DOUBLE AND RIGHT SINGLE 	FORMS DOWN DOUBLE AND RIGHT SINGLE
+# U+2554 	╔ 	e2 95 94 	BOX DRAWINGS DOUBLE DOWN AND RIGHT 	FORMS DOUBLE DOWN AND RIGHT
+# U+2555 	╕ 	e2 95 95 	BOX DRAWINGS DOWN SINGLE AND LEFT DOUBLE 	FORMS DOWN SINGLE AND LEFT DOUBLE
+# U+2556 	╖ 	e2 95 96 	BOX DRAWINGS DOWN DOUBLE AND LEFT SINGLE 	FORMS DOWN DOUBLE AND LEFT SINGLE
+# U+2557 	╗ 	e2 95 97 	BOX DRAWINGS DOUBLE DOWN AND LEFT 	FORMS DOUBLE DOWN AND LEFT
+# U+2558 	╘ 	e2 95 98 	BOX DRAWINGS UP SINGLE AND RIGHT DOUBLE 	FORMS UP SINGLE AND RIGHT DOUBLE
+# U+2559 	╙ 	e2 95 99 	BOX DRAWINGS UP DOUBLE AND RIGHT SINGLE 	FORMS UP DOUBLE AND RIGHT SINGLE
+# U+255A 	╚ 	e2 95 9a 	BOX DRAWINGS DOUBLE UP AND RIGHT 	FORMS DOUBLE UP AND RIGHT
+# U+255B 	╛ 	e2 95 9b 	BOX DRAWINGS UP SINGLE AND LEFT DOUBLE 	FORMS UP SINGLE AND LEFT DOUBLE
+# U+255C 	╜ 	e2 95 9c 	BOX DRAWINGS UP DOUBLE AND LEFT SINGLE 	FORMS UP DOUBLE AND LEFT SINGLE
+# U+255D 	╝ 	e2 95 9d 	BOX DRAWINGS DOUBLE UP AND LEFT 	FORMS DOUBLE UP AND LEFT
+# U+255E 	╞ 	e2 95 9e 	BOX DRAWINGS VER­TI­CAL SINGLE AND RIGHT DOUBLE 	FORMS VERTICAL SINGLE AND RIGHT DOUBLE
+# U+255F 	╟ 	e2 95 9f 	BOX DRAWINGS VER­TI­CAL DOUBLE AND RIGHT SINGLE 	FORMS VERTICAL DOUBLE AND RIGHT SINGLE
+# U+2560 	╠ 	e2 95 a0 	BOX DRAWINGS DOUBLE VER­TI­CAL AND RIGHT 	FORMS DOUBLE VERTICAL AND RIGHT
+# U+2561 	╡ 	e2 95 a1 	BOX DRAWINGS VER­TI­CAL SINGLE AND LEFT DOUBLE 	FORMS VERTICAL SINGLE AND LEFT DOUBLE
+# U+2562 	╢ 	e2 95 a2 	BOX DRAWINGS VER­TI­CAL DOUBLE AND LEFT SINGLE 	FORMS VERTICAL DOUBLE AND LEFT SINGLE
+# U+2563 	╣ 	e2 95 a3 	BOX DRAWINGS DOUBLE VER­TI­CAL AND LEFT 	FORMS DOUBLE VERTICAL AND LEFT
+# U+2564 	╤ 	e2 95 a4 	BOX DRAWINGS DOWN SINGLE AND HO­RI­ZON­TAL DOUBLE 	FORMS DOWN SINGLE AND HORIZONTAL DOUBLE
+# U+2565 	╥ 	e2 95 a5 	BOX DRAWINGS DOWN DOUBLE AND HO­RI­ZON­TAL SINGLE 	FORMS DOWN DOUBLE AND HORIZONTAL SINGLE
+# U+2566 	╦ 	e2 95 a6 	BOX DRAWINGS DOUBLE DOWN AND HO­RI­ZON­TAL 	FORMS DOUBLE DOWN AND HORIZONTAL
+# U+2567 	╧ 	e2 95 a7 	BOX DRAWINGS UP SINGLE AND HO­RI­ZON­TAL DOUBLE 	FORMS UP SINGLE AND HORIZONTAL DOUBLE
+# U+2568 	╨ 	e2 95 a8 	BOX DRAWINGS UP DOUBLE AND HO­RI­ZON­TAL SINGLE 	FORMS UP DOUBLE AND HORIZONTAL SINGLE
+# U+2569 	╩ 	e2 95 a9 	BOX DRAWINGS DOUBLE UP AND HO­RI­ZON­TAL 	FORMS DOUBLE UP AND HORIZONTAL
+# U+256A 	╪ 	e2 95 aa 	BOX DRAWINGS VER­TI­CAL SINGLE AND HO­RI­ZON­TAL DOUBLE 	FORMS VERTICAL SINGLE AND HORIZONTAL DOUBLE
+# U+256B 	╫ 	e2 95 ab 	BOX DRAWINGS VER­TI­CAL DOUBLE AND HO­RI­ZON­TAL SINGLE 	FORMS VERTICAL DOUBLE AND HORIZONTAL SINGLE
+# U+256C 	╬ 	e2 95 ac 	BOX DRAWINGS DOUBLE VER­TI­CAL AND HO­RI­ZON­TAL 	FORMS DOUBLE VERTICAL AND HORIZONTAL
+# U+256D 	╭ 	e2 95 ad 	BOX DRAWINGS LIGHT ARC DOWN AND RIGHT 	FORMS LIGHT ARC DOWN AND RIGHT
+# U+256E 	╮ 	e2 95 ae 	BOX DRAWINGS LIGHT ARC DOWN AND LEFT 	FORMS LIGHT ARC DOWN AND LEFT
+# U+256F 	╯ 	e2 95 af 	BOX DRAWINGS LIGHT ARC UP AND LEFT 	FORMS LIGHT ARC UP AND LEFT
+# U+2570 	╰ 	e2 95 b0 	BOX DRAWINGS LIGHT ARC UP AND RIGHT 	FORMS LIGHT ARC UP AND RIGHT
+
+# U+23A1 	⎡ 	LEFT SQUARE BRACKET UPPER CORNER
+# U+23A3 	⎣  	LEFT SQUARE BRACKET LOWER CORNER
+# U+23A4 	⎤  	RIGHT SQUARE BRACKET UPPER CORNER
+# U+23A6 	⎦ 	RIGHT SQUARE BRACKET LOWER CORNER
+
+# U+230A 	⌊ 	e2 8c 8a 	LEFT FLOOR
+# U+230B 	⌋ 	e2 8c 8b 	RIGHT FLOOR
+# U+2308 	⌈ 	e2 8c 88 	LEFT CEILING
+# U+2309 	⌉ 	e2 8c 89 	RIGHT CEILING
+
+# U+300C 	「 	LEFT CORNER BRACKET 	OPENING CORNER BRACKET
+# U+300D 	」  RIGHT CORNER BRACKET 	CLOSING CORNER BRACKET
+# U+300E 	『 	e3 80 8e 	LEFT WHITE CORNER BRACKET
+# U+300F 	』 	e3 80 8f 	RIGHT WHITE CORNER BRACKET
+# U+FE41 	﹁ 	ef b9 81 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL LEFT CORNER BRACKET 	GLYPH FOR VERTICAL OPENING CORNER BRACKET
+# U+FE42 	﹂ 	ef b9 82 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL RIGHT CORNER BRACKET 	GLYPH FOR VERTICAL CLOSING CORNER BRACKET
+# U+FE43 	﹃ 	ef b9 83 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL LEFT WHITE CORNER BRACKET 	GLYPH FOR VERTICAL OPENING WHITE CORNER BRACKET
+# U+FE44 	﹄ 	ef b9 84 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL RIGHT WHITE CORNER BRACKET
+# U+A71A 	ꜚ 	ea 9c 9a 	MO­DI­FI­ER LET­TER LOWER RIGHT CORNER ANGLE
+
+
+# U+23AB 	⎫ 	e2 8e ab 	RIGHT CURLY BRACKET UPPER HOOK
+# U+23AD 	⎭ 	e2 8e ad 	RIGHT CURLY BRACKET LOWER HOOK
+# U+23A7 	⎧ 	e2 8e a7 	LEFT CURLY BRACKET UPPER HOOK
+# U+23A9 	⎩ 	e2 8e a9 	LEFT CURLY BRACKET LOWER HOOK
+
+# U+23A2 	⎢ 	e2 8e a2 	LEFT SQUARE BRACKET EXTENSION
+# U+23A5 	⎥ 	e2 8e a5 	RIGHT SQUARE BRACKET EXTENSION
+# U+FF5C 	｜ 	ef bd 9c 	FULLWIDTH VER­TI­CAL LINE 	FULLWIDTH VERTICAL BAR
+# U+007C 	| 	7c 	VER­TI­CAL LINE 	VERTICAL BAR
+# U+00A6 	¦ 	c2 a6 	BROKEN BAR
+
+# U+22A4 	⊤ 	e2 8a a4 	DOWN TACK
+# U+22A5 	⊥ 	e2 8a a5 	UP TACK
+# U+27D8 	⟘ 	e2 9f 98 	LARGE UP TACK
+# U+27D9 	⟙ 	e2 9f 99 	LARGE DOWN TACK
+
+# LIGTH GREEK CROSS "\U0001F7A2"  # font support uncommon ??
+# THIN GREEK CROSS "\U0001F7A1"
+# FULLWIDTH PLUS SIGN ＋
+
+# TODO: check out wcwidth lib
+
 
 # FIXME: alignment not nice when mixed negative positive....
 #  or mixed float decimal (minimalist)
@@ -51,9 +282,14 @@ from recipes.introspection.utils import get_module_name
 logger = logging.getLogger(get_module_name(__file__))
 
 # defaults as module constants
-TRUNC_CHR = '…'  # single character ellipsis u"\u2026" to indicate truncation
+TRUNC = '…'  # single character ellipsis u"\u2026" to indicate truncation
 BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
+OVERLINE = '‾'  # U+203E
+# EMDASH = '—' U+2014
 HEADER_ALIGN = '^'
+MAX_WIDTH = None  # TODO
+MAX_LINES = None  # TODO
+
 
 # defines vectorized length
 lengths = np.vectorize(len, [int])
@@ -192,26 +428,23 @@ def resolve_input(obj,
         #
         obj = dict(enumerate(obj))
 
-    if raises:
-        def action(msg):
-            raise ValueError(msg)
-    else:
-        action = logger.warning
+    # set action raise / warn
+    emit = bork(ValueError) if raises else logger.warning
 
     keys = list(obj.keys())
     if (str in set(map(type, keys))) and col_headers is None:
         # only really a problem if formatter is not None
-        action('Could not assign %r due to missing `column_headers`' % what)
+        emit(f'Could not assign {what} due to missing `column_headers`')
 
     # convert all keys in format dict to int
     if col_headers is not None:
         col_headers = list(col_headers)
-        for key, val in obj.items():
+        for key, val in obj.copy().items():
+            # copy to prevent RuntimeError dictionary changed size during iteration
             if isinstance(key, str):
                 if key not in col_headers:
-                    action(
-                        'Could not assign %s. Key %r not in `column_headers`' %
-                        (what, key))
+                    emit(f'Could not assign {what}. Key {key!r} not in '
+                         '`column_headers`')
                     continue
                 #
                 new_key = col_headers.index(key)
@@ -219,7 +452,7 @@ def resolve_input(obj,
                 obj[new_key] = obj.pop(key)
 
             elif not isinstance(key, numbers.Integral):
-                action('Key %r invalid type for mapping to column' % key)
+                emit('Key %r invalid type for mapping to column' % key)
 
     # convert values
     if converter:
@@ -344,117 +577,19 @@ def highlight(array, condition, props, formatter=pprint.numeric, **kws):
 
 
 def truncate(item, width):
-    # TODO: if TRUNC_CHR more than 1 chr long
+    # TODO: if TRUNC more than 1 chr long
     cw = 0  # cumulative width
     s = ''
     for parts in ansi.parse(str(item), named=True):
         cw += len(parts.s)
         if cw > width:
-            s += ''.join(parts[:3] + (parts.s[:width - 1], TRUNC_CHR) +
+            s += ''.join(parts[:3] +
+                         (parts.s[:width - 1], TRUNC) +
                          parts[-1:])
             break
         else:
             s += ''.join(parts)
     return s
-
-
-# TODO: check out wcwidth lib
-
-
-class TerseKws(object):
-    """
-
-    """
-
-    def __init__(self, pattern, answer=None):
-        """
-
-        Parameters
-        ----------
-        pattern
-        answer
-        """
-        regex = ''
-        self.answer = ''
-        self.pattern = pattern
-        sub = pattern
-        while 1:
-            s, (i0, i1) = match_brackets(sub, '[]', return_index=True)
-            # print(s, i0, i1)
-            if s is None:
-                regex += sub
-                break
-
-            regex += f'{sub[:i0]}[{s}]{{0,{len(s)}}}'
-            self.answer += sub[:i0]
-            sub = sub[i1 + 1:]
-
-            # print(sub, regex)
-            # i += 1
-        self.regex = re.compile(regex)
-
-        if answer:
-            self.answer = str(answer)
-
-    def __call__(self, s):
-        if self.regex.fullmatch(s):
-            return self.answer
-
-    def __repr__(self):
-        return f'{self.pattern} --> {self.answer}'
-
-
-class KeywordResolver(object):
-    """Helper class for resolving terse keywords"""
-
-    def __init__(self, mappings):
-        self.mappings = []
-        for k, v in mappings.items():
-            self.mappings.append(TerseKws(k, v))
-
-    def __repr__(self):
-        return repr(self.mappings)
-
-    def resolve(self, func, kws, namespace=None):
-        """
-        map terse keywords in `kws` to their full form. 
-        If given, values from the `namespace` dict replace those in kws
-        if their corresponging keywords are valid parameter names for `func` 
-        and they are non-default values
-        """
-        # get arg names and defaults
-        code = func.__code__
-        defaults = func.__defaults__
-        arg_names = code.co_varnames[1:code.co_argcount]
-
-        # load the defaults / passed args
-        n_req_args = len(arg_names) - len(defaults)
-        # opt_arg_names = arg_names[n_req_args:]
-
-        args_dict = {}
-        # now get non-default arguments (those passed by user)
-        if namespace is not None:
-            for i, o in enumerate(arg_names[n_req_args:]):
-                v = namespace[o]
-                if v is not defaults[i]:
-                    args_dict[o] = v
-
-        # resolve terse kws and add to dict
-        for k, v in kws.items():
-            if k not in arg_names:
-                for m in self.mappings:
-                    if m(k) in arg_names:
-                        args_dict[m(k)] = v
-                        break
-                else:
-                    # get name
-                    name = func.__name__
-                    if isinstance(func, types.MethodType):
-                        name = f'{func.__self__.__class__.__name__}.{name}'
-                    raise KeyError(
-                        f'{k!r} is not a valid keyword for {name!r}')
-
-        return args_dict
 
 
 class Table(LoggingMixin):
@@ -475,9 +610,11 @@ class Table(LoggingMixin):
         '[column_]width[s]': '',
         'c[olumn_]groups': 'col_groups',
         '[row_]nrs': 'row_nrs',
+        'n[umbe]r_rows': 'row_nrs',
         'total[s]': 'totals'
     }
-    for rc, p in {'row': 'r[ow_]', 'col': 'c[olumn_]'}.items():
+    for rc, p in {'row': 'r[ow_]',
+                  'col': 'c[olumn_]'}.items():
         _mappings.update({
             f'{p}head[ers]': f'{rc}_headers',
             f'{p}head[er]_prop[erties]': f'{rc}_head_props',
@@ -589,8 +726,8 @@ class Table(LoggingMixin):
             The table title
         title_props : str, tuple, dict
             ANSICodes property descriptors
-        align, title_align : {'left', 'right', 'center', '<', '>', '^', None}
-            column / title alignment
+        align, title_align, col_head_align: {'left', 'right', 'center', '<', '>', '^', None}
+            The column / column header / title alignment
             if None (default)- right align for numerical type data, left align
             for everything else
 
@@ -600,8 +737,6 @@ class Table(LoggingMixin):
             Column header properties.  If `row_nrs` is True,
             the row_head_props will be applied to the number column as well
             TODO: OR a sequence of these, one for each column
-        TODO: column head align
-
 
         col_borders : str,
             TODO: dict: {0j: '|', 3: '!', 6: '…'}
@@ -737,6 +872,7 @@ class Table(LoggingMixin):
 
         # resolve kws
         if kws:
+            # TODO: as a decorator!!
             # remap terse keywords
             kws_ = self._kw_map.resolve(self.__init__, kws, locals())
             # `kws_` now has all the allowed parameters for this function as
@@ -860,10 +996,19 @@ class Table(LoggingMixin):
         # FIXME: too wide col_groups should truncate
 
         # compactify
-        self.compact = compact
-        self.compacted = []
+        if not isinstance(compact, numbers.Integral):
+            raise ValueError('`compact` must be bool or int')
+
+        self.compact = (False, compact)[self.compactable()]
+        self.compact_items = {}
         self._idx_shown = np.arange(self.shape[1])
         if compact:
+            if not self.has_col_head:
+                self.logger.warning(
+                    'Requested `compact` representation, but no column headers '
+                    'provided. Ignoring.'
+                )
+            #
             self.compactify()
             # requested_width = requested_width[shown]
             # borders = borders[shown]
@@ -876,7 +1021,7 @@ class Table(LoggingMixin):
 
         # next block needs to happen after `self.col_widths` assigned
         self._compact_table = None
-        has_compact = compact and np.size(self.compacted)
+        has_compact = compact and self.compact_items
         if has_compact:
             # this is an instance of `Table`!!
             self._compact_table = self._get_compact_table()
@@ -891,7 +1036,10 @@ class Table(LoggingMixin):
 
             # use explicit split('\n') below instead of splitlines since the
             # former yields a non-empty sequence for title=''
-            tw = max(lengths(self.title.split('\n')).max(), tw)
+            tw = 0
+            if self.has_title:
+                tw = max(lengths(self.title.split('\n')).max(), tw)
+
             w = self.get_width() - 1  # -1 to exclude lhs / rhs borders
             cw = self.col_widths[self._idx_shown]
             if tw > w:
@@ -903,6 +1051,8 @@ class Table(LoggingMixin):
 
         if width is not None:
             requested_widths = self.resolve_widths(width)
+            if np.any(requested_widths <= 0):
+                raise ValueError('Column widths must be positive.')
             # if requested widths are smaller than that required to fully
             # display widest item in the column, truncate all too-wide items
             # in that column
@@ -1041,7 +1191,7 @@ class Table(LoggingMixin):
         n = (self.title.count('\n') + 1) if self.has_title else 0
         m = 0
         if self.compact:
-            m = len(self.compacted[0]) if len(self.compacted) else 0
+            m = len(self.compact_items)
             m //= int(self.compact)
         return n + m + self.n_head_rows + self.frame
 
@@ -1125,8 +1275,7 @@ class Table(LoggingMixin):
         flags = flags or {}
 
         # format custom columns
-        for i, fmt in formatters.items(
-        ):  # Todo: formatting for row_headers...
+        for i, fmt in formatters.items():  # Todo: formatting for row_headers...
             if fmt is None:
                 # null format means convert to str, need everything in array
                 # to be str to prevent errors downstream
@@ -1221,6 +1370,10 @@ class Table(LoggingMixin):
         idx_same = np.setdiff1d(idx_same, idx_ign)
         return idx_same
 
+    def compactable(self):
+        """Check if table allows compact representation"""
+        return (len(self.data) > 1) and self.has_col_head
+
     def compactify(self, ignore=()):
         """
         check which columns contain single unique value duplicated. These data
@@ -1240,12 +1393,7 @@ class Table(LoggingMixin):
         # columns for which all data identical
         # end = -1 if self.has_totals else None
         data = self.data
-        if len(data) <= 1:
-            return ...
-
-        if not self.has_col_head:
-            self.logger.warning('Requested `compact` representation, but no '
-                                'column headers provided. Ignoring.')
+        if (len(data) <= 1) or not self.has_col_head:
             return ...
 
         nhc = self.n_head_col
@@ -1260,7 +1408,7 @@ class Table(LoggingMixin):
             totals = self.pre_table[-1]
 
         idx_squash = np.setdiff1d(idx_same, np.nonzero(totals)[0])
-        val_squash = self.pre_table[self.n_head_rows - 1, idx_squash]
+        val_squash = self.pre_table[self.n_head_rows, idx_squash]
         idx_show = np.setdiff1d(range(self.shape[1]), idx_squash)
         # check if any data left to display
         if idx_show.size == 0:
@@ -1270,7 +1418,8 @@ class Table(LoggingMixin):
         # remove columns
         # self.col_data_types = np.take(self.col_data_types, idx_show[nhc:] - nhc)
         self._idx_shown = idx_show
-        self.compacted = [np.take(self.col_headers, idx_squash), val_squash]
+        self.compact_items = dict(zip(np.take(self.col_headers, idx_squash),
+                                      val_squash))
 
         # self.pre_table = self.pre_table[:, idx_show]
         # self.col_widths = self.col_widths[idx_show]
@@ -1643,7 +1792,7 @@ class Table(LoggingMixin):
         # FIXME: problems with too-wide column
 
         # compacted columns
-        if np.size(self.compacted):
+        if self.compact_items:
             # display compacted columns in single row
             compact_rows = self.build_long_line(str(self._compact_table),
                                                 table_width,
@@ -1710,48 +1859,68 @@ class Table(LoggingMixin):
 
         return table
 
-    def _get_compact_table(self, n_cols=None, justify=False):
+    def _get_compact_table(self, n_cols=None, justify=True):
 
-        if isinstance(self.compact, numbers.Integral) and (n_cols is None):
+        compact_items = list(self.compact_items.items())
+        n_comp = len(self.compact_items)  # number of compacted columns
+        table_width = self.get_width()  # excludes lhs border
+
+        if (n_cols is None) and (self.compact is not True):
             n_cols = self.compact
 
-        # decide how many columns the inset table will have
-        n_cols = int(n_cols)
-        n_comp = len(self.compacted[0])
-        table_width = self.get_width()  # excludes lhs border
-        if n_cols is None:
-            # find optimal shape for table           # +3 for ' = '
-            _2widths = lengths(self.compacted).sum(0) + 3
-            for n_cols in range(1, 5):
-                pad = (n_comp // n_cols + (n_comp % n_cols)) * n_cols - n_comp
+        auto_ncols = (
+            # number of compact columns unspecified
+            ((n_cols is None) & (self.compact is True)) |
+            # user specified too many compact columns
+            ((n_cols is not None) and (n_cols > n_comp))
+        )
+
+        if auto_ncols:
+            # decide how many columns the inset table will have
+            # n_cols chosen to be as large as possible given table width
+            # this leads to most compact repr       # + 3 for ' = '
+            _2widths = lengths(compact_items).sum(1) + 3
+            # this is the width of the compacted columns
+            extra = len(self._default_border) + self.cell_white
+            trials = list(range(2, round(n_comp / 2) + 1)) + [n_comp]
+            for i, n_cols in enumerate(trials):
+                nc, lo = divmod(n_comp, n_cols)
+                pad = (nc + bool(lo)) * n_cols - n_comp
                 ccw = np.hstack([_2widths, [0] * pad]
                                 ).reshape(n_cols, -1).max(1)
-                # +3 for column spacing
-                if sum(ccw + 3) > table_width:
+
+                # + extra for column border + cell_white
+                if sum(ccw + extra) > table_width:
                     if np.any(ccw == 0):
                         continue
-                    n_cols -= 1
+                    n_cols = trials[i - 1]
                     break
 
         # n items per column
-        n_pc = (n_comp // n_cols) + (n_comp % n_cols)
+        self.compact = n_cols = int(n_cols)
+        n_pc = (n_comp // n_cols) + bool(n_comp % n_cols)
         pad = n_pc * n_cols - n_comp
-        data = np.hstack([self.compacted, [[''] * pad] * 2])
-        data = np.hstack(data.T.reshape(n_cols, n_pc, 2))
+        compact_items.extend([('', '')] * pad)
+        data = np.hstack(np.reshape(compact_items, (n_cols, n_pc, 2)))
         data = np.atleast_2d(data.squeeze())
 
         # todo row_head_props=self.col_head_props,
         # self._default_border #  u"\u22EE" VERTICAL ELLIPSIS
-        col_borders = ['= ', self._default_border + ' '] * n_cols
+        col_borders = ['= ', self._default_border] * n_cols
         col_borders[-1] = ''
 
+        # widths of actual columns
+        widths = lengths(data).max(0)
+        widths[0::2] += 1           # +1 for column borders
+
         # justified spacing
-        w = apportion(table_width, n_cols)
-        widths = np.vectorize(len)(data).max(0)
-        widths[0::2] += 1
-        extra = sum(w - widths.reshape(2, -1).sum(0) - 3)  # '= ' borders
         if justify:
-            widths[1::2] += apportion(extra, n_cols)
+            _2w = widths.reshape(-1, 2).sum(1) + 3
+            widths[1::2] += (apportion(table_width, n_cols) - _2w)
+
+            if np.any(widths <= 0):
+                raise Exception('NEGATIVE WIDTHS FIXME!!!')
+
         return Table(data, col_borders=col_borders, frame=False, width=widths)
 
     # def expand_dtype(self, data):
@@ -1896,3 +2065,130 @@ class Table(LoggingMixin):
 # http://misc.flogisoft.com/bash/tip_colors_and_formatting
 # http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
 # https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
+
+
+class AttrTable:
+    """
+    """
+
+    def _get_input(self, obj):
+        if obj is None:
+            return dict()
+
+        if isinstance(obj, dict):
+            return obj
+
+        return dict(zip(self.attrs, obj))
+        # TODO : ordered dict better
+
+    def __init__(self, attrs, column_headers=None, formatters=None, **kws):
+
+        # set default options for table
+        self.kws = {**dict(row_nrs=0,
+                           precision=5,
+                           minimalist=True,
+                           compact=True),
+                    **kws}
+
+        self.attrs = list(attrs)
+        self.formatters = self._get_input(formatters)
+        self.headers = self._get_input(column_headers)
+        self.headers = dict(zip(attrs, self.get_headers(attrs)))
+
+    def __call__(self, container, attrs=None, **kws):
+        """
+        Print the table of attributes for this container as a table.
+
+        Parameters
+        ----------
+        attrs: array_like, optional
+            Attributes of the instance that will be printed in the table.
+            defaults to the list given upon initialization of the class.
+        **kws:
+            Keyword arguments passed directly to the `motley.table.Table`
+            constructor.
+
+        Returns
+        -------
+
+
+        """
+        if not hasattr(container, 'attrs'):
+            raise TypeError('Container does not support vectorized attribute '
+                            'lookup on items.')
+
+        table = self.get_table(container, attrs, **kws)
+        print(table)
+        return table
+
+    def get_table(self, container, attrs=None, **kws):
+        """
+        Keyword arguments passed directly to the `motley.table.Table`
+            constructor.
+
+        Returns
+        -------
+        `motley.table.Table` instance
+        """
+
+        from motley.table import Table
+
+        if len(container) == 0:
+            return Table(['Empty'])
+
+        if attrs is None:
+            attrs = self.attrs
+
+        return Table(container.attrs(*attrs),
+                     **{**self.kws,
+                        **{**dict(title=container.__class__.__name__,
+                                  col_headers=self.get_headers(attrs),
+                                  formatters=self.get_formatters(attrs),
+                                  col_groups=self.get_col_groups(attrs)),
+                           **kws},
+                        })
+
+    def get_headers(self, attrs):
+        heads = []
+        for a in attrs:
+            heads.append(self.headers.get(a, a.split('.')[-1]))
+        return heads
+
+    def get_col_groups(self, attrs):
+        groups = []
+        for a in attrs:
+            parts = a.split('.')
+            groups.append(parts[0] if len(parts) > 1 else '')
+        return groups
+
+    def get_formatters(self, attrs):
+        return [self.formatters.get(a, str) for a in attrs]
+        # fmt = []
+        # for a in attrs:
+        #     # will auto format if no formatter
+        #     if a in self.formatters:
+        #         fmt[self.headers.get(a, a)] = self.formatters[a]
+        #
+        # return fmt
+
+    def add_attr(self, attr, column_header=None, formatter=None):
+
+        if not isinstance(attr, str):
+            raise ValueError('Attribute must be a str')
+
+        # block below will bork with empty containers
+        # obj = self.parent[0]
+        # if not hasattr(obj, attr):
+        #     raise ValueError('%r is not a valid attribute of object of '
+        #                      'type %r' % (attr, obj.__class__.__name__))
+
+        # avoid duplication
+        if attr not in self.attrs:
+            self.attrs.append(attr)
+
+        if column_header is None:
+            column_header = attr  # FIXME split here
+
+        self.headers[attr] = column_header
+        if formatter is not None:
+            self.formatters[column_header] = formatter
