@@ -18,6 +18,7 @@ ALIGNMENT_MAP = {'r': '>',
                  'c': '^'}
 
 
+
 def get_alignment(align):
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
     if align not in '<^>':
@@ -77,34 +78,46 @@ def hstack(tables, spacing=0, offset=()):
     return '\n'.join(map(''.join, zip(*lines_list)))
 
 
-def vstack(tables, strip_heads=True):
+def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
     """
-
+    Vertically stack tables while aligning column widths
+    
     Parameters
     ----------
-    tables
-    strip_heads: bool
-        If True, all but the first table will have title, column group
-        headings and column headings stripped.
+    tables: list of motley.table.Table
+        Tables to stack
+    strip_titles: bool
+        Strip titles from all but the first table in the sequence
+    strip_headers: bool
+        Strip column group headings and column headings from all but the first
+        table in the sequence
 
     Returns
     -------
-
+    str
     """
     # check that all tables have same number of columns
-    assert len(set(tbl.shape[1] for tbl in tables)) == 1
+    ncols = [tbl.shape[1] for tbl in tables]
+    if len(set(ncols)) != 1:
+        raise ValueError(f'Cannot stack tables with unequal number of columns: {ncols}')
 
     w = np.max([tbl.col_widths for tbl in tables], 0)
+    vspace = '\n' * (spacing + 1)
     s = ''
+    nnl = 0
     for i, tbl in enumerate(tables):
         tbl.col_widths = w  # set all column widths equal
-        r = str(tbl)
-        nnl = tbl.frame
-        if strip_heads:
-            nnl += (tbl.n_head_rows + tbl.has_title)
-        if i:
-            *_, r = r.split('\n', nnl)
-        s += ('\n' + r)
+        if i and strip_headers:
+            nnl = (tbl.frame + tbl.has_title + tbl.n_head_rows)
+        *head, r = str(tbl).split('\n', nnl)
+        keep = []
+        if head:
+            if not strip_titles:
+                keep += head[tbl.frame:(-tbl.n_head_rows or None)]
+            if not strip_headers:
+                keep += head[(tbl.frame + tbl.has_title):]
+            
+        s += '\n'.join((vspace, *keep, r))
 
     return s.lstrip('\n')
 
@@ -146,7 +159,7 @@ def overlay(text, background='', align='^', width=None):
     align = get_alignment(align)
     if ansi.has_ansi(background):
         raise NotImplementedError(
-                '# fixme: will not work if background has coded strings')
+            '# fixme: will not work if background has coded strings')
 
     if align == '<':  # left aligned
         overlaid = text + background[ansi.length_seen(text):]
@@ -229,21 +242,18 @@ def rainbow(words, effects=(), **kws):
     return out
 
 
-from recipes import pprint
-
-
 # def _echo(_):
 #     return _
 #
 #  NOTE: single dispatch not a good option here due to formatting subtleties
 #   might be useful at some point tho...
 # @ftl.singledispatch
-# def formatter(obj, precision=None, compact=False, **kws):
+# def formatter(obj, precision=None, short=False, **kws):
 #     """default multiple dispatch func for formatting"""
 #     if hasattr(obj, 'pprint'):
 #         return obj.pprint()
 #     return pprint.PrettyPrinter(precision=precision,
-#                                 minimalist=compact,
+#                                 minimalist=short,
 #                                 **kws).pformat
 #
 #
@@ -256,31 +266,31 @@ from recipes import pprint
 # # numbers.Integral
 # @formatter.register(int)
 # @formatter.register(np.int_)
-# def _(obj, precision=0, compact=True, **kws):
+# def _(obj, precision=0, short=True, **kws):
 #     # FIXME: this code path is sub optimal for ints
 #     # if any(precision, right_pad, left_pad):
 #     return ftl.partial(pprint.decimal,
 #                        precision=precision,
-#                        compact=compact,
+#                        short=short,
 #                        **kws)
 #
 #
 # # numbers.Real
 # @formatter.register(float)
 # @formatter.register(np.float_)
-# def _(obj, precision=None, compact=False, **kws):
+# def _(obj, precision=None, short=False, **kws):
 #     return ftl.partial(pprint.decimal,
 #                        precision=precision,
-#                        compact=compact,
+#                        short=short,
 #                        **kws)
-
-
-def format(obj, precision=None, minimalist=False, align='<', **kws):
-    """
-    Dispatch formatter based on type of object and then format to str by
-    calling  formatter on object.
-    """
-    return formatter(obj, precision, minimalist, align, **kws)(obj)
+#
+#
+# def format(obj, precision=None, minimalist=False, align='<', **kws):
+#     """
+#     Dispatch formatter based on type of object and then format to str by
+#     calling  formatter on object.
+#     """
+#     return formatter(obj, precision, minimalist, align, **kws)(obj)
 
 
 class ConditionalFormatter(object):
