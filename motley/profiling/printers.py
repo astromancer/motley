@@ -17,7 +17,7 @@ import more_itertools as mit
 
 # local libs
 from recipes.iter import where_true, where_false
-from recipes.introspection import get_class_that_defined_method
+from recipes.introspect import get_class_that_defined_method
 from recipes import pprint
 
 # relative
@@ -127,7 +127,7 @@ def _ast_func_index(source):
         head = '\n'.join(sourceLines[line_nr_def:line_nr_body + 1])
         # escape regex characters in docstring
         matcher = re.compile(
-                '[^"\']*?(["\']{1,3})(%s)(\\1)' % re.escape(doc_raw))
+            '[^"\']*?(["\']{1,3})(%s)(\\1)' % re.escape(doc_raw))
         for m in matcher.finditer(head):
             pass  # go to last match
 
@@ -236,11 +236,11 @@ class ReportStats(object):
         """print preamble"""
         stream = stream or sys.stdout
         stream.write(textwrap.dedent(
-                """
+            """
                 File: %s
                 Function: %s at line %s
                 Total time: %g s""".lstrip('\n')
-                % (filename, func_name, start_line_nr, total_time)))
+            % (filename, func_name, start_line_nr, total_time)))
 
     def header(self, stream=None):
         """print header"""
@@ -257,7 +257,7 @@ class ReportStats(object):
         for lineNo, line in self.enumerate():
             nhits, time, per_hit, fof, fot = stats.get(lineNo, empty)
             txt = self.template.format(
-                    lineNo, nhits, time, per_hit, fof, fot, line)
+                lineNo, nhits, time, per_hit, fof, fot, line)
             stream.write(txt)
             stream.write("\n")
 
@@ -429,8 +429,8 @@ class ReportStatsTable(ReportStats):
         # truncate and fill lines with whitespace to create block text
         if self.max_line_width:
             self.sourceCodeLines = truncate_block(source_lines,
-                                                 self.max_line_width,
-                                                 self.dots)
+                                                  self.max_line_width,
+                                                  self.dots)
 
     def preamble(self, filename, func_name, start_line_nr, total_time,
                  stream=None):
@@ -439,7 +439,7 @@ class ReportStatsTable(ReportStats):
         filename = codes.apply(filename, 'y')
         name = codes.apply(func_name, 'b')
         ReportStats.preamble(
-                self, filename, name, start_line_nr, total_time, self._preamble)
+            self, filename, name, start_line_nr, total_time, self._preamble)
 
     def header(self, stream=None):
         # for the table we need tuple of headers not formatted str, so pass
@@ -530,11 +530,12 @@ class ReportStatsTable(ReportStats):
                             title_props=dict(text='bold', bg='dark gray'),
                             col_headers=colhead,
                             col_head_props=dict(text=('bold', 'w'), bg='b'),
-                            where_row_borders=where_row_borders,
+                            hlines=where_row_borders,
                             align=align,
-                            width=range(1000),
+                            # width=range(1000),
                             formatters=formatters,
                             masked='')
+
         # large max width so table doesn't split
         stream.write(str(self._table))
 

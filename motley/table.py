@@ -4,7 +4,7 @@ Pretty printed tables for small data sets
 
 import types
 import re
-from recipes.string import match_brackets
+from recipes.string import brackets
 import itertools as itt
 import os
 import logging
@@ -23,14 +23,16 @@ import numbers
 import functools as ftl
 from recipes import pprint as ppr
 from recipes.decor import raises as bork
-from recipes.containers.dicts import KeywordResolver
+from recipes.dicts import KeywordResolver
 from recipes.logging import get_module_logger
-from recipes.containers.lists import findall
+from recipes.lists import where
 # from .utils import formatter
 
 
 # module level logger
 logger = get_module_logger()
+logging.basicConfig()
+logger.setLevel(logging.INFO)
 
 
 # defaults as module constants
@@ -49,234 +51,7 @@ MAX_LINES = None  # TODO
 # TODO: HIGHLIGHT COLUMNS
 # TODO: OPTION for plain text row borders?
 
-# # #  TODO: generate style sheet like this
-# #
-#                 ⎡___ConstellationModel___⎤
-#                 ⎪x_⎪_y_⎪_σₓ__⎪_σᵥ__⎪__A__⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎣ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎦
-
-#
-#                 ┌   ConstellationModel    ┐
-#                 ⎪ x   y   σₓ    σᵥ    A   ⎪
-#                 ⎪ 5  10   1     1     1   ⎪
-#                 ⎪ 5   6   2     2     2   ⎪
-#                 └ 8   2   3     3     3   ┘
-
-# #               __________________________
-#                 ⎪___ConstellationModel___⎪
-#                 ⎪x_⎪_y_⎪_σₓ__⎪_σᵥ__⎪__A__⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
-#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-# #               __________________________
-#                 ⎪   ConstellationModel   ⎪
-#                 ⎪------------------------⎪
-#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
-#                 ⎪--⎪---⎪-----⎪-----⎪-----⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
-#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-#
-# #               __________________________
-#                 ⎪   ConstellationModel   ⎪
-#                 ⎪________________________⎪
-#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
-#                 ⎪__⎪___⎪_____⎪_____⎪_____⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
-#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-
-# #               __________________________
-#                 ⎪   ConstellationModel   ⎪
-#                 ⎪————————————————————————⎪
-#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
-#                 ⎪——⎪———⎪—————⎪—————⎪—————⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
-#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-
-# #               __________________________
-#                 ⎪   ConstellationModel   ⎪
-#                 ⎪------------------------⎪
-#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
-#                 ⎪——＋——＋————＋—————＋————⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
-#                 ‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾‾
-# #               __________________________
-#                 ⎪   ConstellationModel   ⎪
-#                 ⎪————————————————————————⎪
-#                 ⎪x ⎪ y ⎪ σₓ  ⎪ σᵥ  ⎪  A  ⎪
-#                 ⎪——⎪———⎪—————⎪—————⎪—————⎪
-#                 ⎪ 5⎪ 10⎪ 1   ⎪ 1   ⎪ 1   ⎪
-#                 ⎪ 5⎪  6⎪ 2   ⎪ 2   ⎪ 2   ⎪
-#                 ⎪ 8⎪  2⎪ 3   ⎪ 3   ⎪ 3   ⎪
-#                 ———﬩——﬩—————﬩—————﬩—————
-
-# U+2500 	─ 	e2 94 80 	BOX DRAWINGS LIGHT HO­RI­ZON­TAL 	FORMS LIGHT HORIZONTAL
-# U+2501 	━ 	e2 94 81 	BOX DRAWINGS HEAVY HO­RI­ZON­TAL 	FORMS HEAVY HORIZONTAL
-# U+2502 	│ 	e2 94 82 	BOX DRAWINGS LIGHT VER­TI­CAL 	FORMS LIGHT VERTICAL
-# U+2503 	┃ 	e2 94 83 	BOX DRAWINGS HEAVY VER­TI­CAL 	FORMS HEAVY VERTICAL
-# U+2504 	┄ 	e2 94 84 	BOX DRAWINGS LIGHT TRIPLE DASH HO­RI­ZON­TAL 	FORMS LIGHT TRIPLE DASH HORIZONTAL
-# U+2505 	┅ 	e2 94 85 	BOX DRAWINGS HEAVY TRIPLE DASH HO­RI­ZON­TAL 	FORMS HEAVY TRIPLE DASH HORIZONTAL
-# U+2506 	┆ 	e2 94 86 	BOX DRAWINGS LIGHT TRIPLE DASH VER­TI­CAL 	FORMS LIGHT TRIPLE DASH VERTICAL
-# U+2507 	┇ 	e2 94 87 	BOX DRAWINGS HEAVY TRIPLE DASH VER­TI­CAL 	FORMS HEAVY TRIPLE DASH VERTICAL
-# U+2508 	┈ 	e2 94 88 	BOX DRAWINGS LIGHT QUAD­RU­PLE DASH HO­RI­ZON­TAL 	FORMS LIGHT QUADRUPLE DASH HORIZONTAL
-# U+2509 	┉ 	e2 94 89 	BOX DRAWINGS HEAVY QUAD­RU­PLE DASH HO­RI­ZON­TAL 	FORMS HEAVY QUADRUPLE DASH HORIZONTAL
-# U+250A 	┊ 	e2 94 8a 	BOX DRAWINGS LIGHT QUAD­RU­PLE DASH VER­TI­CAL 	FORMS LIGHT QUADRUPLE DASH VERTICAL
-# U+250B 	┋ 	e2 94 8b 	BOX DRAWINGS HEAVY QUAD­RU­PLE DASH VER­TI­CAL 	FORMS HEAVY QUADRUPLE DASH VERTICAL
-# U+250C 	┌ 	e2 94 8c 	BOX DRAWINGS LIGHT DOWN AND RIGHT 	FORMS LIGHT DOWN AND RIGHT
-# U+250D 	┍ 	e2 94 8d 	BOX DRAWINGS DOWN LIGHT AND RIGHT HEAVY 	FORMS DOWN LIGHT AND RIGHT HEAVY
-# U+250E 	┎ 	e2 94 8e 	BOX DRAWINGS DOWN HEAVY AND RIGHT LIGHT 	FORMS DOWN HEAVY AND RIGHT LIGHT
-# U+250F 	┏ 	e2 94 8f 	BOX DRAWINGS HEAVY DOWN AND RIGHT 	FORMS HEAVY DOWN AND RIGHT
-# U+2510 	┐ 	e2 94 90 	BOX DRAWINGS LIGHT DOWN AND LEFT 	FORMS LIGHT DOWN AND LEFT
-# U+2511 	┑ 	e2 94 91 	BOX DRAWINGS DOWN LIGHT AND LEFT HEAVY 	FORMS DOWN LIGHT AND LEFT HEAVY
-# U+2512 	┒ 	e2 94 92 	BOX DRAWINGS DOWN HEAVY AND LEFT LIGHT 	FORMS DOWN HEAVY AND LEFT LIGHT
-# U+2513 	┓ 	e2 94 93 	BOX DRAWINGS HEAVY DOWN AND LEFT 	FORMS HEAVY DOWN AND LEFT
-# U+2514 	└ 	e2 94 94 	BOX DRAWINGS LIGHT UP AND RIGHT 	FORMS LIGHT UP AND RIGHT
-# U+2515 	┕ 	e2 94 95 	BOX DRAWINGS UP LIGHT AND RIGHT HEAVY 	FORMS UP LIGHT AND RIGHT HEAVY
-# U+2516 	┖ 	e2 94 96 	BOX DRAWINGS UP HEAVY AND RIGHT LIGHT 	FORMS UP HEAVY AND RIGHT LIGHT
-# U+2517 	┗ 	e2 94 97 	BOX DRAWINGS HEAVY UP AND RIGHT 	FORMS HEAVY UP AND RIGHT
-# U+2518 	┘ 	e2 94 98 	BOX DRAWINGS LIGHT UP AND LEFT 	FORMS LIGHT UP AND LEFT
-# U+2519 	┙ 	e2 94 99 	BOX DRAWINGS UP LIGHT AND LEFT HEAVY 	FORMS UP LIGHT AND LEFT HEAVY
-# U+251A 	┚ 	e2 94 9a 	BOX DRAWINGS UP HEAVY AND LEFT LIGHT 	FORMS UP HEAVY AND LEFT LIGHT
-# U+251B 	┛ 	e2 94 9b 	BOX DRAWINGS HEAVY UP AND LEFT 	FORMS HEAVY UP AND LEFT
-# U+251C 	├ 	e2 94 9c 	BOX DRAWINGS LIGHT VER­TI­CAL AND RIGHT 	FORMS LIGHT VERTICAL AND RIGHT
-# U+251D 	┝ 	e2 94 9d 	BOX DRAWINGS VER­TI­CAL LIGHT AND RIGHT HEAVY 	FORMS VERTICAL LIGHT AND RIGHT HEAVY
-# U+251E 	┞ 	e2 94 9e 	BOX DRAWINGS UP HEAVY AND RIGHT DOWN LIGHT 	FORMS UP HEAVY AND RIGHT DOWN LIGHT
-# U+251F 	┟ 	e2 94 9f 	BOX DRAWINGS DOWN HEAVY AND RIGHT UP LIGHT 	FORMS DOWN HEAVY AND RIGHT UP LIGHT
-# U+2520 	┠ 	e2 94 a0 	BOX DRAWINGS VER­TI­CAL HEAVY AND RIGHT LIGHT 	FORMS VERTICAL HEAVY AND RIGHT LIGHT
-# U+2521 	┡ 	e2 94 a1 	BOX DRAWINGS DOWN LIGHT AND RIGHT UP HEAVY 	FORMS DOWN LIGHT AND RIGHT UP HEAVY
-# U+2522 	┢ 	e2 94 a2 	BOX DRAWINGS UP LIGHT AND RIGHT DOWN HEAVY 	FORMS UP LIGHT AND RIGHT DOWN HEAVY
-# U+2523 	┣ 	e2 94 a3 	BOX DRAWINGS HEAVY VER­TI­CAL AND RIGHT 	FORMS HEAVY VERTICAL AND RIGHT
-# U+2524 	┤ 	e2 94 a4 	BOX DRAWINGS LIGHT VER­TI­CAL AND LEFT 	FORMS LIGHT VERTICAL AND LEFT
-# U+2525 	┥ 	e2 94 a5 	BOX DRAWINGS VER­TI­CAL LIGHT AND LEFT HEAVY 	FORMS VERTICAL LIGHT AND LEFT HEAVY
-# U+2526 	┦ 	e2 94 a6 	BOX DRAWINGS UP HEAVY AND LEFT DOWN LIGHT 	FORMS UP HEAVY AND LEFT DOWN LIGHT
-# U+2527 	┧ 	e2 94 a7 	BOX DRAWINGS DOWN HEAVY AND LEFT UP LIGHT 	FORMS DOWN HEAVY AND LEFT UP LIGHT
-# U+2528 	┨ 	e2 94 a8 	BOX DRAWINGS VER­TI­CAL HEAVY AND LEFT LIGHT 	FORMS VERTICAL HEAVY AND LEFT LIGHT
-# U+2529 	┩ 	e2 94 a9 	BOX DRAWINGS DOWN LIGHT AND LEFT UP HEAVY 	FORMS DOWN LIGHT AND LEFT UP HEAVY
-# U+252A 	┪ 	e2 94 aa 	BOX DRAWINGS UP LIGHT AND LEFT DOWN HEAVY 	FORMS UP LIGHT AND LEFT DOWN HEAVY
-# U+252B 	┫ 	e2 94 ab 	BOX DRAWINGS HEAVY VER­TI­CAL AND LEFT 	FORMS HEAVY VERTICAL AND LEFT
-# U+252C 	┬ 	e2 94 ac 	BOX DRAWINGS LIGHT DOWN AND HO­RI­ZON­TAL 	FORMS LIGHT DOWN AND HORIZONTAL
-# U+252D 	┭ 	e2 94 ad 	BOX DRAWINGS LEFT HEAVY AND RIGHT DOWN LIGHT 	FORMS LEFT HEAVY AND RIGHT DOWN LIGHT
-# U+252E 	┮ 	e2 94 ae 	BOX DRAWINGS RIGHT HEAVY AND LEFT DOWN LIGHT 	FORMS RIGHT HEAVY AND LEFT DOWN LIGHT
-# U+252F 	┯ 	e2 94 af 	BOX DRAWINGS DOWN LIGHT AND HO­RI­ZON­TAL HEAVY 	FORMS DOWN LIGHT AND HORIZONTAL HEAVY
-# U+2530 	┰ 	e2 94 b0 	BOX DRAWINGS DOWN HEAVY AND HO­RI­ZON­TAL LIGHT 	FORMS DOWN HEAVY AND HORIZONTAL LIGHT
-# U+2531 	┱ 	e2 94 b1 	BOX DRAWINGS RIGHT LIGHT AND LEFT DOWN HEAVY 	FORMS RIGHT LIGHT AND LEFT DOWN HEAVY
-# U+2532 	┲ 	e2 94 b2 	BOX DRAWINGS LEFT LIGHT AND RIGHT DOWN HEAVY 	FORMS LEFT LIGHT AND RIGHT DOWN HEAVY
-# U+2533 	┳ 	e2 94 b3 	BOX DRAWINGS HEAVY DOWN AND HO­RI­ZON­TAL 	FORMS HEAVY DOWN AND HORIZONTAL
-# U+2534 	┴ 	e2 94 b4 	BOX DRAWINGS LIGHT UP AND HO­RI­ZON­TAL 	FORMS LIGHT UP AND HORIZONTAL
-# U+2535 	┵ 	e2 94 b5 	BOX DRAWINGS LEFT HEAVY AND RIGHT UP LIGHT 	FORMS LEFT HEAVY AND RIGHT UP LIGHT
-# U+2536 	┶ 	e2 94 b6 	BOX DRAWINGS RIGHT HEAVY AND LEFT UP LIGHT 	FORMS RIGHT HEAVY AND LEFT UP LIGHT
-# U+2537 	┷ 	e2 94 b7 	BOX DRAWINGS UP LIGHT AND HO­RI­ZON­TAL HEAVY 	FORMS UP LIGHT AND HORIZONTAL HEAVY
-# U+2538 	┸ 	e2 94 b8 	BOX DRAWINGS UP HEAVY AND HO­RI­ZON­TAL LIGHT 	FORMS UP HEAVY AND HORIZONTAL LIGHT
-# U+2539 	┹ 	e2 94 b9 	BOX DRAWINGS RIGHT LIGHT AND LEFT UP HEAVY 	FORMS RIGHT LIGHT AND LEFT UP HEAVY
-# U+253A 	┺ 	e2 94 ba 	BOX DRAWINGS LEFT LIGHT AND RIGHT UP HEAVY 	FORMS LEFT LIGHT AND RIGHT UP HEAVY
-# U+253B 	┻ 	e2 94 bb 	BOX DRAWINGS HEAVY UP AND HO­RI­ZON­TAL 	FORMS HEAVY UP AND HORIZONTAL
-# U+253C 	┼ 	e2 94 bc 	BOX DRAWINGS LIGHT VER­TI­CAL AND HO­RI­ZON­TAL 	FORMS LIGHT VERTICAL AND HORIZONTAL
-# U+253D 	┽ 	e2 94 bd 	BOX DRAWINGS LEFT HEAVY AND RIGHT VER­TI­CAL LIGHT 	FORMS LEFT HEAVY AND RIGHT VERTICAL LIGHT
-# U+253E 	┾ 	e2 94 be 	BOX DRAWINGS RIGHT HEAVY AND LEFT VER­TI­CAL LIGHT 	FORMS RIGHT HEAVY AND LEFT VERTICAL LIGHT
-# U+253F 	┿ 	e2 94 bf 	BOX DRAWINGS VER­TI­CAL LIGHT AND HO­RI­ZON­TAL HEAVY 	FORMS VERTICAL LIGHT AND HORIZONTAL HEAVY
-# U+2540 	╀ 	e2 95 80 	BOX DRAWINGS UP HEAVY AND DOWN HO­RI­ZON­TAL LIGHT 	FORMS UP HEAVY AND DOWN HORIZONTAL LIGHT
-# U+2541 	╁ 	e2 95 81 	BOX DRAWINGS DOWN HEAVY AND UP HO­RI­ZON­TAL LIGHT 	FORMS DOWN HEAVY AND UP HORIZONTAL LIGHT
-# U+2542 	╂ 	e2 95 82 	BOX DRAWINGS VER­TI­CAL HEAVY AND HO­RI­ZON­TAL LIGHT 	FORMS VERTICAL HEAVY AND HORIZONTAL LIGHT
-# U+2543 	╃ 	e2 95 83 	BOX DRAWINGS LEFT UP HEAVY AND RIGHT DOWN LIGHT 	FORMS LEFT UP HEAVY AND RIGHT DOWN LIGHT
-# U+2544 	╄ 	e2 95 84 	BOX DRAWINGS RIGHT UP HEAVY AND LEFT DOWN LIGHT 	FORMS RIGHT UP HEAVY AND LEFT DOWN LIGHT
-# U+2545 	╅ 	e2 95 85 	BOX DRAWINGS LEFT DOWN HEAVY AND RIGHT UP LIGHT 	FORMS LEFT DOWN HEAVY AND RIGHT UP LIGHT
-# U+2546 	╆ 	e2 95 86 	BOX DRAWINGS RIGHT DOWN HEAVY AND LEFT UP LIGHT 	FORMS RIGHT DOWN HEAVY AND LEFT UP LIGHT
-# U+2547 	╇ 	e2 95 87 	BOX DRAWINGS DOWN LIGHT AND UP HO­RI­ZON­TAL HEAVY 	FORMS DOWN LIGHT AND UP HORIZONTAL HEAVY
-# U+2548 	╈ 	e2 95 88 	BOX DRAWINGS UP LIGHT AND DOWN HO­RI­ZON­TAL HEAVY 	FORMS UP LIGHT AND DOWN HORIZONTAL HEAVY
-# U+2549 	╉ 	e2 95 89 	BOX DRAWINGS RIGHT LIGHT AND LEFT VER­TI­CAL HEAVY 	FORMS RIGHT LIGHT AND LEFT VERTICAL HEAVY
-# U+254A 	╊ 	e2 95 8a 	BOX DRAWINGS LEFT LIGHT AND RIGHT VER­TI­CAL HEAVY 	FORMS LEFT LIGHT AND RIGHT VERTICAL HEAVY
-# U+254B 	╋ 	e2 95 8b 	BOX DRAWINGS HEAVY VER­TI­CAL AND HO­RI­ZON­TAL 	FORMS HEAVY VERTICAL AND HORIZONTAL
-# U+254C 	╌ 	e2 95 8c 	BOX DRAWINGS LIGHT DOUBLE DASH HO­RI­ZON­TAL 	FORMS LIGHT DOUBLE DASH HORIZONTAL
-# U+254D 	╍ 	e2 95 8d 	BOX DRAWINGS HEAVY DOUBLE DASH HO­RI­ZON­TAL 	FORMS HEAVY DOUBLE DASH HORIZONTAL
-# U+254E 	╎ 	e2 95 8e 	BOX DRAWINGS LIGHT DOUBLE DASH VER­TI­CAL 	FORMS LIGHT DOUBLE DASH VERTICAL
-# U+254F 	╏ 	e2 95 8f 	BOX DRAWINGS HEAVY DOUBLE DASH VER­TI­CAL 	FORMS HEAVY DOUBLE DASH VERTICAL
-# U+2550 	═ 	e2 95 90 	BOX DRAWINGS DOUBLE HO­RI­ZON­TAL 	FORMS DOUBLE HORIZONTAL
-# U+2551 	║ 	e2 95 91 	BOX DRAWINGS DOUBLE VER­TI­CAL 	FORMS DOUBLE VERTICAL
-# U+2552 	╒ 	e2 95 92 	BOX DRAWINGS DOWN SINGLE AND RIGHT DOUBLE 	FORMS DOWN SINGLE AND RIGHT DOUBLE
-# U+2553 	╓ 	e2 95 93 	BOX DRAWINGS DOWN DOUBLE AND RIGHT SINGLE 	FORMS DOWN DOUBLE AND RIGHT SINGLE
-# U+2554 	╔ 	e2 95 94 	BOX DRAWINGS DOUBLE DOWN AND RIGHT 	FORMS DOUBLE DOWN AND RIGHT
-# U+2555 	╕ 	e2 95 95 	BOX DRAWINGS DOWN SINGLE AND LEFT DOUBLE 	FORMS DOWN SINGLE AND LEFT DOUBLE
-# U+2556 	╖ 	e2 95 96 	BOX DRAWINGS DOWN DOUBLE AND LEFT SINGLE 	FORMS DOWN DOUBLE AND LEFT SINGLE
-# U+2557 	╗ 	e2 95 97 	BOX DRAWINGS DOUBLE DOWN AND LEFT 	FORMS DOUBLE DOWN AND LEFT
-# U+2558 	╘ 	e2 95 98 	BOX DRAWINGS UP SINGLE AND RIGHT DOUBLE 	FORMS UP SINGLE AND RIGHT DOUBLE
-# U+2559 	╙ 	e2 95 99 	BOX DRAWINGS UP DOUBLE AND RIGHT SINGLE 	FORMS UP DOUBLE AND RIGHT SINGLE
-# U+255A 	╚ 	e2 95 9a 	BOX DRAWINGS DOUBLE UP AND RIGHT 	FORMS DOUBLE UP AND RIGHT
-# U+255B 	╛ 	e2 95 9b 	BOX DRAWINGS UP SINGLE AND LEFT DOUBLE 	FORMS UP SINGLE AND LEFT DOUBLE
-# U+255C 	╜ 	e2 95 9c 	BOX DRAWINGS UP DOUBLE AND LEFT SINGLE 	FORMS UP DOUBLE AND LEFT SINGLE
-# U+255D 	╝ 	e2 95 9d 	BOX DRAWINGS DOUBLE UP AND LEFT 	FORMS DOUBLE UP AND LEFT
-# U+255E 	╞ 	e2 95 9e 	BOX DRAWINGS VER­TI­CAL SINGLE AND RIGHT DOUBLE 	FORMS VERTICAL SINGLE AND RIGHT DOUBLE
-# U+255F 	╟ 	e2 95 9f 	BOX DRAWINGS VER­TI­CAL DOUBLE AND RIGHT SINGLE 	FORMS VERTICAL DOUBLE AND RIGHT SINGLE
-# U+2560 	╠ 	e2 95 a0 	BOX DRAWINGS DOUBLE VER­TI­CAL AND RIGHT 	FORMS DOUBLE VERTICAL AND RIGHT
-# U+2561 	╡ 	e2 95 a1 	BOX DRAWINGS VER­TI­CAL SINGLE AND LEFT DOUBLE 	FORMS VERTICAL SINGLE AND LEFT DOUBLE
-# U+2562 	╢ 	e2 95 a2 	BOX DRAWINGS VER­TI­CAL DOUBLE AND LEFT SINGLE 	FORMS VERTICAL DOUBLE AND LEFT SINGLE
-# U+2563 	╣ 	e2 95 a3 	BOX DRAWINGS DOUBLE VER­TI­CAL AND LEFT 	FORMS DOUBLE VERTICAL AND LEFT
-# U+2564 	╤ 	e2 95 a4 	BOX DRAWINGS DOWN SINGLE AND HO­RI­ZON­TAL DOUBLE 	FORMS DOWN SINGLE AND HORIZONTAL DOUBLE
-# U+2565 	╥ 	e2 95 a5 	BOX DRAWINGS DOWN DOUBLE AND HO­RI­ZON­TAL SINGLE 	FORMS DOWN DOUBLE AND HORIZONTAL SINGLE
-# U+2566 	╦ 	e2 95 a6 	BOX DRAWINGS DOUBLE DOWN AND HO­RI­ZON­TAL 	FORMS DOUBLE DOWN AND HORIZONTAL
-# U+2567 	╧ 	e2 95 a7 	BOX DRAWINGS UP SINGLE AND HO­RI­ZON­TAL DOUBLE 	FORMS UP SINGLE AND HORIZONTAL DOUBLE
-# U+2568 	╨ 	e2 95 a8 	BOX DRAWINGS UP DOUBLE AND HO­RI­ZON­TAL SINGLE 	FORMS UP DOUBLE AND HORIZONTAL SINGLE
-# U+2569 	╩ 	e2 95 a9 	BOX DRAWINGS DOUBLE UP AND HO­RI­ZON­TAL 	FORMS DOUBLE UP AND HORIZONTAL
-# U+256A 	╪ 	e2 95 aa 	BOX DRAWINGS VER­TI­CAL SINGLE AND HO­RI­ZON­TAL DOUBLE 	FORMS VERTICAL SINGLE AND HORIZONTAL DOUBLE
-# U+256B 	╫ 	e2 95 ab 	BOX DRAWINGS VER­TI­CAL DOUBLE AND HO­RI­ZON­TAL SINGLE 	FORMS VERTICAL DOUBLE AND HORIZONTAL SINGLE
-# U+256C 	╬ 	e2 95 ac 	BOX DRAWINGS DOUBLE VER­TI­CAL AND HO­RI­ZON­TAL 	FORMS DOUBLE VERTICAL AND HORIZONTAL
-# U+256D 	╭ 	e2 95 ad 	BOX DRAWINGS LIGHT ARC DOWN AND RIGHT 	FORMS LIGHT ARC DOWN AND RIGHT
-# U+256E 	╮ 	e2 95 ae 	BOX DRAWINGS LIGHT ARC DOWN AND LEFT 	FORMS LIGHT ARC DOWN AND LEFT
-# U+256F 	╯ 	e2 95 af 	BOX DRAWINGS LIGHT ARC UP AND LEFT 	FORMS LIGHT ARC UP AND LEFT
-# U+2570 	╰ 	e2 95 b0 	BOX DRAWINGS LIGHT ARC UP AND RIGHT 	FORMS LIGHT ARC UP AND RIGHT
-
-# U+23A1 	⎡ 	LEFT SQUARE BRACKET UPPER CORNER
-# U+23A3 	⎣  	LEFT SQUARE BRACKET LOWER CORNER
-# U+23A4 	⎤  	RIGHT SQUARE BRACKET UPPER CORNER
-# U+23A6 	⎦ 	RIGHT SQUARE BRACKET LOWER CORNER
-
-# U+230A 	⌊ 	e2 8c 8a 	LEFT FLOOR
-# U+230B 	⌋ 	e2 8c 8b 	RIGHT FLOOR
-# U+2308 	⌈ 	e2 8c 88 	LEFT CEILING
-# U+2309 	⌉ 	e2 8c 89 	RIGHT CEILING
-
-# U+300C 	「 	LEFT CORNER BRACKET 	OPENING CORNER BRACKET
-# U+300D 	」  RIGHT CORNER BRACKET 	CLOSING CORNER BRACKET
-# U+300E 	『 	e3 80 8e 	LEFT WHITE CORNER BRACKET
-# U+300F 	』 	e3 80 8f 	RIGHT WHITE CORNER BRACKET
-# U+FE41 	﹁ 	ef b9 81 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL LEFT CORNER BRACKET 	GLYPH FOR VERTICAL OPENING CORNER BRACKET
-# U+FE42 	﹂ 	ef b9 82 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL RIGHT CORNER BRACKET 	GLYPH FOR VERTICAL CLOSING CORNER BRACKET
-# U+FE43 	﹃ 	ef b9 83 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL LEFT WHITE CORNER BRACKET 	GLYPH FOR VERTICAL OPENING WHITE CORNER BRACKET
-# U+FE44 	﹄ 	ef b9 84 	PRE­SEN­TA­TI­ON FORM FOR VER­TI­CAL RIGHT WHITE CORNER BRACKET
-# U+A71A 	ꜚ 	ea 9c 9a 	MO­DI­FI­ER LET­TER LOWER RIGHT CORNER ANGLE
-
-
-# U+23AB 	⎫ 	e2 8e ab 	RIGHT CURLY BRACKET UPPER HOOK
-# U+23AD 	⎭ 	e2 8e ad 	RIGHT CURLY BRACKET LOWER HOOK
-# U+23A7 	⎧ 	e2 8e a7 	LEFT CURLY BRACKET UPPER HOOK
-# U+23A9 	⎩ 	e2 8e a9 	LEFT CURLY BRACKET LOWER HOOK
-
-# U+23A2 	⎢ 	e2 8e a2 	LEFT SQUARE BRACKET EXTENSION
-# U+23A5 	⎥ 	e2 8e a5 	RIGHT SQUARE BRACKET EXTENSION
-# U+FF5C 	｜ 	ef bd 9c 	FULLWIDTH VER­TI­CAL LINE 	FULLWIDTH VERTICAL BAR
-# U+007C 	| 	7c 	VER­TI­CAL LINE 	VERTICAL BAR
-# U+00A6 	¦ 	c2 a6 	BROKEN BAR
-
-# U+22A4 	⊤ 	e2 8a a4 	DOWN TACK
-# U+22A5 	⊥ 	e2 8a a5 	UP TACK
-# U+27D8 	⟘ 	e2 9f 98 	LARGE UP TACK
-# U+27D9 	⟙ 	e2 9f 99 	LARGE DOWN TACK
-
-# LIGTH GREEK CROSS "\U0001F7A2"  # font support uncommon ??
-# THIN GREEK CROSS "\U0001F7A1"
-# FULLWIDTH PLUS SIGN ＋
-
 # TODO: check out wcwidth lib
-
 
 # FIXME: alignment not nice when mixed negative positive....
 #  or mixed float decimal (minimalist)
@@ -860,7 +635,7 @@ class Table(LoggingMixin):
             Any footnote that will be added to the bottom of the table.
             Useful to explain the meaning of `flags`
 
-        #TODO: list attributes here
+        # TODO: list attributes here
         """
 
         # FIXME: precision etc ignored when init from dict
@@ -872,6 +647,9 @@ class Table(LoggingMixin):
             data, kws = self._from_dict(data, **kws)
             self.__init__(data, **kws)
             return
+        
+        if isinstance(data, set):
+            data = list(data)
 
         # resolve kws
         if kws:
@@ -947,10 +725,12 @@ class Table(LoggingMixin):
         # get alignment based on column data types
         self.align = self.get_alignment(
             align, data, col_headers, self.get_default_align)
+        self.dot_aligned = np.array(where(self.align, '.')) - self.n_head_col
+        self.align = np.array(list(self.align.replace('.', '<')), 'U1')
 
         # column headers will be center aligned unless requested otherwise.
-        self.col_head_align = self.get_alignment(
-            align, data, col_headers, lambda _: HEADER_ALIGN)
+        self.col_head_align = np.array(list(self.get_alignment(
+            align, data, col_headers, lambda _: HEADER_ALIGN)))
 
         # column formatters
         self.formatters = resolve_input(
@@ -1232,6 +1012,8 @@ class Table(LoggingMixin):
         -------
 
         """
+        # warnings.filterwarnings('error', category=DeprecationWarning)
+
         types_ = self.col_data_types[col_idx]
 
         if len(types_) == 1:
@@ -1251,14 +1033,9 @@ class Table(LoggingMixin):
                     precision = 0
 
             else:  # real numbers
-
-                # print =('Desser of the real!!')
-                # from IPython import embed
-                # embed(header="Embedded interpreter at 'table.py':1255")
-
                 # if short and (self.align[col_idx] in '<>'):
                 #     right_pad = precision + 1
-                sign = (' ' * np.any(data[:, col_idx] < 0))
+                sign = (' ' * int(np.any(data[:, col_idx] < 0)))
 
             # print(col_idx,type_, precision, short, sign, right_pad)
 
@@ -1296,6 +1073,8 @@ class Table(LoggingMixin):
             col = data[..., i]
             if np.ma.is_masked(col):
                 use = np.logical_not(col.mask)
+                if ~use.any():
+                    continue
             else:
                 use = ...
 
@@ -1304,15 +1083,16 @@ class Table(LoggingMixin):
             try:
                 data[use, i] = np.vectorize(fmt, (str, ))(col[use])
             except Exception as err:
-                logger.warning(
-                    'Could not format column %i with %r due to '
-                    'the following exception:\n%s', i, fmt, err)
+                warnings.warn(
+                    'Could not format column %i with %r due to the following '
+                    'exception:\n%s', i, fmt, err
+                )
 
                 data[use, i] = np.vectorize(str, (str, ))(col[use])
 
             # special alignment on '.' for float columns
             if i in self.dot_aligned:
-                data[:, i] = ppr.align_dot(data[:, i])
+                data[use, i] = ppr.align_dot(data[use, i])
 
             # concatenate data with flags
             # flags = flags.get(i)
@@ -1322,9 +1102,9 @@ class Table(LoggingMixin):
                                                flags[i])
                 except Exception as err:
                     logger.warning(
-                        'Could not append flags to formatted data for '
-                        'column %i due to the following  exception:\n%s', i,
-                        err)
+                        'Could not append flags to formatted data for column %i'
+                        ' due to the following  exception:\n%s', i, err
+                    )
 
         # finally set masked str for entire table
         if np.ma.is_masked(data):
@@ -1422,7 +1202,7 @@ class Table(LoggingMixin):
             totals = self.pre_table[-1]
 
         idx_same = self.compactable_columns(ignore)
-        idx_squash = np.setdiff1d(idx_same, np.nonzero(totals)[0])
+        idx_squash = np.setdiff1d(idx_same, np.atleast_1d(totals).nonzero()[0])
         val_squash = self.pre_table[self.n_head_rows, idx_squash]
         idx_show = np.setdiff1d(range(self.shape[1]), idx_squash)
         # check if any data left to display
@@ -1487,13 +1267,14 @@ class Table(LoggingMixin):
         # make align an array with same size as nr of columns in table
 
         # row headers are left aligned
-        align = '<' * self.n_head_col + ''.join(alignment.values())
-        self.dot_aligned = np.array(findall(align, '.')) - self.n_head_col
-        align = align.replace('.', '<')
-        return np.array(list(align), 'U1')
+        return '<' * self.n_head_col + ''.join(alignment.values())
+        # dot_aligned = np.array(where(align, '.')) - self.n_head_col
+        # align = align.replace('.', '<')
+        # return align
 
     def get_totals(self, data, col_indices):
         """compute totals for columns at `col_indices`"""
+
         # suppress totals for tables with single row
         if data.shape[0] <= 1:
             if col_indices is not None:
@@ -1662,7 +1443,7 @@ class Table(LoggingMixin):
         _under = ('underline' in props)
         if _under:
             props = list(props)
-            props.pop(props.index('underline'))
+            props.remove('underline')
 
         lines = []
         for line in text.split(os.linesep):
@@ -1876,7 +1657,7 @@ class Table(LoggingMixin):
         return table
 
     def _get_compact_table(self, n_cols=None, justify=True):
-        
+
         # TODO: should print units here also!
 
         compact_items = list(self.compact_items.items())
@@ -2086,6 +1867,9 @@ class Table(LoggingMixin):
 # http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
 # https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
 
+def sentinel():
+    pass
+
 
 class AttrTable:
     """
@@ -2100,9 +1884,8 @@ class AttrTable:
             return obj
 
         return dict(zip(self.attrs, obj))
-        # TODO : ordered dict better
 
-    def __init__(self, attrs, aliases=None, formatters=None, **kws):
+    def __init__(self, attrs, aliases=None, formatters=None, units=None, **kws):
 
         # set default options for table
         self.kws = {**dict(row_nrs=0,
@@ -2113,6 +1896,7 @@ class AttrTable:
 
         self.attrs = list(attrs)
         self.formatters = self._get_input(formatters)
+        self.units = self._get_input(units)
         self.aliases = self._get_input(aliases)
         self.aliases = dict(zip(attrs, self.get_headers(attrs)))
 
@@ -2166,39 +1950,44 @@ class AttrTable:
         if attrs is None:
             attrs = self.attrs
 
-        kws = {**self.kws,
+        headers = self.get_headers(attrs)
+        kws = {**self.kws,  # defaults
                **{**dict(title=container.__class__.__name__,
-                         col_headers=self.get_headers(attrs),
-                         formatters=self.get_formatters(attrs),
+                         col_headers=headers,
                          col_groups=self.get_col_groups(attrs)),
-                  **kws},
+                  **{key: self.get_defaults(attrs, key)
+                     for key in ('units', 'formatters')},
+                  **kws},  # input
                }
-
-        # for the aliased column_headers
-        for key in ('units', 'formatters', 'totals'):
-            if key in kws:
-                kws[key] = self.convert_aliases(kws.pop(key))
-
-        from IPython import embed
-        embed(header="Embedded interpreter at 'table.py':2178")
 
         return Table(container.attrs(*attrs), **kws)
 
-    def get_headers(self, attrs):
-        heads = []
+    def get_defaults(self, attrs, which):
+        defaults = getattr(self, which)
+        out = {}
         for a in attrs:
-            heads.append(self.aliases.get(a, a.split('.')[-1]))
-        return heads
+            alias = self.get_header(a)
+            use = defaults.get(a, defaults.get(alias, sentinel))
+            if not use is sentinel:
+                out[alias] = use
+        return out
+
+    def get_header(self, attr):
+        return self.aliases.get(attr, attr.split('.')[-1])
+
+    def get_headers(self, attrs):
+        return list(map(self.get_header, attrs))
+
+    def _col_group(self, attrs):
+        for a in attrs:
+            first, *second = a.split('.')
+            yield first if second else ''
 
     def get_col_groups(self, attrs):
-        groups = []
-        for a in attrs:
-            parts = a.split('.')
-            groups.append(parts[0] if len(parts) > 1 else '')
-        return groups
+        return list(self._col_group(attrs))
 
-    def get_formatters(self, attrs):
-        return {a: self.formatters[a] for a in attrs if a in self.formatters}
+    # def get_formatters(self, attrs):
+    #     return {a: self.formatters[a] for a in attrs if a in self.formatters}
 
     def add_attr(self, attr, column_header=None, formatter=None):
 

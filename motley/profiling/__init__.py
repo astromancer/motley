@@ -2,8 +2,8 @@
 Convenience methods that contains various decorators for profiling functions
 with line_profiler and pretty-printing the results.
 
-Example
--------
+Examples
+--------
 from motley.profiling import profile
 
 @profile()  # The default `line_profiler` report format
