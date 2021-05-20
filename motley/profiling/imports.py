@@ -57,7 +57,7 @@ def extractor(filename, up_to_line=None):
         code block containing extracted import statements
 
     """
-    from recipes.introspection.imports import ImportCapture, rewrite
+    from recipes.introspect.imports import ImportCapture, rewrite
 
     with open(filename) as fp:
         source = fp.read()

@@ -4,7 +4,7 @@ import functools
 import traceback
 import inspect
 from collections import defaultdict  # , OrderedDict
-from recipes.containers.dicts import DefaultOrderedDict
+from recipes.dicts import DefaultOrderedDict
 from recipes import pprint
 
 from .. import codes
@@ -242,7 +242,7 @@ def timer_dev(f):
 # from ..expose import get_func_repr
 
 # ====================================================================================================
-# class timer(OptionalArgumentsDecorator):
+# class timer(OptArgDecor):
 #     """Print function execution time upon return"""
 #
 #     def make_wrapper(self, func):

@@ -6,7 +6,7 @@ import warnings
 
 import more_itertools as mit
 
-from recipes.containers.dicts import Many2OneMap
+from recipes.dicts import ManyToOneMap
 from .ansi import parse
 
 import functools as ftl
@@ -184,13 +184,13 @@ FORMAT_24BIT = dict(fg='38;2;{:d};{:d};{:d}',
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # def _aliasFactory(codes, aliases):
 #     """Create the code translation dict"""
-#     Codes = Many2OneMap(codes)
+#     Codes = ManyToOneMap(codes)
 #     Codes.add_vocab(aliases)
 #     Codes.add_map(str.lower)
 #     return Codes
 
 
-class KeyResolver(Many2OneMap):
+class KeyResolver(ManyToOneMap):
     """
     Resolve all the various ways in which colours or effects can be specified.
     """
@@ -207,7 +207,7 @@ class KeyResolver(Many2OneMap):
         raise KeyError('%r is not a valid property description' % key)
 
 
-class CodeResolver(Many2OneMap):
+class CodeResolver(ManyToOneMap):
     """
     Resolve all the various names for colours or effects into codes
     """

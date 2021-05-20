@@ -5,7 +5,7 @@ import time
 import functools
 
 from recipes.misc import get_terminal_size
-from recipes.pprint.misc import overlay
+from recipes.string import overlay
 # from recipes.progressbar import ProgressBarBase
 from . import codes
 

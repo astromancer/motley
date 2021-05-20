@@ -116,7 +116,7 @@ class LineProfiler(lp.LineProfiler):
         from shutil import get_terminal_size
 
         import numpy as np
-        from recipes.containers.lists import sortmore
+        from recipes.lists import cosort
 
         from motley.table import Table
         # from recipes.misc import get_terminal_size
@@ -129,7 +129,7 @@ class LineProfiler(lp.LineProfiler):
                 totals[func.__name__] = sum(times)
 
         # sort timings etc. descending
-        totals, names = sortmore(totals.values(), totals.keys(), order=-1)
+        totals, names = cosort(totals.values(), totals.keys(), order=-1)
 
         # do histogram thing
         frac = np.divide(totals, max(totals))
