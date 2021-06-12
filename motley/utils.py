@@ -18,7 +18,6 @@ ALIGNMENT_MAP = {'r': '>',
                  'c': '^'}
 
 
-
 def get_alignment(align):
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
     if align not in '<^>':
@@ -81,7 +80,7 @@ def hstack(tables, spacing=0, offset=()):
 def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
     """
     Vertically stack tables while aligning column widths
-    
+
     Parameters
     ----------
     tables: list of motley.table.Table
@@ -99,7 +98,8 @@ def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
     # check that all tables have same number of columns
     ncols = [tbl.shape[1] for tbl in tables]
     if len(set(ncols)) != 1:
-        raise ValueError(f'Cannot stack tables with unequal number of columns: {ncols}')
+        raise ValueError(
+            f'Cannot stack tables with unequal number of columns: {ncols}')
 
     w = np.max([tbl.col_widths for tbl in tables], 0)
     vspace = '\n' * (spacing + 1)
@@ -116,7 +116,7 @@ def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
                 keep += head[tbl.frame:(-tbl.n_head_rows or None)]
             if not strip_headers:
                 keep += head[(tbl.frame + tbl.has_title):]
-            
+
         s += '\n'.join((vspace, *keep, r))
 
     return s.lstrip('\n')
@@ -385,3 +385,40 @@ class ConditionalFormatter(object):
 #     for txt, bg in itt.zip_longest(colours, background, fillvalue='default'):
 # codes.get_code_str(txt, bg=bg)
 # yield tuple(codes._gen_codes(txt, bg=bg))
+
+
+class Filler:
+    text = 'NO MATCH'
+    table = None
+
+    def __init__(self, style):
+        self.style = style
+
+    def __str__(self):
+        self.table.pre_table[0, 0] = codes.apply(self.text, self.style)
+        return str(self.table)
+
+    @classmethod
+    def make(cls, table):
+        cls.table = table.empty_like(1, frame=False)
+
+
+class GroupTitle:
+    width = None
+    # formater = 'group {}'
+
+    def __init__(self, i, keys, props):
+        self.g = f'group {i}:'
+        self.s = self.format_key(keys)
+        # self.s = "; ".join(map('{:s} = {:s}'.format, *zip(*info.items())))
+        self.props = props
+
+    # @staticmethod
+    def format_key(self, keys):
+        if isinstance(keys, str):
+            return keys
+        return "; ".join(map(str, keys))
+
+    def __str__(self):
+        return '\n' + overlay(codes.apply(self.s, self.props),
+                              self.g.ljust(self.width))
