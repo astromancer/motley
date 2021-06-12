@@ -2,16 +2,21 @@
 Does the work to translate colour/effect names to ANSI codes
 """
 
-import warnings
 
-import more_itertools as mit
-
-from recipes.dicts import ManyToOneMap
-from .ansi import parse
-
+# std libs
+import numbers
 import functools as ftl
 
+# third-party libs
 import numpy as np
+from matplotlib.colors import to_rgb
+
+# local libs
+from recipes.dicts import ManyToOneMap
+
+# relative libs
+from .ansi import parse
+
 
 # source: https://en.wikipedia.org/wiki/ANSI_escape_code
 # http://ascii-table.com/ansi-escape-sequences.php
@@ -171,11 +176,6 @@ kwAliasMap = {
     'bgc': 'bg'
 }
 
-FORMAT_8BIT = dict(fg='38;5;{:d}',
-                   bg='48;5;{:d}')
-FORMAT_24BIT = dict(fg='38;2;{:d};{:d};{:d}',
-                    bg='48;2;{:d};{:d};{:d}')
-
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Movement = {} # TODO
@@ -190,7 +190,7 @@ FORMAT_24BIT = dict(fg='38;2;{:d};{:d};{:d}',
 #     return Codes
 
 
-class KeyResolver(ManyToOneMap):
+class KeyMap(ManyToOneMap):
     """
     Resolve all the various ways in which colours or effects can be specified.
     """
@@ -202,22 +202,23 @@ class KeyResolver(ManyToOneMap):
     def __missing__(self, key):
         try:
             return super().__missing__(key)
-        except KeyError as e:
+        except KeyError:
             pass
-        raise KeyError('%r is not a valid property description' % key)
+        raise KeyError(
+            f'{key} is not a valid description for text or background effect.')
 
 
-class CodeResolver(ManyToOneMap):
+class CodeMap(ManyToOneMap):  # CodeMap
     """
     Resolve all the various names for colours or effects into codes
     """
 
-    def __init__(self, dic=None, **kws):
-        super().__init__(dic, **kws)
-        # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
-        self.add_vocab(mplShortsMap)
-        # add a layer that maps to lower case: 'REd' --> 'red'
-        self.add_mapping(str.lower)
+    # def __init__(self, dic=None, **kws):
+    #     super().__init__(dic, **kws)
+    # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
+    # self.add_vocab(mplShortsMap)
+    # add a layer that maps to lower case: 'REd' --> 'red'
+    # self.add_mapping(str.lower)
 
     def __getitem__(self, key):
         # make sure we always return a str
@@ -226,22 +227,26 @@ class CodeResolver(ManyToOneMap):
     def __missing__(self, key):
         try:
             return super().__missing__(key)
-        except KeyError as e:
-            raise KeyError('Unknown property %r' % key)
+        except KeyError:
+            raise KeyError(f'Unknown colour or effect {key!r}') from None
 
 
 # additional shorthands for bold / italic text
-fg_resolver = CodeResolver(FG_CODES)
-fg_resolver.add_vocab(effectShortsMap)
+fg_codes = CodeMap(FG_CODES)
+fg_codes.add_vocab(effectShortsMap)
 
-resolver = KeyResolver(fg=fg_resolver,
-                       bg=CodeResolver(BG_CODES))
+codes = KeyMap(fg=fg_codes,
+               bg=CodeMap(BG_CODES))
 
-import numbers
-
+FORMAT_8BIT = KeyMap(fg='38;5;{:d}',
+                     bg='48;5;{:d}')
+FORMAT_24BIT = KeyMap(fg='38;2;{:d};{:d};{:d}',
+                      bg='48;2;{:d};{:d};{:d}')
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Dispatch functions for translating user input to ANSI codes
+
+
 @ftl.singledispatch
 def resolve(obj, fg_or_bg='fg'):
     """default dispatch func for resolving ANSI codes from user input"""
@@ -259,9 +264,13 @@ def _(obj, fg_or_bg='fg'):
 
 @resolve.register(str)
 def _(obj, fg_or_bg='fg'):
-    if obj is '':
+    if obj == '':
         return
-    yield resolver[fg_or_bg][obj]
+
+    try:
+        yield from resolve(to_24bit(obj), fg_or_bg)
+    except ValueError:
+        yield codes[fg_or_bg][obj]
 
 
 @resolve.register(numbers.Integral)
@@ -283,7 +292,8 @@ def _(obj, fg_or_bg='fg'):
             yield FORMAT_24BIT[fg_or_bg].format(*obj)
         else:
             raise ValueError(
-                    'Could not interpret key %s as a 24 bit colour' % repr(obj))
+                f'Could not interpret key {obj!r} as a 24 bit colour'
+            )
     else:
         for p in obj:
             yield from resolve(p, fg_or_bg)
@@ -301,11 +311,11 @@ def is_24bit(obj):
     if len(obj) != 3:
         return False
 
-    for o in obj:
-        if not isinstance(o, numbers.Integral):
-            return False
+    return all(isinstance(o, numbers.Integral) for o in obj)
 
-    return True
+
+def to_24bit(name):
+    return tuple((np.multiply(to_rgb(name), 255).astype(int)))
 
 
 def _gen_codes(*properties, **kws):
