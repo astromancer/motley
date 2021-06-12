@@ -8,7 +8,7 @@ from recipes.string import brackets
 import itertools as itt
 import os
 import logging
-import warnings
+import warnings as wrn
 from shutil import get_terminal_size
 
 import numpy as np
@@ -52,6 +52,8 @@ MAX_LINES = None  # TODO
 # TODO: OPTION for plain text row borders?
 
 # TODO: check out wcwidth lib
+
+# TODO: subtitle
 
 # FIXME: alignment not nice when mixed negative positive....
 #  or mixed float decimal (minimalist)
@@ -101,11 +103,23 @@ def str2tup(keys):
     return keys
 
 
-def apportion(w, n):
+def apportion(width, n):
     # divide space as equally as possible between `n` columns
-    space = np.array([w // n] * n)
-    space[:(w % n)] += 1
+    space = np.array([width // n] * n)
+    space[:(width % n)] += 1
     return space
+
+
+def justified_delta(widths, total):
+    extra = apportion(total, len(widths)) - widths
+    wide = (extra < 0)
+    if any(wide):
+        # some columns are wider than average
+        narrow = ~wide
+        delta = -sum(extra[wide])
+        extra[narrow] -= apportion(delta, narrow.sum())
+        extra[wide] = 0
+    return extra
 
 
 def get_column_widths(data, col_headers=None, raw=False):
@@ -275,8 +289,8 @@ def resolve_borders(col_borders, where, ncols, frame):
         cx = l.sum()
         wcb[~l] += cx
         wcb[l] = range(cx)
-        with warnings.catch_warnings():
-            warnings.filterwarnings("ignore", category=np.ComplexWarning)
+        with wrn.catch_warnings():
+            wrn.filterwarnings("ignore", category=np.ComplexWarning)
             wcb = wcb.astype(int)
 
     if col_borders is not None:
@@ -647,7 +661,7 @@ class Table(LoggingMixin):
             data, kws = self._from_dict(data, **kws)
             self.__init__(data, **kws)
             return
-        
+
         if isinstance(data, set):
             data = list(data)
 
@@ -1012,7 +1026,7 @@ class Table(LoggingMixin):
         -------
 
         """
-        # warnings.filterwarnings('error', category=DeprecationWarning)
+        # wrn.filterwarnings('error', category=DeprecationWarning)
 
         types_ = self.col_data_types[col_idx]
 
@@ -1083,9 +1097,9 @@ class Table(LoggingMixin):
             try:
                 data[use, i] = np.vectorize(fmt, (str, ))(col[use])
             except Exception as err:
-                warnings.warn(
-                    'Could not format column %i with %r due to the following '
-                    'exception:\n%s', i, fmt, err
+                wrn.warn(
+                    f'Could not format column {i} with {fmt!r} due to the '
+                    f'following exception:\n{err}'
                 )
 
                 data[use, i] = np.vectorize(str, (str, ))(col[use])
@@ -1101,9 +1115,9 @@ class Table(LoggingMixin):
                     data[use, i] = np.char.add(data[use, i].astype(str),
                                                flags[i])
                 except Exception as err:
-                    logger.warning(
-                        'Could not append flags to formatted data for column %i'
-                        ' due to the following  exception:\n%s', i, err
+                    wrn.warn(
+                        f'Could not append flags to formatted data for column '
+                        f'{i} due to the following exception:\n{err}'
                     )
 
         # finally set masked str for entire table
@@ -1673,7 +1687,6 @@ class Table(LoggingMixin):
             # user specified too many compact columns
             ((n_cols is not None) and (n_cols > n_comp))
         )
-
         if auto_ncols:
             # decide how many columns the inset table will have
             # n_cols chosen to be as large as possible given table width
@@ -1712,17 +1725,18 @@ class Table(LoggingMixin):
 
         # widths of actual columns
         widths = lengths(data).max(0)
-        widths[0::2] += 1           # +1 for column borders
+        widths[::2] += 1           # +1 for column borders
 
         # justified spacing
         if justify:
-            _2w = widths.reshape(-1, 2).sum(1) + 3
-            widths[1::2] += (apportion(table_width, n_cols) - _2w)
+            widths[1::2] += justified_delta(widths.reshape(-1, 2).sum(1) + 3,
+                                            table_width)
 
             if np.any(widths <= 0):
                 raise Exception('NEGATIVE WIDTHS FIXME!!!')
 
-        return Table(data, col_borders=col_borders, frame=False, width=widths)
+        return Table(data, col_borders=col_borders, frame=False, width=widths, 
+                     too_wide=False)
 
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes
