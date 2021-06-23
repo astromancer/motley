@@ -1,6 +1,9 @@
 # Things specific to this project #
 ###################################
-
+dev/
+src/motley/styles.py
+src/motley/mprog.py
+src/motley/unicode.py
 
 #########################################
 # Editor temporary/working/backup files #
@@ -85,5 +88,4 @@ lib/z.lib
 # Jupyter files #
 #################
 .ipynb_checkpoints/
-
 

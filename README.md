@@ -1,22 +1,23 @@
-# {name}: {long_name}
+# motley: {long_name}
 
-> {description}
+> Rocking terminal colours. Just like in the 80s. 🏳️‍🌈🤘🏽🎸
 
-<!-- 
+<!--
 TODO
-[![Build Status](https://travis-ci.com/astromancer/{name}.svg?branch=master)](https://travis-ci.com/astromancer/{name})
-[![Documentation Status](https://readthedocs.org/projects/{name}/badge/?version=latest)](https://{name}.readthedocs.io/en/latest/?badge=latest)
-[![PyPI](https://img.shields.io/pypi/v/{name}.svg)](https://pypi.org/project/{name})
-[![GitHub](https://img.shields.io/github/license/astromancer/{name}.svg?color=blue)](https://{name}.readthedocs.io/en/latest/license.html)
+[![Build Status](https://travis-ci.com/astromancer/motley.svg?branch=master)](https://travis-ci.com/astromancer/motley)
+[![Documentation Status](https://readthedocs.org/projects/motley/badge/?version=latest)](https://motley.readthedocs.io/en/latest/?badge=latest)
+[![PyPI](https://img.shields.io/pypi/v/motley.svg)](https://pypi.org/project/motley)
+[![GitHub](https://img.shields.io/github/license/astromancer/motley.svg?color=blue)](https://motley.readthedocs.io/en/latest/license.html)
  -->
 
-This project is for ...
+A python library for playing with colourful string representations using ANSI escape sequences.
+
 
 
 # Install
 
 ```shell
-pip install {name}
+pip install motley
 ```
 
 # Use
@@ -27,7 +28,7 @@ pip install {name}
 ```
 
 
-<!-- ![Example Image]({url}/blob/master/tests/images/example_0.png "Example Image") -->
+<!-- ![Example Image](https://github.com/astromancer/motley/blob/master/tests/images/example_0.png "Example Image") -->
 
 
 For more examples see [Documentation]()
@@ -38,16 +39,16 @@ For more examples see [Documentation]()
 # Test
 
 The [`test suite`](./tests) contains further examples of how
-`{name}` can be used.  Testing is done with `pytest`:
+`motley` can be used.  Testing is done with `pytest`:
 
 ```shell
-pytest {name}
+pytest motley
 ```
 
 # Contribute
 Contributions are welcome!
 
-1. [Fork it!]({url}/fork)
+1. [Fork it!](https://github.com/astromancer/motley/fork)
 2. Create your feature branch\
     ``git checkout -b feature/rad``
 3. Commit your changes\
@@ -58,18 +59,18 @@ Contributions are welcome!
 
 # Contact
 
-* e-mail: {email}
+* e-mail: hannes@saao.ac.za
 
 <!-- ### Third party libraries
  * see [LIBRARIES](https://github.com/username/sw-name/blob/master/LIBRARIES.md) files -->
 
 # License
 
-* see [LICENSE]({url}/blob/master/LICENSE)
+* see [LICENSE](https://github.com/astromancer/motley/blob/master/LICENSE)
 
 
-# Version
+<!-- # Version
 This project uses a [semantic versioning](https://semver.org/) scheme. The 
 latest version is
-* {version}
+* {version} -->
 
