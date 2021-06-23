@@ -2,28 +2,27 @@ from motley.table import Table
 import numpy as np
 
 
-def test_formatters_mixed():
-    Table([['foo', 1.44],
-           ['bar', 3.14]],
-          col_headers=['one', 'two'],
-          formatters={0: str, 'two': '{:.3f}'.format})
-
-
 def random_words(word_size, n_words, ord_range=(97, 122)):
     return list(map(''.join,
                     np.vectorize(chr)(
                             np.random.randint(*ord_range, (n_words, word_size))
                     )))
 
+def test_formatters_mixed():
+    Table([['foo', 1.44],
+           ['bar', 3.14]],
+          col_headers=['one', 'two'],
+          formatters={0: str, 'two': '{:.3f}'.format})
 
 # TODO: loads more basic tests to showcase functionality
 
 # TODO: automated way of looping through all possible argument combinations
-#  that make sense??
+#  that make sense?? --> pytest.mark.parametrize!!
 
 
 # test_simple
-data = np.random.randn(10, 10)
+nr, nc = 5, 8
+data = np.random.randn(nr, nc)
 tp = (dict(txt=('bold', 'm'), bg='g'))
 
 tables = [
@@ -43,19 +42,19 @@ tables = [
           title_props=tp,
           total=True,
           row_nrs=True,
-          col_headers=random_words(5, 10),
+          col_headers=random_words(5, nc),
           col_head_props=('italic', 'y')),
 
     # test terse keywords
     Table(data,
           title='Random data',
           nrs=True,
-          chead=random_words(5, 10),
+          chead=random_words(5, nc),
           chead_prop=('italic', 'y')),
 
     # test minimalist
-    Table.from_columns(*np.random.randn(3, 10),
-                       *np.random.randint(0, 1000, (3, 10)),
+    Table.from_columns(*np.random.randn(3, nc),
+                       *np.random.randint(0, 1000, (3, nc)),
                        title='Mixed float, int',
                        precision=3, minimalist=True, ),
 
@@ -72,11 +71,11 @@ tables = [
           title_props=(dict(txt=('bold', 'm'), bg='g')),
           totals=True,
           row_nrs=True,
-          col_headers=random_words(5, 10),
+          col_headers=random_words(5, nc),
           col_head_props=('italic', 'y')),
 
-    Table.from_columns(*np.random.randn(3, 10),
-                       *np.random.randint(0, 1000, (3, 10)),
+    Table.from_columns(*np.random.randn(3, nc),
+                       *np.random.randint(0, 1000, (3, nc)),
                        title='Mixed float, int',
                        precision=3, minimalist=True, ),
     # title_props=(dict(txt=('bold', 'm'), bg='g')),
