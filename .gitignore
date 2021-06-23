@@ -4,6 +4,7 @@ dev/
 src/motley/styles.py
 src/motley/mprog.py
 src/motley/unicode.py
+src/motley/progress.py
 
 #########################################
 # Editor temporary/working/backup files #

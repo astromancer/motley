@@ -2,30 +2,32 @@
 Pretty printed tables for small data sets
 """
 
-import types
-import re
-from recipes.string import brackets
-import itertools as itt
+
+# std libs
 import os
 import logging
+import numbers
 import warnings as wrn
+import functools as ftl
+import itertools as itt
 from shutil import get_terminal_size
 
+# third-party libs
 import numpy as np
 
-# from recipes.pprint import PrettyPrinter
-from recipes.logging import LoggingMixin
-from . import ansi
-from . import codes
-from .utils import wideness, get_alignment
-
-import numbers
-import functools as ftl
+# local libs
+from recipes.lists import where
 from recipes import pprint as ppr
 from recipes.decor import raises as bork
 from recipes.dicts import KeywordResolver
-from recipes.logging import get_module_logger
-from recipes.lists import where
+from recipes.logging import LoggingMixin, get_module_logger
+
+# relative libs
+from . import ansi, codes
+from .utils import wideness, get_alignment
+
+
+# from recipes.pprint import PrettyPrinter
 # from .utils import formatter
 
 

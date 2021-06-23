@@ -12,18 +12,19 @@ hue = codes.apply
 
 
 class ConvenienceFunction(object):
+    """
+    API function for applying ANSI codes to strings
+    """
+
     _doc_tmp = textwrap.dedent(
-            """
-            %s
-            
-            Calling this function on a str `s` is equivalent to running:
-            >>> codes.apply(s, fg={0!r}, bg={1!r})
-            """)
+        """
+        %s
+        
+        Calling this function on a str `s` is equivalent to running:
+        >>> codes.apply(s, fg={0!r}, bg={1!r})
+        """)
 
     def __init__(self, fg, bg=None):
-        """
-        API function for applying ANSI codes to strings
-        """
 
         # postfix = 'bg'
         # will postfix all functions referring to the background with '_bg'.

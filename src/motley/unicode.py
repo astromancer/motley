@@ -1,3 +1,0 @@
-#  TODO: maybe possible to do some basic things (underline / overline
-# /strikethrough) etc in unicode...
-#  https://en.wikipedia.org/wiki/Overline#Unicode

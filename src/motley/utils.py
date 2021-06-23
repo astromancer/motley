@@ -1,17 +1,22 @@
 """
 Utility functions and classes
 """
-import numbers
-import os
 
+# std libs
+import os
+import numbers
+import functools as ftl
+import itertools as itt
+
+# third-party libs
 import numpy as np
+
+# local libs
 from recipes.misc import get_terminal_size
 
-from . import codes
-from . import ansi
+# relative libs
+from . import codes, ansi
 
-import itertools as itt
-import functools as ftl
 
 ALIGNMENT_MAP = {'r': '>',
                  'l': '<',
@@ -211,35 +216,31 @@ def banner(obj, width=None, swoosh='=', align='<', **props):
     return info
 
 
-def rainbow(words, effects=(), **kws):
-    # try:
-    # embed()
+# def rainbow(words, effects=(), **kws):
+#     # try:
+#     # embed()
 
-    propIter = _prop_dict_gen(*effects, **kws)
-    propList = list(propIter)
-    nprops = len(propList)
+#     propIter = _prop_dict_gen(*effects, **kws)
+#     propList = list(propIter)
+#     nprops = len(propList)
 
-    if len(words) < nprops:
-        pairIter = itt.zip_longest(words, propList, fillvalue='default')
-    else:
-        pairIter = zip(words, propList)
+#     if len(words) < nprops:
+#         pairIter = itt.zip_longest(words, propList, fillvalue='default')
+#     else:
+#         pairIter = zip(words, propList)
 
-    try:
-        out = list(itt.starmap(codes.apply, pairIter))
-    except:
-        print('rainbow_' * 25)
-        from IPython import embed
-        embed()
-    #     raise SystemExit
-    # out = []
-    # for i, (word, props) in enumerate(pairIter):
-    #     word = codes.apply(word, **props)
-    #     out.append(word)
+#     out = list(itt.starmap(codes.apply, pairIter))
+    
+#     #     raise SystemExit
+#     # out = []
+#     # for i, (word, props) in enumerate(pairIter):
+#     #     word = codes.apply(word, **props)
+#     #     out.append(word)
 
-    if isinstance(words, str):
-        return ''.join(out)
+#     if isinstance(words, str):
+#         return ''.join(out)
 
-    return out
+#     return out
 
 
 # def _echo(_):
