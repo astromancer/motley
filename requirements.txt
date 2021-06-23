@@ -1,0 +1,10 @@
+recipes.egg
+more_itertools
+numpy
+matplotlib.egg
+decor
+ipython
+line_profiler
+lll
+matplotlib
+recipes
