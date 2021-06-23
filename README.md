@@ -1,4 +1,4 @@
-# motley: {long_name}
+# motley
 
 > Rocking terminal colours. Just like in the 80s. 🏳️‍🌈🤘🏽🎸
 
