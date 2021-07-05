@@ -19,7 +19,7 @@ import numpy as np
 from recipes.lists import where
 from recipes import pprint as ppr
 from recipes.decor import raises as bork
-from recipes.dicts import KeywordResolver
+from recipes.synonyms import Synonyms
 from recipes.logging import LoggingMixin, get_module_logger
 
 # relative libs
@@ -388,36 +388,10 @@ def truncate(item, width):
 
 class Table(LoggingMixin):
     """
-    An ascii table formatter. Good for displaying data. Definitely not for data
-    manipulation.  Plays nicely with ANSI colours and multi-line cell elements.
+    A table formatter. Good for displaying data. Definitely not for data
+    manipulation. Plays nicely with ANSI colours and multi-line cell elements.
     """
 
-    # TODO: test mappings!!
-
-    # mappings for terse kws
-    _mappings = {
-        'unit[s]': 'units',
-        'footnote[s]': 'footnotes',
-        'formatter[s]': 'formatters',
-        'cell_white[space]': 'cell_whitespace',
-        'minimal[ist]': ' minimalist',
-        '[column_]width[s]': '',
-        'c[olumn_]groups': 'col_groups',
-        '[row_]nrs': 'row_nrs',
-        'n[umbe]r_rows': 'row_nrs',
-        'total[s]': 'totals'
-    }
-    for rc, p in {'row': 'r[ow_]',
-                  'col': 'c[olumn_]'}.items():
-        _mappings.update({
-            f'{p}head[ers]': f'{rc}_headers',
-            f'{p}head[er]_prop[erties]': f'{rc}_head_props',
-            f'{p}borders': 'col_borders'
-        })
-    #
-    _kw_map = KeywordResolver(_mappings)
-
-    #
     _default_border = BORDER  # TODO odo move to module scope
 
     # The column format specification:
@@ -468,6 +442,29 @@ class Table(LoggingMixin):
         kws.setdefault('row_headers', row_headers)
         kws.setdefault('col_headers', col_headers)
         return data, kws
+
+    # TODO: test mappings!!
+
+    # mappings for terse kws
+    synonyms = Synonyms({
+        'unit[s]':              'units',
+        'footnote[s]':          'footnotes',
+        'formatter[s]':         'formatters',
+        'cell_white[space]':    'cell_whitespace',
+        'minimal[ist]':         'minimalist',
+        '[column_]width[s]':    '',
+        'c[olumn_]groups':      'col_groups',
+        '[row_]nrs':            'row_nrs',
+        'n[umbe]r_rows':        'row_nrs',
+        'total[s]':             'totals'
+    })
+    for rc, p in {'row':        'r[ow_]',
+                  'col':        'c[olumn_]'}.items():
+        synonyms.update({
+            f'{p}head[ers]':                f'{rc}_headers',
+            f'{p}head[er]_prop[erties]':    f'{rc}_head_props',
+            f'{p}borders':                  'col_borders'
+        })
 
     def __init__(self,
                  data,
@@ -669,20 +666,18 @@ class Table(LoggingMixin):
 
         # resolve kws
         if kws:
-            # TODO: as a decorator!!
             # remap terse keywords
-            kws_ = self._kw_map.resolve(self.__init__, kws, locals())
+            self.__init__(data, **self.synonyms.resolve(locals(), **kws))
+            return
             # `kws_` now has all the allowed parameters for this function as
             # keywords with either the default or user input as values
-            self.__init__(data, **kws_)
-            return
 
         # special case: astropy.table.Table
         if is_astropy_table(data):
             # FIXME: can you do this with from_dict???
             data, col_headers_, units_ = _convert_astropy_table(data)
             # remap terse keywords
-            kws_ = self._kw_map.resolve(self.__init__, kws, locals())
+            kws_ = self.synonyms.resolve(locals(), **kws)
             # replace defaults with those from the astropy table
             if kws_['col_headers'] is None:
                 kws_['col_headers'] = col_headers_
@@ -746,7 +741,7 @@ class Table(LoggingMixin):
 
         # column headers will be center aligned unless requested otherwise.
         self.col_head_align = np.array(list(self.get_alignment(
-            align, data, col_headers, lambda _: HEADER_ALIGN)))
+            col_head_align, data, col_headers, lambda _: HEADER_ALIGN)))
 
         # column formatters
         self.formatters = resolve_input(
@@ -931,7 +926,10 @@ class Table(LoggingMixin):
             footnotes = footnotes.splitlines()
 
         self.footnotes = list(footnotes)
-
+    
+    # HACK
+    synonyms.func = __init__
+    
     def __repr__(self):
         # useful in interactive sessions to immediately print the table
         return str(self)
@@ -1737,7 +1735,7 @@ class Table(LoggingMixin):
             if np.any(widths <= 0):
                 raise Exception('NEGATIVE WIDTHS FIXME!!!')
 
-        return Table(data, col_borders=col_borders, frame=False, width=widths, 
+        return Table(data, col_borders=col_borders, frame=False, width=widths,
                      too_wide=False)
 
     # def expand_dtype(self, data):
