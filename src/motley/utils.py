@@ -130,19 +130,70 @@ def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
 def vstack_compact(tables):
     # figure out which columns can be compactified
     # note. the same thing can probs be accomplished with table groups ...
-    assert len(tables)
+    assert tables
     varies = set()
     ok_size = tables[0].data.shape[1]
     for i, tbl in enumerate(tables):
         size = tbl.data.shape[1]
         if size != ok_size:
-            raise ValueError('Table %d has %d columns while the preceding %d '
-                             'tables have %d columns.'
-                             % (i, size, i - 1, ok_size))
+            raise ValueError(
+                'Table %d has %d columns while the preceding %d tables have %d '
+                'columns.' % (i, size, i - 1, ok_size)
+            )
         # check compactable
         varies |= set(tbl.compactable())
 
     return varies
+
+
+def make_group_title(keys):
+    if isinstance(keys, str):
+        return keys
+
+    try:
+        return "; ".join(map(str, keys))
+    except:
+        return str(keys)
+
+
+def vstack_groups(groups, titled=make_group_title, braces=False, vspace=1,
+                  **kws):
+    """
+    Pretty print grouped tables
+    """
+
+    # ΤΟDO: could accomplish the same effect by colour coding...
+
+    ordered_keys = list(groups.keys())  # key=sort
+    stack = [groups[key] for key in ordered_keys]
+
+    if not braces:
+        return vstack(stack, not bool(titled), True, vspace)
+
+    braces = ''
+    for i, gid in enumerate(ordered_keys):
+        tbl = groups[gid]
+        braces += ('\n' * bool(i) +
+                   hbrace(tbl.data.shape[0], gid) +
+                   '\n' * (tbl.has_totals + vspace))
+
+    # vertical offset
+    offset = stack[0].n_head_lines
+    return hstack([vstack(stack, True, vspace), braces],
+                  spacing=1, offset=offset)
+
+
+def hbrace(size, name=''):
+    #
+    if size < 3:
+        return '← ' + str(name) + '\n' * (int(size) // 2)
+
+    d, r = divmod(int(size) - 3, 2)
+    return '\n'.join(['⎫'] +
+                     ['⎪'] * d +
+                     ['⎬ %s' % str(name)] +
+                     ['⎪'] * (d + r) +
+                     ['⎭'])
 
 
 def overlay(text, background='', align='^', width=None):
@@ -230,7 +281,7 @@ def banner(obj, width=None, swoosh='=', align='<', **props):
 #         pairIter = zip(words, propList)
 
 #     out = list(itt.starmap(codes.apply, pairIter))
-    
+
 #     #     raise SystemExit
 #     # out = []
 #     # for i, (word, props) in enumerate(pairIter):
