@@ -3,6 +3,7 @@ Pretty printed tables for small data sets
 """
 
 
+
 # std libs
 import os
 import logging
@@ -14,12 +15,15 @@ from shutil import get_terminal_size
 
 # third-party libs
 import numpy as np
+from pyxides.grouping import Groups
+from pyxides.vectorize import AttrVectorize
 
 # local libs
 from recipes.lists import where
 from recipes import pprint as ppr
-from recipes.decor import raises as bork
+from recipes.sets import OrderedSet
 from recipes.synonyms import Synonyms
+from recipes.decor import raises as bork
 from recipes.logging import LoggingMixin, get_module_logger
 
 # relative libs
@@ -926,10 +930,10 @@ class Table(LoggingMixin):
             footnotes = footnotes.splitlines()
 
         self.footnotes = list(footnotes)
-    
+
     # HACK
     synonyms.func = __init__
-    
+
     def __repr__(self):
         # useful in interactive sessions to immediately print the table
         return str(self)
@@ -1932,11 +1936,13 @@ class AttrTable:
 
 
         """
-        if not hasattr(container, 'attrs'):
-            raise TypeError('Container does not support vectorized attribute '
-                            'lookup on items.')
+        if isinstance(container, AttrVectorize):  # not hasattr(container, 'attrs')
+            return self.get_table(container, attrs, **kws)
 
-        return self.get_table(container, attrs, **kws)
+        if isinstance(container, Groups):
+            return self.get_tables(container, attrs, **kws)
+
+        raise TypeError(f'Cannot tabulate object of type {type(container)}')
 
     def convert_aliases(self, kws):
         # ok = set(map(self.aliases.get, kws)) - {None}
@@ -1956,7 +1962,9 @@ class AttrTable:
         `motley.table.Table` instance
         """
 
-        from motley.table import Table
+        if not isinstance(container, AttrVectorize):
+            raise TypeError('Container does not support vectorized attribute '
+                            'lookup on items.')
 
         if len(container) == 0:
             return Table(['Empty'])
@@ -2024,3 +2032,112 @@ class AttrTable:
         self.headers[attr] = column_header
         if formatter is not None:
             self.formatters[column_header] = formatter
+
+    def get_tables(self, groups, attrs=None, titled=True, filler_text='EMPTY',
+                   **kws):
+        # TODO: grand total..
+        """
+        Get a dictionary of tables for the containers in `groups`. This method
+        assists pretty printing groups of tables.
+        """
+        if titled is True:
+            titled = make_group_title
+
+        title = kws.pop('title', self.__class__.__name__)
+        ncc = kws.pop('compact', False)  # number of columns in compact part
+        kws['compact'] = False
+
+        attrs = OrderedSet(self.attrs)
+        attrs_grouped_by = ()
+        compactable = set()
+        # multiple = (len(self) > 1)
+        if len(groups) > 1:
+            if groups.group_id != ((), {}):
+                keys, _ = groups.group_id
+                key_types = {gid: list(grp)
+                             for gid, grp in itt.groupby(keys, type)}
+                attrs_grouped_by = key_types.get(str, ())
+                attrs -= set(attrs_grouped_by)
+
+            # check which columns are compactable
+            attrs_varies = {key for key in attrs if groups.varies_by(key)}
+            compactable = attrs - attrs_varies
+            attrs -= compactable
+
+        # column headers
+        headers = self.get_headers(attrs)
+
+        # handle column totals
+        totals = kws.pop('totals', self.kws['totals'])
+        if totals:
+            # don't print totals for columns used for grouping since they will
+            # not be displayed
+            totals = set(totals) - set(attrs_grouped_by) - compactable
+            # convert totals to numeric since we remove column headers for
+            # lower tables
+            totals = list(
+                map(headers.index, self.convert_aliases(list(totals))))
+
+        units = kws.pop('units', self.units)
+        if units:
+            want_units = set(units.keys())
+            nope = set(units.keys()) - set(headers)
+            units = {k: units[k] for k in (want_units - nope - compactable)}
+
+        tables = {}
+        empty = []
+        footnotes = OrderedSet()
+        for i, (gid, items) in enumerate(groups.items()):
+            if items is None:
+                empty.append(gid)
+                continue
+
+            # get table
+            if titled:
+                # FIXME: problem with dynamically formatted group title.
+                # Table wants to know width at runtime....
+                title = titled(gid)
+                # title = titled(i, gid, kws.get('title_props'))
+
+            tables[gid] = tbl = self.get_table(items, attrs,
+                                               title=title,
+                                               totals=totals,
+                                               units=units,
+                                               # compact=False,
+                                               **kws)
+
+            # only first table gets title / headers
+            if not titled:
+                kws['title'] = None
+            if not headers:
+                kws['col_headers'] = kws['col_groups'] = None
+
+            # only last table gets footnote
+            footnotes |= set(tbl.footnotes)
+            tbl.footnotes = []
+        #
+        tbl.footnotes = list(footnotes)
+
+        # deal with null matches
+        first = next(iter(tables.values()))
+        if len(empty):
+            filler = [''] * first.shape[1]
+            filler[1] = filler_text
+            filler = Table([filler])
+            for gid in empty:
+                tables[gid] = filler
+
+        # HACK compact repr
+        if ncc and first.compactable():
+            first.compact = ncc
+            first.compact_items = dict(zip(
+                list(compactable),
+                self.get_table(first[:1], compactable,
+                               chead=None, cgroups=None,
+                               row_nrs=False, **kws).pre_table[0]
+            ))
+            first._compact_table = first._get_compact_table()
+
+        # put empty tables at the end
+        # tables.update(empty)
+        return tables

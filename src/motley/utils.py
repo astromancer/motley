@@ -156,19 +156,17 @@ def make_group_title(keys):
         return str(keys)
 
 
-def vstack_groups(groups, titled=make_group_title, braces=False, vspace=1,
-                  **kws):
+def vstack_groups(groups, strip_titles, braces=False, vspace=1, **kws):
     """
-    Pretty print grouped tables
+    Pretty print dict of tables
     """
 
     # ΤΟDO: could accomplish the same effect by colour coding...
-
     ordered_keys = list(groups.keys())  # key=sort
     stack = [groups[key] for key in ordered_keys]
 
     if not braces:
-        return vstack(stack, not bool(titled), True, vspace)
+        return vstack(stack, strip_titles, True, vspace)
 
     braces = ''
     for i, gid in enumerate(ordered_keys):
