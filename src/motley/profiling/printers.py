@@ -142,7 +142,7 @@ def _ast_func_index(source):
 
 
 # ****************************************************************************************************
-class ReportStats(object):
+class ReportStats:
     """
     Helper class that prints profiling results for a single function when called.
     This base class is essentially an OO (and therefore extensible) version of

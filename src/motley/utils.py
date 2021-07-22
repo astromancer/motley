@@ -343,7 +343,7 @@ def banner(obj, width=None, swoosh='=', align='<', **props):
 #     return formatter(obj, precision, minimalist, align, **kws)(obj)
 
 
-class ConditionalFormatter(object):
+class ConditionalFormatter:
     """
     A str formatter that applies ANSI codes conditionally
     """

@@ -158,7 +158,7 @@ class LineProfiler(lp.LineProfiler):
 # Decorator classes
 # ****************************************************************************************************
 
-class profile(object):
+class profile:
     """
     Decorator for printing results from multiple profiled functions in
     various output formats

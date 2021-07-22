@@ -47,7 +47,7 @@ ansiCode = namedtuple('ansiCode', ('csi', 'params', 'final_byte', 's', 'end'))
 
 
 # TODO:
-# class ANSI(object):
+# class ANSI:
 #     def __init__(self, s):
 #         *self.codes, self.s, self.end = split(s)
 #

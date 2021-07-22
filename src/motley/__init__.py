@@ -11,7 +11,7 @@ from .ansi import *
 hue = codes.apply
 
 
-class ConvenienceFunction(object):
+class ConvenienceFunction:
     """
     API function for applying ANSI codes to strings
     """
