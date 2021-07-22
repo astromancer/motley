@@ -197,39 +197,47 @@ def hbrace(size, name=''):
 def overlay(text, background='', align='^', width=None):
     """overlay text on background using given alignment."""
 
-    if not (background or width):  # nothing to align on
+    if not (background or width):
+        # nothing to align on
         return text
 
+    text_size = ansi.length_seen(text)
+    bg_size = ansi.length_seen(background)
     if not background:
-        background = ' ' * width  # align on clear background
+        # align on clear background
+        background = ' ' * width
     elif not width:
-        width = ansi.length_seen(background)
+        # keep width of background text
+        width = bg_size
 
-    if ansi.length_seen(background) < ansi.length_seen(text):
-        # alignment is pointless
+    if bg_size < text_size:
+        # background will be clobbered. Alignment is pointless.
         return text
 
-    # do alignment
-    align = get_alignment(align)
     if ansi.has_ansi(background):
         raise NotImplementedError(
             '# fixme: will not work if background has coded strings')
 
-    if align == '<':  # left aligned
-        overlaid = text + background[ansi.length_seen(text):]
+    # resolve alignment character
+    align = get_alignment(align)
 
-    elif align == '>':  # right aligned
-        overlaid = background[:-ansi.length_seen(text)] + text
-
-    elif align == '^':  # center aligned
-        div, mod = divmod(ansi.length_seen(text), 2)
+    # center aligned
+    if align == '^':
+        div, mod = divmod(text_size, 2)
         half_width = width // 2
         # start and end indices of the text in the center of the background
-        idx = half_width - div, half_width + (div + mod)
         # center text on background
-        overlaid = background[:idx[0]] + text + background[idx[1]:]
+        return ''.join((background[:(half_width - div)],
+                        text,
+                        background[(half_width + div + mod):]))
 
-    return overlaid
+    # left aligned
+    if align == '<':
+        return text + background[text_size:]
+
+     # right aligned
+    if align == '>':
+        return background[:-text_size] + text
 
 
 def wideness(s, raw=False):  # rename width ??
@@ -259,10 +267,12 @@ def banner(obj, width=None, swoosh='=', align='<', **props):
     # s = pprint.pformat(obj, width=width)
     s = str(obj)
     # fill whitespace (so background props reflect for entire block of banner)
-    s = '{0:{2}{1:d}}'.format(s, width, align)
-    info = '\n'.join([swoosh, s, swoosh])
-    info = codes.apply(info, **props)
-    return info
+
+@ftl.lru_cache()
+def resolve_width(width):
+    if width is None:
+        return get_terminal_size()[0]
+    return int(width)
 
 
 # def rainbow(words, effects=(), **kws):
