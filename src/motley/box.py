@@ -1,11 +1,11 @@
 
-# std libs
+# std
 import warnings as wrn
 
-# local libs
+# local
 from recipes.functionals import echo0
 
-# relative libs
+# relative
 from . import underline
 from .utils import wideness, resolve_width
 

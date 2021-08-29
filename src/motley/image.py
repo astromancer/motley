@@ -2,7 +2,7 @@
 Image rendering in the terminal.
 """
 
-# third-party libs
+# third-party
 import numpy as np
 from matplotlib.pyplot import get_cmap
 from matplotlib.colors import Normalize

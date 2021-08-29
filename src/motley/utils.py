@@ -3,20 +3,20 @@ Utility functions and classes
 """
 
 
-# std libs
+# std
 import os
 import numbers
 import functools as ftl
 import itertools as itt
 from collections import abc
 
-# third-party libs
+# third-party
 import numpy as np
 
-# local libs
+# local
 from recipes.misc import get_terminal_size
 
-# relative libs
+# relative
 from . import codes, ansi
 
 

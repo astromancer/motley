@@ -3,19 +3,19 @@ Does the work to translate colour/effect names to ANSI codes
 """
 
 
-# std libs
+# std
 import numbers
 import functools as ftl
 
-# third-party libs
+# third-party
 import numpy as np
 import more_itertools as mit
 
-# local libs
+# local
 from recipes.dicts import ManyToOneMap
 from recipes.string import replace_prefix
 
-# relative libs
+# relative
 from .ansi import parse
 from .colors import CSS_TO_RGB
 

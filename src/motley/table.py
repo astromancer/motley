@@ -3,7 +3,7 @@ Pretty printed tables for small data sets
 """
 
 
-# std libs
+# std
 import os
 import logging
 import numbers
@@ -12,12 +12,12 @@ import functools as ftl
 import itertools as itt
 from shutil import get_terminal_size
 
-# third-party libs
+# third-party
 import numpy as np
 from pyxides.grouping import Groups
 from pyxides.vectorize import AttrVectorizerMixin
 
-# local libs
+# local
 from recipes.lists import where
 from recipes import pprint as ppr
 from recipes.sets import OrderedSet
@@ -25,7 +25,7 @@ from recipes.synonyms import Synonyms
 from recipes.decorators import raises as bork
 from recipes.logging import LoggingMixin, get_module_logger
 
-# relative libs
+# relative
 from . import ansi, codes
 from .utils import wideness, get_alignment, make_group_title
 
