@@ -13,13 +13,14 @@ from matplotlib.colors import to_rgb
 
 # local libs
 from recipes.dicts import ManyToOneMap
+from recipes.string import replace_prefix
 
 # relative libs
 from .ansi import parse
 
 
-# source: https://en.wikipedia.org/wiki/ANSI_escape_code
-# http://ascii-table.com/ansi-escape-sequences.php
+# see:  https://en.wikipedia.org/wiki/ANSI_escape_code
+#       http://ascii-table.com/ansi-escape-sequences.php
 
 # Escape sequence
 ESC = '\033'  # All sequences start with this character # equivalent to \x1b
@@ -30,13 +31,13 @@ END = CSI + '0m'
 # ANSI Codes for Text effects and colours  FG_CODES BG_CODE
 FG_CODES = {
     'bold': 1,
-    'dim': 2,  # faint
+    'dim': 2,                   # faint
     'italic': 3,
     'underline': 4,
-    'blink': 5,  # blink slow
-    # 'blink' : 6,           # blink fast
+    'blink': 5,                 # blink slow
+    # 'blink' : 6,              # blink fast
     'invert': 7,
-    'hidden': 8,  # conceal
+    'hidden': 8,                # conceal
     'strike': 9,
     # ------------------
     # 10	Primary(default) font
@@ -67,7 +68,7 @@ FG_CODES = {
     # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
     # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
     # channels (out of 255)
-    'default': 39,  # Default text color (foreground)
+    'default': 39,                  # Default text color (foreground)
     # ------------------
     'frame': 51,
     'circle': 52,
@@ -127,32 +128,37 @@ BG_CODES = {
     'light cyan': 106,
     'white': 107,
 }
-# TODO: alternate colour names here: https://en.wikipedia.org/wiki/ANSI_escape_code
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Convenient short colour descriptions a la matplotlib
-mplShortsMap = {
-    'b': 'blue',
-    'g': 'green',
-    'r': 'red',
-    'c': 'cyan',
-    'm': 'magenta',
-    'y': 'yellow',
-    'k': 'black',
-    'w': 'white',
-}
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
+# Short colour descriptions
+# mplShortsMap = {
+#     'b': 'blue',
+#     'g': 'green',
+#     'r': 'red',
+#     'c': 'cyan',
+#     'm': 'magenta',
+#     'y': 'yellow',
+#     'k': 'black',
+#     'w': 'white',
+# }
 
 #
-effectShortsMap = {'B': 'bold',
-                   'I': 'italic',
-                   'U': 'underline',
-                   'S': 'strike',
-                   'unbold': 'dim',
-                   'strikethrough': 'strike',
-                   'blink': 'blink_slow',
-                   'hide': 'hidden',
-                   'faint': 'dim'
-                   }
+effectAliasMap = {
+    'B': 'bold',
+    'I': 'italic',
+    'U': 'underline',
+    '_': 'underline',
+    'ul': 'underline',
+    'S': 'strike',
+    '-': 'strike',
+    'strikethrough': 'strike',
+    'unbold': 'dim',
+    'blink': 'blink_slow',
+    'hide': 'hidden',
+    'faint': 'dim'
+}
 # volcab is translated before keyword mappings in Many2One, so the uppercase
 # here works
 
@@ -168,6 +174,7 @@ kwAliasMap = {
     'fg': 'fg',
     'foreground': 'fg',
     'rgb': 'fg',
+
     # background
     'highlight': 'bg',
     'background': 'bg',
@@ -205,12 +212,13 @@ class KeyMap(ManyToOneMap):
         except KeyError:
             pass
         raise KeyError(
-            f'{key} is not a valid description for text or background effect.')
+            f'{key!r} is not a valid description for text or background effect.'
+        )
 
 
 class CodeMap(ManyToOneMap):  # CodeMap
     """
-    Resolve all the various names for colours or effects into codes
+    Resolve all the various names for colours or effects into ansi codes.
     """
 
     # def __init__(self, dic=None, **kws):
@@ -232,11 +240,16 @@ class CodeMap(ManyToOneMap):  # CodeMap
 
 
 # additional shorthands for bold / italic text
-fg_codes = CodeMap(FG_CODES)
-fg_codes.add_vocab(effectShortsMap)
+fg_codes, bg_codes = CodeMap(FG_CODES), CodeMap(BG_CODES)
 
-codes = KeyMap(fg=fg_codes,
-               bg=CodeMap(BG_CODES))
+light_is_bright = ftl.partial(replace_prefix, old='bright', new='light')
+fg_codes.add_mapping(light_is_bright)
+bg_codes.add_mapping(light_is_bright)
+
+fg_codes.add_vocab(effectAliasMap)
+
+# Keyword Translator
+codes = KeyMap(fg=fg_codes, bg=bg_codes)
 
 FORMAT_8BIT = KeyMap(fg='38;5;{:d}',
                      bg='48;5;{:d}')
@@ -259,7 +272,7 @@ def resolve(obj, fg_or_bg='fg'):
 @resolve.register(type(None))
 def _(obj, fg_or_bg='fg'):
     return
-    yield
+    yield  # sourcery skip: remove-unreachable-code #pylint: disable=unreachable
 
 
 @resolve.register(str)
@@ -318,12 +331,12 @@ def to_24bit(name):
     return tuple((np.multiply(to_rgb(name), 255).astype(int)))
 
 
-def _gen_codes(*properties, **kws):
+def _gen_codes(*effects, **kws):
     """
 
     Parameters
     ----------
-    properties
+    effects
     kws
 
     Yields
@@ -331,32 +344,34 @@ def _gen_codes(*properties, **kws):
     code: int
     """
 
-    yield from resolve(properties)
+    yield from resolve(effects)
     yield from resolve(kws)
 
 
-def _get_params(*properties, **kws):
+def _get_params(*effects, **kws): # TODO better name
     # get the nrs '34;48;5;22' part of the code
-    return ';'.join(_gen_codes(*properties, **kws))
+    return ';'.join(_gen_codes(*effects, **kws))
 
 
-def get(*properties, **kws):
+def get(*effects, **kws):
     """
-    Get the ANSI code for `properties` and `kws`
+    Get the ANSI code for `effects` and `kws`
 
     Parameters
     ----------
-    properties:
+    effects:
     kws:
 
     Returns
     -------
 
     """
-    return ''.join((CSI, _get_params(*properties, **kws), 'm'))
+    return ''.join((CSI, _get_params(*effects, **kws), 'm'))
 
 
 def from_list(fg=None, bg=None):
+    """Vectorized code resolution."""
+
     if fg is not None:
         return list(map(get, fg))
 
@@ -364,14 +379,14 @@ def from_list(fg=None, bg=None):
         return [get(bg=_) for _ in bg]
 
 
-def apply(s, *properties, **kws):
+def apply(s, *effects, **kws):
     """
-    Apply the ANSI codes mapped to by `properties` and `kws` to the string `s`
+    Apply the ANSI codes mapped to by `effects` and `kws` to the string `s`
 
     Parameters
     ----------
     s
-    properties
+    effects
     kws
 
     Returns
@@ -382,39 +397,37 @@ def apply(s, *properties, **kws):
     # string = str(s)
 
     # get code bits eg: '34;48;5;22'
-    new_codes = _get_params(*properties, **kws)
-    if not len(new_codes):
+    new_codes = _get_params(*effects, **kws)
+    if not new_codes:
         return s
 
-    # In order to get the correct representation of the string,
-    # we strip and ANSI codes that are in place and stack the new codes
-    # This means previous colours are replaced, but effects like 'bold' or
-    # 'italic' will stack for recursive invocations.  This also means we get
-    # the shortest representation of the string given the parameters which is
-    # nice and efficient. If we were to apply blindly our string would be
+    # In order to get the correct representation of the string, we strip and
+    # ANSI codes that are in place and stack the new codes This means previous
+    # colours are replaced, but effects like 'bold' or 'italic' will stack for
+    # recursive invocations of this function.  This also means we get the
+    # shortest possible representation of the string given the parameters which
+    # is nice and efficient. If we were to apply blindly our string would be
     # longer than needed by a few (non-display) characters. This might seem
-    # innocuous but becomes deadly once you start doing more complicated
-    # effects on longer strings
-    # note: final byte 'm' only valid for SGR (Select Graphic Rendition) and
-    #  not other codes, but this is all we support for now
+    # innocuous but becomes important once you start doing more complicated
+    # effects on longer strings.
 
-    return ''.join(''.join((CSI, params, ';', new_codes, 'm', w, END))
-                   for _, params, _, w, _ in parse(s)
-                   )  # .replace('\n', f'{END}\n{CSI}{new_codes}m'
-    #
-    # Finally, terminate and restart all codes at a newline boundary so that
-    # we can more easily stack text blocks horizontally
+    # NOTE: final byte 'm' only valid for SGR (Select Graphic Rendition) and not
+    # other codes, but this is all we support for now
+
+    return ''.join(f'{CSI}{params};{new_codes}m{w}{END}'
+                   for _, params, _, w, _ in parse(s))
+    
 
 
-def apply_naive(s, *properties, **kws):
+def apply_naive(s, *effects, **kws):
     """
     Initial naive implementation of `apply` that blindly wraps the string with
     the ANSI codes.  Use `apply` instead of this function.
     """
 
     # get code string eg: '34;48;5;22'
-    code = get(*properties, **kws)
-    if not len(code):
+    code = get(*effects, **kws)
+    if not code:
         return s
 
     return ''.join((code, s, END))

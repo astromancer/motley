@@ -3,7 +3,6 @@ Pretty printed tables for small data sets
 """
 
 
-
 # std libs
 import os
 import logging
@@ -16,19 +15,19 @@ from shutil import get_terminal_size
 # third-party libs
 import numpy as np
 from pyxides.grouping import Groups
-from pyxides.vectorize import AttrVectorize
+from pyxides.vectorize import AttrVectorizerMixin
 
 # local libs
 from recipes.lists import where
 from recipes import pprint as ppr
 from recipes.sets import OrderedSet
 from recipes.synonyms import Synonyms
-from recipes.decor import raises as bork
+from recipes.decorators import raises as bork
 from recipes.logging import LoggingMixin, get_module_logger
 
 # relative libs
 from . import ansi, codes
-from .utils import wideness, get_alignment
+from .utils import wideness, get_alignment, make_group_title
 
 
 # from recipes.pprint import PrettyPrinter
@@ -42,7 +41,7 @@ logger.setLevel(logging.INFO)
 
 
 # defaults as module constants
-TRUNC = '…'  # single character ellipsis u"\u2026" to indicate truncation
+DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
 BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
 OVERLINE = '‾'  # U+203E
 # EMDASH = '—' U+2014
@@ -119,6 +118,9 @@ def apportion(width, n):
 def justified_delta(widths, total):
     extra = apportion(total, len(widths)) - widths
     wide = (extra < 0)
+    if all(wide):
+        return np.zeros_like(widths)
+
     if any(wide):
         # some columns are wider than average
         narrow = ~wide
@@ -126,6 +128,10 @@ def justified_delta(widths, total):
         extra[narrow] -= apportion(delta, narrow.sum())
         extra[wide] = 0
     return extra
+
+# def justify_widths(widths, table_width):
+#     widths[1::2] += justified_delta(widths.reshape(-1, 2).sum(1) + 3,
+#                                         table_width)
 
 
 def get_column_widths(data, col_headers=None, raw=False):
@@ -375,14 +381,14 @@ def highlight(array, condition, props, formatter=ppr.numeric, **kws):
 
 
 def truncate(item, width):
-    # TODO: if TRUNC more than 1 chr long
+    # TODO: if DOTS more than 1 chr long
     cw = 0  # cumulative width
     s = ''
     for parts in ansi.parse(str(item), named=True):
         cw += len(parts.s)
         if cw > width:
             s += ''.join(parts[:3] +
-                         (parts.s[:width - 1], TRUNC) +
+                         (parts.s[:width - 1], DOTS) +
                          parts[-1:])
             break
         else:
@@ -472,31 +478,48 @@ class Table(LoggingMixin):
 
     def __init__(self,
                  data,
+
+                 #  Title(text, '_', '^')
                  title=None,
                  title_align='center',
                  title_props=('underline', ),
+
+                 # ColumnTitles(names, 'bold', 'blue', '^', nrs=True, units)
                  col_headers=None,
                  col_head_props='bold',
                  col_head_align='^',
                  units=None,
                  col_borders=_default_border,
+
                  vlines=None,
                  col_groups=None,
+
+                 # RowTitles(names, 'bold', 'blue', nrs=True)
                  row_headers=None,
                  row_head_props='bold',
                  row_nrs=False,
+
+                 max_rows=np.inf,
                  hlines=None,
+
+                 # styling
                  frame=True,
-                 align=None,
+                 compact=False,
+
+                 # Data format
+                 # DataFormat(precision, minimalist, align, masked)
+                 formatters=None,
+                 masked='--',
                  precision=2,
                  minimalist=False,
-                 compact=False,
+                 align=None,
+
                  width=None,
                  too_wide='split',
                  cell_whitespace=1,
                  totals=None,
-                 formatters=None,
-                 masked='--',
+
+
                  flags=None,
                  insert=None,
                  highlight=None,
@@ -779,6 +802,12 @@ class Table(LoggingMixin):
         self.col_head_props = col_head_props
         # todo : don't really need this since we have self.highlight
         self.row_head_props = row_head_props
+
+        # truncate number of rows
+        nrows = data.shape[0]
+        if nrows > max_rows:
+            insert[max_rows] = '< ... {} rows omitted ... >'
+            data = data[:max_rows]
 
         # add the (row/column) headers / row numbers / totals
         self.pre_table = self.add_headers(data, row_headers, col_headers,
@@ -1117,7 +1146,7 @@ class Table(LoggingMixin):
             if i in flags:
                 try:
                     data[use, i] = np.char.add(data[use, i].astype(str),
-                                               flags[i])
+                                               list(map(str, flags[i])))
                 except Exception as err:
                     wrn.warn(
                         f'Could not append flags to formatted data for column '
@@ -1885,13 +1914,14 @@ class Table(LoggingMixin):
 # http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
 # https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
 
-def sentinel():
+def SENTINEL():
     pass
 
 
 class AttrTable:
     """
-    Helper class to print tables of attributes for containers of items
+    Helper class for tabulating data. Attributes of the objects in the container
+    are mapped to the columns of the table.
     """
 
     def _get_input(self, obj):
@@ -1936,7 +1966,7 @@ class AttrTable:
 
 
         """
-        if isinstance(container, AttrVectorize):  # not hasattr(container, 'attrs')
+        if isinstance(container, AttrVectorizerMixin):
             return self.get_table(container, attrs, **kws)
 
         if isinstance(container, Groups):
@@ -1952,45 +1982,13 @@ class AttrTable:
             return [self.aliases.get(k, k) for k in kws]
         raise TypeError
 
-    def get_table(self, container, attrs=None, **kws):
-        """
-        Keyword arguments passed directly to the `motley.table.Table`
-            constructor.
-
-        Returns
-        -------
-        `motley.table.Table` instance
-        """
-
-        if not isinstance(container, AttrVectorize):
-            raise TypeError('Container does not support vectorized attribute '
-                            'lookup on items.')
-
-        if len(container) == 0:
-            return Table(['Empty'])
-
-        if attrs is None:
-            attrs = self.attrs
-
-        headers = self.get_headers(attrs)
-        kws = {**self.kws,  # defaults
-               **{**dict(title=container.__class__.__name__,
-                         col_headers=headers,
-                         col_groups=self.get_col_groups(attrs)),
-                  **{key: self.get_defaults(attrs, key)
-                     for key in ('units', 'formatters')},
-                  **kws},  # input
-               }
-
-        return Table(container.attrs(*attrs), **kws)
-
     def get_defaults(self, attrs, which):
         defaults = getattr(self, which)
         out = {}
         for a in attrs:
             alias = self.get_header(a)
-            use = defaults.get(a, defaults.get(alias, sentinel))
-            if not use is sentinel:
+            use = defaults.get(a, defaults.get(alias, SENTINEL))
+            if use is not SENTINEL:
                 out[alias] = use
         return out
 
@@ -2033,12 +2031,43 @@ class AttrTable:
         if formatter is not None:
             self.formatters[column_header] = formatter
 
+    def get_table(self, container, attrs=None, **kws):
+        """
+        Keyword arguments passed directly to the `motley.table.Table`
+            constructor.
+
+        Returns
+        -------
+        `motley.table.Table` instance
+        """
+
+        if not isinstance(container, AttrVectorizerMixin):
+            raise TypeError('Container does not support vectorized attribute '
+                            'lookup on items.')
+
+        if len(container) == 0:
+            return Table(['Empty'])
+
+        if attrs is None:
+            attrs = self.attrs
+
+        headers = self.get_headers(attrs)
+        kws = {**self.kws,  # defaults
+               **{**dict(title=container.__class__.__name__,
+                         col_headers=headers,
+                         col_groups=self.get_col_groups(attrs)),
+                  **{key: self.get_defaults(attrs, key)
+                     for key in ('units', 'formatters')},
+                  **kws},  # input
+               }
+        return Table(container.attrs(*attrs), **kws)
+
     def get_tables(self, groups, attrs=None, titled=True, filler_text='EMPTY',
                    **kws):
         # TODO: grand total..
         """
         Get a dictionary of tables for the containers in `groups`. This method
-        assists pretty printing groups of tables.
+        assists working with groups of tables.
         """
         if titled is True:
             titled = make_group_title

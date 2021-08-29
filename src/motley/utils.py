@@ -2,11 +2,13 @@
 Utility functions and classes
 """
 
+
 # std libs
 import os
 import numbers
 import functools as ftl
 import itertools as itt
+from collections import abc
 
 # third-party libs
 import numpy as np
@@ -24,6 +26,7 @@ ALIGNMENT_MAP = {'r': '>',
 
 
 def get_alignment(align):
+    # resolve_align  # alignment.resolve() # alignment[align]
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
     if align not in '<^>':
         raise ValueError('Unrecognised alignment {!r}'.format(align))
@@ -104,7 +107,8 @@ def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
     ncols = [tbl.shape[1] for tbl in tables]
     if len(set(ncols)) != 1:
         raise ValueError(
-            f'Cannot stack tables with unequal number of columns: {ncols}')
+            f'Cannot stack tables with unequal number of columns: {ncols}'
+        )
 
     w = np.max([tbl.col_widths for tbl in tables], 0)
     vspace = '\n' * (spacing + 1)
@@ -195,7 +199,38 @@ def hbrace(size, name=''):
 
 
 def overlay(text, background='', align='^', width=None):
-    """overlay text on background using given alignment."""
+    """
+    Overlay `text` on `background` string using given alignment at a given
+    width.
+
+    Parameters
+    ----------
+    text : [type]
+        [description]
+    background : str, optional
+        [description], by default ''
+    align : str, optional
+        [description], by default '^'
+    width : [type], optional
+        [description], by default None
+
+    Examples
+    --------
+    >>> 
+
+    Returns
+    -------
+    [type]
+        [description]
+
+    Raises
+    ------
+    NotImplementedError
+        [description]
+    """
+
+    # TODO: can you acheive this with some clever use of fstrings?
+    # {line!s: {align}{width}}
 
     if not (background or width):
         # nothing to align on
@@ -240,6 +275,7 @@ def overlay(text, background='', align='^', width=None):
         return background[:-text_size] + text
 
 
+# @ftl.lru_cache()
 def wideness(s, raw=False):  # rename width ??
     """
     For multi-line string `s` get the character width of the widest line.
@@ -258,15 +294,43 @@ def wideness(s, raw=False):  # rename width ??
     return max(map(length, s.split(os.linesep)))
 
 
-def banner(obj, width=None, swoosh='=', align='<', **props):
-    """print pretty banner"""
+def banner(obj, width=None, bar='—', side='⎪', middle='',
+           align='^', **props):
+    """
+    print pretty banner
+
+    Parameters
+    ----------
+    obj : [type]
+        [description]
+    width : [type], optional
+        [description], by default None
+    swoosh : str, optional
+        [description], by default '='
+    middle : str, optional
+        [description], by default ''
+    align : str, optional
+        [description], by default '<'
+
+    Examples
+    --------
+    >>> 
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
+
     if width is None:
         width = get_terminal_size()[0]
+    width = int(width)
 
-    swoosh = swoosh * width
-    # s = pprint.pformat(obj, width=width)
-    s = str(obj)
     # fill whitespace (so background props reflect for entire block of banner)
+    title = f'{obj!s:{middle}{align}{width - 2 * len(side)}}'
+    banner = box(title, width, bar, side, align)
+    return codes.apply(banner,  **props)
+
 
 @ftl.lru_cache()
 def resolve_width(width):
@@ -465,20 +529,27 @@ class Filler:
 
 class GroupTitle:
     width = None
-    # formater = 'group {}'
+    template = 'group {}: '
 
-    def __init__(self, i, keys, props):
-        self.g = f'group {i}:'
-        self.s = self.format_key(keys)
-        # self.s = "; ".join(map('{:s} = {:s}'.format, *zip(*info.items())))
-        self.props = props
+    def __init__(self, i, keys, props, align='^'):
+        self.g = self.template.format(i)
+        self.s = codes.apply(self.format_key(keys), props)
+        # self.props = props
 
-    # @staticmethod
-    def format_key(self, keys):
+        self.align = get_alignment(align)
+
+    @staticmethod
+    def format_key(keys):
         if isinstance(keys, str):
             return keys
-        return "; ".join(map(str, keys))
+        if isinstance(keys, abc.Collection):
+            return "; ".join(map(str, keys))
+        return str(keys)
 
     def __str__(self):
-        return '\n' + overlay(codes.apply(self.s, self.props),
-                              self.g.ljust(self.width))
+        if self.align == '<':
+            return (self.g + self.s).ljust(self.width)
+
+        return '\n' + overlay(self.s,
+                              self.g.ljust(self.width),
+                              self.align)

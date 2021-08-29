@@ -8,7 +8,7 @@ from . import codes
 from .utils import *
 from .ansi import *
 
-hue = codes.apply
+apply = hue = codes.apply
 
 
 class ConvenienceFunction:

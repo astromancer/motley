@@ -166,6 +166,7 @@ class profile:
 
     # singleton profiler.  All functions will be added to this one.
     profiler = LineProfiler()
+    
 
     def __init__(self, follow=(), report=None, **kws):
         # decorator for profiling
