@@ -4,7 +4,7 @@ Rocking colours. Just like in the 80s...
 
 import textwrap
 import sys
-from . import codes
+from . import codes, image
 from .utils import *
 from .ansi import *
 

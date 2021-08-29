@@ -9,9 +9,6 @@ from matplotlib.colors import Normalize
 
 from scrawl.imagine import get_clim
 
-# relative libs
-from . import codes, underline, ansi
-
 
 BORDER = '⎪'    # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
 # LBORDER = '⎸'  # LEFT VERTICAL BOX LINE
@@ -26,17 +23,9 @@ def stack(pixels):
     return ''.join(''.join(row) + '\n' for row in pixels)
 
 
-def left_vert(pixel):
-    *pre, (_, *text), end = next(ansi.parse(pixel))
-    return ''.join((*pre, '⎸', *text, end))
-
-
-def right_vert(pixel):
-    *pre, (*text, _), end = next(ansi.parse(pixel))
-    return ''.join((*pre, *text,  '▕', end))
-
-
 def framed(pixels, add_top_row=True):
+    from . import underline
+
     # "frame" represented by ANSI underline  (top, bottom)
     # and "CURLY BRACKET EXTENSION" "⎪" for sides
 
@@ -46,7 +35,7 @@ def framed(pixels, add_top_row=True):
         pix = np.row_stack((['  '] * pixels.shape[1], pixels)).astype('O')
     else:
         pix = pixels.astype('O')
-        
+
     # add left right edges
     pix[1:, 0] = np.char.add(BORDER, pix[1:, 0].astype(str))
     pix[1:, -1] = np.char.add(pix[1:, -1].astype(str), BORDER)
@@ -131,6 +120,7 @@ class AnsiImage(TextImage):
         TextImage.__init__(self, data, origin)
 
     def get_pixels(self, data, origin):
+        from . import codes
         data = super().get_pixels(data, origin)
 
         # normalize
