@@ -3,11 +3,13 @@ Rocking colours. Just like in the 80s...
 """
 
 import textwrap
-
+import sys
 from . import codes
 from .utils import *
 from .ansi import *
 
+
+# aliases
 apply = hue = codes.apply
 
 
@@ -22,7 +24,8 @@ class ConvenienceFunction:
         
         Calling this function on a str `s` is equivalent to running:
         >>> codes.apply(s, fg={0!r}, bg={1!r})
-        """)
+        """
+    )
 
     def __init__(self, fg, bg=None):
 
@@ -61,28 +64,44 @@ class ConvenienceFunction:
         #
 
     def __call__(self, s):
+        # TODO: optimization here would be to pre-resolve codes
         return codes.apply(s, fg=self.fg, bg=self.bg)
 
 
-# can also dynamically generate combination fg, bg colour functions
-_colours = ('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
-            'gray', 'white', None)
-_effects = ('bold', 'dim', 'italic', 'underline', 'blink_slow', 'blink_fast',
-            'invert', 'hide', 'strike')
-
-for fg, bg in itt.chain(
-        itt.product(_colours, _colours),
-        itt.product(_effects, (None,)),
-        itt.product(itt.product(('bold', 'italic'), _colours + ('italic',)),
-                    (None,))):
-
-    if fg == bg:
-        # something like red on red is pointless
-        continue
-
-    func = ConvenienceFunction(fg, bg)
+def _combos():
     # TODO: 'y_on_g'
-    exec(f'{func.__name__} = func')
 
-# remove from module namespace
-del func
+    # can also dynamically generate combination fg, bg colour functions
+    _colours = ('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
+                'gray', 'white', None)
+    _effects = ('bold', 'dim', 'italic', 'underline', 'blink_slow',
+                'blink_fast', 'invert', 'hide', 'strike')
+
+    for fg, bg in itt.chain(
+            # simple text effects eg: `underline`, `red` ...
+            itt.product(_effects, [None]),
+            # `red_on_green` etc
+            itt.product(_colours, _colours)
+    ):
+        if fg == bg:
+            # filter `red_on_red` etc
+            continue
+
+        yield fg, bg
+
+    # `italic_blue`, `bold_red` ...
+    for fg in itt.product(('bold', 'italic'), (*_colours, 'italic')):
+        if fg[0] != fg[1]:
+            # filter `bold_bold` etc.
+            yield fg, None
+
+
+def _make_funcs():
+    for fg, bg in _combos():
+        func = ConvenienceFunction(fg, bg)
+        thismodule = sys.modules[__name__]
+        setattr(thismodule, func.__name__, func)
+
+
+# create convenience functions
+_make_funcs()
