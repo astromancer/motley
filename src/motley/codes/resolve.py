@@ -16,190 +16,27 @@ from recipes.dicts import ManyToOneMap
 from recipes.string import replace_prefix
 
 # relative
-from .ansi import parse
-from .colors import CSS_TO_RGB
+from ..ansi import parse
+from ..colors import CSS_TO_RGB
+from ._codes import *
 
-
-# see:  https://en.wikipedia.org/wiki/ANSI_escape_code
-#       http://ascii-table.com/ansi-escape-sequences.php
 
 # Escape sequence
-ESC = '\033'  # All sequences start with this character # equivalent to \x1b
+ESC = '\033'  # All sequences start with this character # equivalent to '\x1b'
 CSI = ESC + '['  # Control Sequence Initiator
 END = CSI + '0m'
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ANSI Codes for Text effects and colours  FG_CODES BG_CODE
-#
-FG_CODES = {
-    'bold': 1,
-    'dim': 2,                   # faint
-    'italic': 3,
-    'underline': 4,
-    'blink': 5,                 # blink slow
-    # 'blink' : 6,              # blink fast
-    'invert': 7,
-    'hidden': 8,                # conceal
-    'strike': 9,
-    # ------------------
-    # 10	Primary(default) font
-    # 11–19	{\displaystyle n} n-th alternate font	Select the {\displaystyle n}
-    # n-th alternate font (14 being the fourth alternate font, up to 19 being
-    # the 9th alternate font).
-    # 20	Fraktur	hardly ever supported
-    # 21	Bold: off or Underline: Double	Bold off not widely supported;
-    # double underline hardly ever supported.
-    # 22	Normal color or intensity	Neither bold nor faint
-    # 23	Not italic, not Fraktur
-    # 24	Underline: None	Not singly or doubly underlined
-    # 25	Blink: off
-    # 26	Reserved
-    # 27	Image: Positive
-    # 28	Reveal  conceal off
-    # 29	Not crossed out
-    # ------------------
-    'black': 30,
-    'red': 31,
-    'green': 32,
-    'yellow': 33,
-    'blue': 34,
-    'magenta': 35,
-    'cyan': 36,
-    'light gray': 37,
-    # 38	Reserved for extended set foreground color typical supported next
-    # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
-    # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
-    # channels (out of 255)
-    'default': 39,                  # Default text color (foreground)
-    # ------------------
-    'frame': 51,
-    'circle': 52,
-    'overline': 53,
-    # 54	Not framed or encircled
-    # 55	Not overlined
-    # ------------------
-    'dark gray': 90,
-    'gray': 90,
-    'light red': 91,
-    'light green': 92,
-    'light yellow': 93,
-    'light blue': 94,
-    'light magenta': 95,
-    'light cyan': 96,
-    'white': 97,
-}
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Background Colours
-BG_CODES = {
-    'black': 40,
-    'red': 41,
-    'green': 42,
-    'yellow': 43,
-    'blue': 44,
-    'magenta': 45,
-    'cyan': 46,
-    'light gray': 47,
-    # ------------------
-    # 48	Reserved for extended set background color	typical supported next
-    # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
-    # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
-    # channels (out of 255)
-    'default': 49,
-    # 49	Default background color	implementation defined (according to
-    # standard)
-    # 50	Reserved
-    # ------------------
-    # 56–59	Reserved
-    # 60	ideogram underline or right side line	hardly ever supported
-    # 61	ideogram double underline or double line on the right side	hardly
-    # ever supported
-    # 62	ideogram overline or left side line	hardly ever supported
-    # 63	ideogram double overline or double line on the left side
-    # hardly ever supported
-    # 64	ideogram stress marking	hardly ever supported
-    # 65	ideogram attributes off	hardly ever supported, reset the effects of
-    # all of 60–64
-    # ------------------
-    'dark gray': 100,
-    'light red': 101,
-    'light green': 102,
-    'light yellow': 103,
-    'light blue': 104,
-    'light magenta': 105,
-    'light cyan': 106,
-    'white': 107,
-}
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-
-# Short colour descriptions
-colorAliasMap = {
-    'r': 'red',
-    'b': 'blue',
-    'g': 'green',
-    'c': 'cyan',
-    'm': 'magenta',
-    'y': 'yellow',
-    'k': 'black',
-    'w': 'white',
-}
-
-#
-effectAliasMap = {
-    'B': 'bold',
-    'I': 'italic',
-    'U': 'underline',
-    '_': 'underline',
-    'ul': 'underline',
-    'S': 'strike',
-    '-': 'strike',
-    'strikethrough': 'strike',
-    'unbold': 'dim',
-    'blink': 'blink_slow',
-    'hide': 'hidden',
-    'faint': 'dim'
-}
-# volcab is translated before keyword mappings in Many2One, so the uppercase
-# here works
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# alias map for allowed keywords for functions
-kwAliasMap = {
-    # text
-    'text': 'fg',
-    'txt': 'fg',
-    'colour': 'fg',
-    'color': 'fg',
-    'c': 'fg',
-    'fg': 'fg',
-    'foreground': 'fg',
-    'rgb': 'fg',
-
-    # background
-    'highlight': 'bg',
-    'background': 'bg',
-    'bg': 'bg',
-    'bc': 'bg',
-    'bgc': 'bg'
-}
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Movement = {} # TODO
 
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# def _aliasFactory(codes, aliases):
-#     """Create the code translation dict"""
-#     Codes = ManyToOneMap(codes)
-#     Codes.add_mapping(aliases)
-#     Codes.add_map(str.lower)
-#     return Codes
-
-class ResolverBase(ManyToOneMap):
-    template = ''
+class KeywordResolver(ManyToOneMap):
+    """
+    Resolve all the various ways in which colours or effects can be specified.
+    """
+    template = ('{key:r} is not a valid description for a text or '
+                'background effect.')
 
     def __missing__(self, key):
         try:
@@ -208,22 +45,11 @@ class ResolverBase(ManyToOneMap):
             raise KeyError(self.template.format(key)) from None
 
 
-class KeyMap(ResolverBase):
-    """
-    Resolve all the various ways in which colours or effects can be specified.
-    """
-    template = ('{key:r} is not a valid description for a text or '
-                'background effect.')
-
-    def __init__(self, dic=None, **kws):
-        super().__init__(dic, **kws)
-        self.add_mapping(kwAliasMap)  # translation
-
-
-class CodeMap(ResolverBase):
+class CodeResolver(KeywordResolver):
     """
     Resolve all the various names for colours or effects into ansi codes.
     """
+    template = '{key:r} is not a valid colour or effect.'
 
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
@@ -232,9 +58,7 @@ class CodeMap(ResolverBase):
         # add a layer that maps to lower case: 'REd' --> 'red'
         self.add_func(str.lower)
         # add light -> bright translation
-        self.add_func(ftl.partial(replace_prefix, old='bright', new='light'))
-
-    template = '{key:r} is not a valid colour or effect.'
+        # self.add_func(ftl.partial(replace_prefix, old='bright', new='light'))
 
     def __getitem__(self, key):
         # make sure we always return a str
@@ -242,17 +66,27 @@ class CodeMap(ResolverBase):
 
 
 # additional shorthands for bold / italic text
-fg_codes, bg_codes = CodeMap(FG_CODES), CodeMap(BG_CODES)
-fg_codes.add_mapping(effectAliasMap)
+BG_CODES = CodeResolver(BG_CODES)
+FG_CODES = CodeResolver(FG_CODES)
+FG_CODES.add_mapping(effectAliasMap)
 
 
 # Keyword Translator
-codes = KeyMap(fg=fg_codes, bg=bg_codes)
+CODES = KeywordResolver(fg=FG_CODES,
+                        bg=BG_CODES)
+# alias map for allowed keywords for functions
+CODES.many_to_one({
+    ('highlight', 'background', 'bg', 'bc', 'bgc'):                     'bg',
+    ('text', 'txt', 'colour', 'color', 'c', 'fg', 'foreground', 'rgb'): 'fg'
+})
 
-FORMAT_8BIT = KeyMap(fg='38;5;{:d}',
-                     bg='48;5;{:d}')
-FORMAT_24BIT = KeyMap(fg='38;2;{:d};{:d};{:d}',
-                      bg='48;2;{:d};{:d};{:d}')
+FORMAT_8BIT = KeywordResolver(fg='38;5;{:d}',
+                              bg='48;5;{:d}')
+FORMAT_24BIT = KeywordResolver(fg='38;2;{:d};{:d};{:d}',
+                               bg='48;2;{:d};{:d};{:d}')
+COLOR_FORMATTERS = {8:  FORMAT_8BIT,
+                    24: FORMAT_24BIT}
+
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Dispatch functions for translating user input to ANSI codes
@@ -294,7 +128,7 @@ def _(obj, fg_or_bg='fg'):
         return
 
     # try resolve as a named color / effect
-    value = codes[fg_or_bg].get(obj, None)
+    value = CODES[fg_or_bg].get(obj, None)
     if value:
         yield value
         return
@@ -302,7 +136,7 @@ def _(obj, fg_or_bg='fg'):
     # try resolve as a named CSS color
     value = CSS_TO_RGB.get(obj, None)
     if value:
-        yield FORMAT_24BIT[fg_or_bg].format(*value)
+        yield COLOR_FORMATTERS[24][fg_or_bg].format(*value)
         return
 
     raise InvalidEffect(obj, fg_or_bg)
@@ -312,7 +146,7 @@ def _(obj, fg_or_bg='fg'):
 def _(obj, fg_or_bg='fg'):
     # integers are interpreted as 8-bit colour codes
     if 0 <= obj < 256:
-        yield FORMAT_8BIT[fg_or_bg].format(obj)
+        yield COLOR_FORMATTERS[8][fg_or_bg].format(obj)
     else:
         raise ValueError(f'Could not interpret key {obj!r} as a 8 bit colour.')
 
@@ -324,7 +158,7 @@ def _(obj, fg_or_bg='fg'):
     # tuple, lists are interpreted as 24-bit rgb colour codes
     if is_24bit(obj):
         if all(0 <= _ < 256 for _ in obj):
-            yield FORMAT_24BIT[fg_or_bg].format(*obj)
+            yield COLOR_FORMATTERS[24][fg_or_bg].format(*obj)
         else:
             raise ValueError(
                 f'Could not interpret key {obj!r} as a 24 bit colour.'

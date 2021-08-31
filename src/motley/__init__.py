@@ -7,6 +7,7 @@ import sys
 from . import codes, image
 from .utils import *
 from .ansi import *
+from .codes import fg, bg
 
 
 # aliases
@@ -17,7 +18,7 @@ class ConvenienceFunction:
     """
     API function for applying ANSI codes to strings
     """
-
+    # # pylint: disable=trailing-whitespace
     _doc_tmp = textwrap.dedent(
         """
         %s
