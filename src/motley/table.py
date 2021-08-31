@@ -385,14 +385,13 @@ def truncate(item, width):
     cw = 0  # cumulative width
     s = ''
     for parts in ansi.parse(str(item), named=True):
-        cw += len(parts.s)
+        *pre, text, end = parts
+        cw += len(text)
         if cw > width:
-            s += ''.join(parts[:3] +
-                         (parts.s[:width - 1], DOTS) +
-                         parts[-1:])
+            s += ''.join((*pre, text[:width - 1], DOTS, end))
             break
-        else:
-            s += ''.join(parts)
+
+        s += ''.join(parts)
     return s
 
 
@@ -802,11 +801,16 @@ class Table(LoggingMixin):
         self.col_head_props = col_head_props
         # todo : don't really need this since we have self.highlight
         self.row_head_props = row_head_props
-
+        
+        
+        # insert lines
+        self.insert = dict(insert or {})
+        
         # truncate number of rows
         nrows = data.shape[0]
-        if nrows > max_rows:
-            insert[max_rows] = '< ... {} rows omitted ... >'
+        nomit = nrows - max_rows
+        if nomit:
+            self.insert[max_rows - 1] = f'< ... {nomit} rows omitted ... >'
             data = data[:max_rows]
 
         # add the (row/column) headers / row numbers / totals
@@ -924,8 +928,7 @@ class Table(LoggingMixin):
         # decide column widths
         # self.col_widths, width_max = self.resolve_width(width)
 
-        # insert lines
-        self.insert = dict(insert or {})
+
         # if self.insert:
         #     invalid =  set(map(type, self.insert.values())) - {list, str}
 
@@ -2057,7 +2060,7 @@ class AttrTable:
                          col_headers=headers,
                          col_groups=self.get_col_groups(attrs)),
                   **{key: self.get_defaults(attrs, key)
-                     for key in ('units', 'formatters')},
+                         for key in ('units', 'formatters')},
                   **kws},  # input
                }
         return Table(container.attrs(*attrs), **kws)
