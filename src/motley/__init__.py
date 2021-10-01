@@ -2,12 +2,16 @@
 Rocking colours. Just like in the 80s...
 """
 
-import textwrap
+# std
 import sys
+import textwrap
+
+# relative
 from . import codes, image
-from .utils import *
 from .ansi import *
+from .utils import *
 from .codes import fg, bg
+from .formatter import format
 
 
 # aliases
