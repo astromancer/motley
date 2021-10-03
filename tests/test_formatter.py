@@ -1,15 +1,12 @@
 
-# third-party
-from loguru import logger
-
-# local
-from motley.string import Formatter
-from recipes.testing import Expected, mock, expected
+from motley.formatter import formatter
+from recipes.testing import Expected, mock
 
 
-logger.disable('recipes.testing')
+# logger.enable('motley')
 
-formatter = Formatter()
+
+# formatter = Formatter()
 exp = Expected(formatter.format)
 exp.is_method = False
 
@@ -107,7 +104,7 @@ test_std_fmt = exp({
 
 # class TestExt:
 
-
+# TODO: test_stylize with cases below!
 test_ext_format = exp({
     **{  # Basic
         ('{0:|r}, {1:|g}, {2:|b}', 'a', 'b', 'c'):
@@ -214,7 +211,7 @@ test_ext_format = exp({
 
         mock('{:|[122,0,0],B,I,_/k}', 'Hello world!'):
         '\x1b[;38;2;122;0;0;1;3;4;40mHello world!\x1b[0m',
-        
+
         # Nested with alignment spec
         mock('{{name:s|g}:{line:d|orange}: <21}', name='xyz', line=666):
             '\x1b[;32mxyz\x1b[0m:\x1b[;38;2;255;165;0m666\x1b[0m              ',
@@ -222,10 +219,18 @@ test_ext_format = exp({
         # abstracted effects
         mock('{{level}: {message}:|{effects}}\n',
              level='WARNING', message='Dragons!', effects='Br'):
-            '\x1b[;1;31mWARNING: Dragons!\x1b[0m'
-        
+            '\x1b[;1;31mWARNING: Dragons!\x1b[0m',
+
+        # Nested field names
+        mock('{{{name}.{function}:|green}:{line:d|orange}: <52}|'
+             '{{level}: {message}:|rB_}',
+             name='test', function='func', line=1, level='INFO', message='hi!'):
+                 '\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}'
+                 '\x1b[0m:\x1b[;38;2;255;165;0m{line:d}\x1b[0m: '
+                 '<84}|\x1b[;31;1;4m{level}: {message}\x1b[0m'
+
        }
-    
+
 }
 )
 

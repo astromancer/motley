@@ -4,9 +4,12 @@ Stylizing strings with extended format directives.
 
 # std
 import re
-import string
 import functools as ftl
 from collections import UserString
+from string import Formatter as BuiltinFormatter
+
+# third-party
+from loguru import logger
 
 # local
 from recipes.regex import unflag
@@ -72,11 +75,25 @@ def get_fmt_regex(fg_switch=DEFAULT_FG_SWITCH, bg_switch=DEFAULT_BG_SWITCH):
     ''')
 
 
+def _apply_style(string, **effects):
+    # apply effects
+    try:
+        return codes.apply(string, **effects)
+    except InvalidEffect as err:
+        fg, *rest = effects.pop('fg')
+        if rest:
+            raise
+
+        try:
+            return codes.apply(string, *fg, **effects)
+        except InvalidEffect as err2:
+            raise err2 from err
+
 # def parse_spec(spec):
 #     RGX_FORMAT_DIRECTIVE.search(spec)
 
 
-class Formatter(string.Formatter):
+class Formatter(BuiltinFormatter):
     """
     Implements a formatting syntax for string colorization and styling.
     """
@@ -94,10 +111,14 @@ class Formatter(string.Formatter):
             yield from parts
             return
         except ValueError as err:
-            if 'Single \'}\' encountered' not in str(err):
+            msg = str(err)
+            if ("Single '}' encountered" not in msg and
+                    "unexpected '{' in field name" not in msg):
+                logger.debug('builtin format parser failed with: {}', err)
                 raise err
 
-        #
+        logger.debug('parsing: {}', string)
+
         pos = 0
         match = None
         itr = self.parser.iterate(string, must_close=True,
@@ -113,7 +134,8 @@ class Formatter(string.Formatter):
             field = ':'.join(field)
 
             #  (literal_text, field_name, format_spec, conversion)
-            # print(f'{literal_text=}, {field_name=}, {format_spec=}, {conversion}')
+            logger.debug('literal_text={!r}, field_name={!r}, format_spec={!r}',
+                         string[pos:match.start], field, spec)
             yield string[pos:match.start], field, spec, None
 
             pos = match.end + 1
@@ -123,10 +145,51 @@ class Formatter(string.Formatter):
 
     def get_field(self, field_name, args, kws):
         if '{' in field_name:
+            logger.debug('recursing on {}', field_name)
             z = self.format(field_name, *args, **kws)
             # logger.debug(f'{z=}')
             return z, None
         return super().get_field(field_name, args, kws)
+
+    def _parse_spec(self, value, spec):
+
+        logger.debug('received value={!r}, spec={!r}', value, spec)
+
+        # print(f'{spec=}')
+        mo = self.spec_regex.fullmatch(spec)
+        if mo is None:
+            raise ValueError(f'Invalid format specifier: {spec!r}')
+
+        spec = mo['spec']  # this is the spec that the std library understands
+
+        # logger.opt(lazy=True).debug('{}', mo.groupdict)
+
+        # if the value is a string which has effects applied, adjust the
+        # width field to compensate for non-display characters
+        if isinstance(value, (str, UserString)) and mo['width']:
+            hidden = ansi.length_codes(value)
+            if hidden:
+                d = mo.groupdict()
+                [*map(d.pop, ('spec', 'effects', 'fg', 'bg'))]
+                d['width'] = str(int(d['width']) + hidden)
+                spec = ''.join(d.values())
+
+        # get color directives
+        effects = dict(fg=mo['fg'] or '',
+                       bg=mo['bg'] or '')
+        for fg_or_bg, val in list(effects.items()):
+            # BracketParser('[]()')
+            for brackets in ('[]', '()'):
+                left, right = brackets
+                if left in val and right in val:
+                    break
+
+            effects[fg_or_bg] = xsplit(effects.pop(fg_or_bg), brackets)
+
+        logger.debug('parsed value={!r}, spec={!r}, effects={!r}',
+                     value, spec, effects)
+
+        return value, spec, effects
 
     def format_field(self, value, spec):
         """
@@ -164,60 +227,75 @@ class Formatter(string.Formatter):
             If the colour / style directives could not be resolved.
         """
 
-        # print(f'{spec=}')
-        mo = self.spec_regex.fullmatch(spec)
-        if mo is None:
-            raise ValueError(f'Invalid format specifier: {spec!r}')
-
-        spec = mo['spec']  # this is the spec that the std library understands
-
-        # logger.opt(lazy=True).debug('{}', mo.groupdict)
-
-        # if the value is a string which has effects applied, adjust the
-        # width field to compensate for non-display characters
-        if isinstance(value, (str, UserString)) and mo['width']:
-            hidden = ansi.length_codes(value)
-            if hidden:
-                d = mo.groupdict()
-                [*map(d.pop, ('spec', 'effects', 'fg', 'bg'))]
-                d['width'] = str(int(d['width']) + hidden)
-                spec = ''.join(d.values())
+        value, spec, effects = self._parse_spec(value, spec)
 
         # delegate formatting
         # logger.debug('Formatting {!r} with {!r}', value, spec)
-        s = super().format_field(value, spec)    # calls  builtins.format
+        return _apply_style(
+            super().format_field(value, spec),      # calls  builtins.format
+            **effects
+        )
 
-        # get color directives
-        effects = dict(fg=mo['fg'] or '',
-                       bg=mo['bg'] or '')
-        for fg_or_bg, val in list(effects.items()):
-            # BracketParser('[]()')
-            for brackets in ('[]', '()'):
-                left, right = brackets
-                if left in val and right in val:
-                    break
+    def convert_field(self, value, conversion):
+        if conversion is None:
+            return value
+        if conversion in 'rsa':
+            return super().convert_field(value, conversion)
+        if conversion == 'q':
+            return repr(str(value))
 
-            effects[fg_or_bg] = xsplit(effects.pop(fg_or_bg), brackets)
+    def stylize(self, format_string):
+        return Stylizer().format(format_string)
 
-        # apply effects
-        try:
-            return codes.apply(s, **effects)
-        except InvalidEffect as err:
-            fg, *rest = effects.pop('fg')
-            if rest:
-                raise
 
-            try:
-                return codes.apply(s, *fg, **effects)
-            except InvalidEffect as err2:
-                raise err2 from err
+class Stylizer(Formatter):
+    """
+    Apply styling to string by resolving the styling part of the format spec
+    and adding the ansi codes into the correct positions. Field widths are
+    also adapted to compensate for hidden (non-display) characters.
+    """
+    _current_level = 0
+    # _max_level = 0
+    _wrap = True
 
-        # return mo['spec']
+    # def format(self, string, *args, **kws):
+    #     if self._current_level == 0 and self._max_level is None:
+    #         self._max_level = self.parser.depth(string)
+    #     try:
+    #         return super().format(string, *args, **kws)
+    #     except Exception:
+    #         self._current_level = 0
+    #         self._max_level = None
+    #         raise
 
-    # def convert_field(value, conversion):
-    #     if conversion in 'rsa':
-    #         super().convert_field()
+    def get_field(self, field_name, args, kws):
+        if '{' in field_name:
+            # self._current_level += 1
+            logger.debug('recursing on {}', field_name)
+            sub = self.format(field_name, *args, **kws)
+            self._wrap = False
+            # self._current_level -= 1
+            return sub, None
+        self._wrap = True
+        return field_name, None
 
+    def format_field(self, value, spec):
+        value, spec, effects = self._parse_spec(value, spec)
+        value = ':'.join(filter(None, (value, spec)))
+        # print(self._current_level, value, effects, spec)
+        # Can we remove the enclosing braces?
+        # if self._current_level < self._max_level or spec:
+        # logger.
+        logger.debug('wrap = {}, spec = {!r}', self._wrap, spec)
+        if self._wrap or spec:
+            value = value.join('{}')
+        logger.debug('applying {} to {!r}', effects, value)
+        return _apply_style(value, **effects)
+
+
+#
+# stylizer = Stylizer()
+# stylize = stylizer.format
 #
 formatter = Formatter()
 format = formatter.format

@@ -6,6 +6,9 @@ Rocking colours. Just like in the 80s...
 import sys
 import textwrap
 
+# third-party
+from loguru import logger
+
 # relative
 from . import codes, image
 from .ansi import *
@@ -13,6 +16,9 @@ from .utils import *
 from .codes import fg, bg
 from .formatter import format
 
+
+#
+logger.disable('motley')
 
 # aliases
 apply = hue = codes.apply
