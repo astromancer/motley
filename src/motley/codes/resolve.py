@@ -4,6 +4,7 @@ Does the work to translate colour/effect names to ANSI codes
 
 
 # std
+import re
 import numbers
 import functools as ftl
 
@@ -13,7 +14,6 @@ import more_itertools as mit
 
 # local
 from recipes.dicts import ManyToOneMap
-from recipes.string import replace_prefix
 
 # relative
 from ..ansi import parse
@@ -21,14 +21,23 @@ from ..colors import CSS_TO_RGB
 from ._codes import *
 
 
+# ---------------------------------------------------------------------------- #
 # Escape sequence
 ESC = '\033'  # All sequences start with this character # equivalent to '\x1b'
 CSI = ESC + '['  # Control Sequence Initiator
 END = CSI + '0m'
 
+# rgb string matcher
+RGX_RGB = re.compile(r'''(?x)
+    (?:(\[)|(\())
+    (?P<r>\d{1,3})\s*,\s*
+    (?P<g>\d{1,3})\s*,\s*
+    (?P<b>\d{1,3})
+    ((?(1)\])(?(2)\))$)
+''')
 
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Movement = {} # TODO
+# ---------------------------------------------------------------------------- #
 
 
 class KeywordResolver(ManyToOneMap):
@@ -87,14 +96,12 @@ FORMAT_24BIT = KeywordResolver(fg='38;2;{:d};{:d};{:d}',
 COLOR_FORMATTERS = {8:  FORMAT_8BIT,
                     24: FORMAT_24BIT}
 
-
-# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Dispatch functions for translating user input to ANSI codes
+# ---------------------------------------------------------------------------- #
 
 
 class InvalidEffect(Exception):
     """
-    Raised when a user input object cannot be resolved to a code for colour or 
+    Raised when a user input object cannot be resolved to a code for colour or
     effect.
     """
 
@@ -103,6 +110,9 @@ class InvalidEffect(Exception):
             (f'Could not interpret object {obj!r} of type {type(obj)!r} as a '
              f'valid colour or effect for {fg_or_bg!r}')
         )
+
+# ---------------------------------------------------------------------------- #
+# Dispatch functions for translating user input to ANSI codes
 
 
 @ftl.singledispatch
@@ -136,7 +146,14 @@ def _(obj, fg_or_bg='fg'):
     # try resolve as a named CSS color
     value = CSS_TO_RGB.get(obj, None)
     if value:
-        yield COLOR_FORMATTERS[24][fg_or_bg].format(*value)
+        yield FORMAT_24BIT[fg_or_bg].format(*value)
+        return
+
+    # try resolve RGB string: '[123,1,99]'
+    rgb = RGX_RGB.fullmatch(obj.strip())
+    if rgb:
+        rgb = rgb.groupdict()
+        yield from resolve(tuple(map(int, map(rgb.get, 'rgb'))), fg_or_bg)
         return
 
     raise InvalidEffect(obj, fg_or_bg)
@@ -146,7 +163,7 @@ def _(obj, fg_or_bg='fg'):
 def _(obj, fg_or_bg='fg'):
     # integers are interpreted as 8-bit colour codes
     if 0 <= obj < 256:
-        yield COLOR_FORMATTERS[8][fg_or_bg].format(obj)
+        yield FORMAT_8BIT[fg_or_bg].format(obj)
     else:
         raise ValueError(f'Could not interpret key {obj!r} as a 8 bit colour.')
 
@@ -158,7 +175,7 @@ def _(obj, fg_or_bg='fg'):
     # tuple, lists are interpreted as 24-bit rgb colour codes
     if is_24bit(obj):
         if all(0 <= _ < 256 for _ in obj):
-            yield COLOR_FORMATTERS[24][fg_or_bg].format(*obj)
+            yield FORMAT_24BIT[fg_or_bg].format(*obj)
         else:
             raise ValueError(
                 f'Could not interpret key {obj!r} as a 24 bit colour.'

@@ -1,5 +1,5 @@
 """
-Utility functions and classes
+Utility functions and classes.
 """
 
 
@@ -48,7 +48,7 @@ def hstack(tables, spacing=0, offset=()):
 
     """
 
-    assert len(tables), 'tables must be non-empty sequence'
+    assert len(tables), '`tables` must be non-empty sequence'
 
     from motley.table import Table
 
@@ -107,7 +107,7 @@ def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
     ncols = [tbl.shape[1] for tbl in tables]
     if len(set(ncols)) != 1:
         raise ValueError(
-            f'Cannot stack tables with unequal number of columns: {ncols}'
+            f'Cannot stack tables with unequal number of columns: {ncols}.'
         )
 
     w = np.max([tbl.col_widths for tbl in tables], 0)
@@ -162,10 +162,28 @@ def make_group_title(keys):
 
 def vstack_groups(groups, strip_titles, braces=False, vspace=1, **kws):
     """
-    Pretty print dict of tables
+    Pretty print dict of table objects.
+
+    Parameters
+    ----------
+    groups : dict
+        Keys are `motley.table.Tables`.
+    strip_titles : bool
+        Whether to strip table titles.
+    braces : bool, optional
+        Whether to use curly braces to mark the groups by their keys, by default
+        False
+    vspace : int, optional
+        Vertical space between tables in number of newlines, by default 1
+
+    Returns
+    -------
+    str
+        The formatted stack of tables.
     """
 
     # ΤΟDO: could accomplish the same effect by colour coding...
+    groups = dict(groups)
     ordered_keys = list(groups.keys())  # key=sort
     stack = [groups[key] for key in ordered_keys]
 

@@ -43,7 +43,7 @@ FG_CODES = {
     'blue':             34,
     'magenta':          35,
     'cyan':             36,
-    'bright gray':       37,
+    'bright gray':      37,
     # 38	Reserved for extended set foreground color typical supported next
     # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
     # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
@@ -58,12 +58,12 @@ FG_CODES = {
     # ------------------
     # 'dark gray':    90,
     'gray':             90,
-    'bright red':        91,
-    'bright green':      92,
-    'bright yellow':     93,
-    'bright blue':       94,
-    'bright magenta':    95,
-    'bright cyan':       96,
+    'bright red':       91,
+    'bright green':     92,
+    'bright yellow':    93,
+    'bright blue':      94,
+    'bright magenta':   95,
+    'bright cyan':      96,
     'white':            97,
 }
 
@@ -77,7 +77,7 @@ BG_CODES = {
     'blue':             44,
     'magenta':          45,
     'cyan':             46,
-    'bright gray':       47,
+    'bright gray':      47,
     # ------------------
     # 48	Reserved for extended set background color	typical supported next
     # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
@@ -100,12 +100,12 @@ BG_CODES = {
     # all of 60–64
     # ------------------
     'dark gray':        100,
-    'bright red':        101,
-    'bright green':      102,
-    'bright yellow':     103,
-    'bright blue':       104,
-    'bright magenta':    105,
-    'bright cyan':       106,
+    'bright red':       101,
+    'bright green':     102,
+    'bright yellow':    103,
+    'bright blue':      104,
+    'bright magenta':   105,
+    'bright cyan':      106,
     'white':            107,
 }
 
@@ -117,9 +117,11 @@ effectAliasMap = {
     'I':                'italic',
     'i':                'italic',
     'U':                'underline',
+    'u':                'underline',
     '_':                'underline',
     'ul':               'underline',
     'S':                'strike',
+    's':                'strike',
     '-':                'strike',
     'strikethrough':    'strike',
     'unbold':           'dim',
