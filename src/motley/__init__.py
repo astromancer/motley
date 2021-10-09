@@ -11,7 +11,7 @@ import itertools as itt
 from loguru import logger
 
 # relative
-from . import codes, image
+from . import codes
 from .ansi import *
 from .utils import *
 from .string import Str
