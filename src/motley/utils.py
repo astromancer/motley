@@ -294,22 +294,28 @@ def overlay(text, background='', align='^', width=None):
 
 
 # @ftl.lru_cache()
-def wideness(s, raw=False):  # rename width ??
+def get_width(text, count_hidden=False):
     """
-    For multi-line string `s` get the character width of the widest line.
+    For string `text` get the maximal line width in number of characters.
 
     Parameters
     ----------
-    s
-    raw
+    text: str
+        String, possibly multi-line, possibly containing non-display characters
+        such as ANSI colour codes.
+    count_hidden: bool
+        Whether to count the "hidden" non-display characters such as ANSI escape
+        codes.  If True, this function returns the same result as you would get
+        from `len(text)`. If False, the length of the string as it would appear
+        on screen when printed is returned.
 
     Returns
     -------
-
+    int
     """
-    length = ftl.partial(ansi.length, raw=raw)
+    length = ftl.partial(ansi.length, raw=count_hidden)
     # deal with cell elements that contain newlines
-    return max(map(length, s.split(os.linesep)))
+    return max(map(length, text.split(os.linesep)))
 
 
 def banner(obj, width=None, bar='—', side='⎪', middle='',

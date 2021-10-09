@@ -28,7 +28,7 @@ from recipes.logging import LoggingMixin, get_module_logger
 
 # relative
 from . import ansi, codes
-from .utils import wideness, get_alignment, make_group_title
+from .utils import get_width, get_alignment, make_group_title
 
 
 # if __name__ == '__main__':
@@ -139,15 +139,15 @@ def justified_delta(widths, total):
 #                                         table_width)
 
 
-def get_column_widths(data, col_headers=None, raw=False):
+def get_column_widths(data, col_headers=None, count_hidden=False):
     """data should be array-like of str types"""
 
     # data widths
-    w = np.vectorize(wideness, [int])(data, raw=raw).max(axis=0)
+    w = np.vectorize(get_width, [int])(data, count_hidden).max(axis=0)
 
     if col_headers is not None:
         assert len(col_headers) == data.shape[1]
-        hw = np.vectorize(wideness, [int])(col_headers, raw=raw)
+        hw = np.vectorize(get_width, [int])(col_headers, count_hidden)
         w = np.max([w, hw], 0)
 
     return w
@@ -1293,7 +1293,7 @@ class Table(LoggingMixin):
             for i in np.where(l)[0]:
                 self.pre_table[i, j] = truncate(self.pre_table[i, j], w)
 
-    def get_column_widths(self, data=None, raw=False, with_borders=False):
+    def get_column_widths(self, data=None, count_hidden=False, with_borders=False):
         """data should be string type array"""
         # note now pretty much redundant
 
@@ -1301,7 +1301,7 @@ class Table(LoggingMixin):
             data = self.pre_table
 
         # get width of columns - widest element in column
-        w = get_column_widths(data, raw=raw) + self.cell_white
+        w = get_column_widths(data, count_hidden=count_hidden) + self.cell_white
 
         # add border size
         if with_borders:
