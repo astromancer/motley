@@ -79,24 +79,33 @@ def _apply_style(string, **effects):
     # apply effects
     try:
         return codes.apply(string, **effects)
-    except InvalidEffect as err:
+    except InvalidEffect:  # as err:
         fg, *rest = effects.pop('fg')
-        if rest:
+        if not rest:
             raise
 
+        # The block above will fail for the short format spec style
+        # eg: 'Bk_' to mean 'bold,black,underline' etc
         try:
-            return codes.apply(string, *fg, **effects)
+            return codes.apply(string, fg, *rest, **effects)
         except InvalidEffect as err2:
-            raise err2 from err
+            raise err2  # from err
 
 # def parse_spec(spec):
 #     RGX_FORMAT_DIRECTIVE.search(spec)
+
+# def _non_display_width(self, spec, value, mo):
+#     if isinstance(value, (str, UserString)) and mo['width']:
+#         return ansi.length_codes(value)
+#     return False
 
 
 class Formatter(BuiltinFormatter):
     """
     Implements a formatting syntax for string colorization and styling.
     """
+    _partial = False
+    _rgb_parser = BracketParser('[]', '()')
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
@@ -112,8 +121,9 @@ class Formatter(BuiltinFormatter):
             return
         except ValueError as err:
             msg = str(err)
-            if ("Single '}' encountered" not in msg and
-                    "unexpected '{' in field name" not in msg):
+            if not msg.endswith(("Single '}' encountered in format string",
+                                 "unexpected '{' in field name",
+                                 "expected '}' before end of string")):
                 logger.debug('builtin format parser failed with: {}', err)
                 raise err
 
@@ -124,14 +134,17 @@ class Formatter(BuiltinFormatter):
         itr = self.parser.iterate(string, must_close=True,
                                   condition=(level == 0))
         for match in itr:
-            # logger.debug('{!r}', match)
             *field, spec = xsplit(match.enclosed, delimeter=':')
-            # handle edge case: filling with colon: "{::<10s}"
-            if '::' in match.enclosed:
-                field = field[:-1]
-                spec = ':' + spec
+            if field:
+                # handle edge case: filling with colon: "{::<10s}"
+                if '::' in match.enclosed:
+                    field = field[:-1]
+                    spec = ':' + spec
 
-            field = ':'.join(field)
+                field = ':'.join(field)
+            else:
+                field = spec
+                spec = ''
 
             #  (literal_text, field_name, format_spec, conversion)
             logger.debug('literal_text={!r}, field_name={!r}, format_spec={!r}',
@@ -146,9 +159,10 @@ class Formatter(BuiltinFormatter):
     def get_field(self, field_name, args, kws):
         if '{' in field_name:
             logger.debug('recursing on {}', field_name)
-            z = self.format(field_name, *args, **kws)
+            # z = self.format(field_name, *args, **kws)
             # logger.debug(f'{z=}')
-            return z, None
+            return self.format(field_name, *args, **kws), None
+
         return super().get_field(field_name, args, kws)
 
     def _parse_spec(self, value, spec):
@@ -160,36 +174,53 @@ class Formatter(BuiltinFormatter):
         if mo is None:
             raise ValueError(f'Invalid format specifier: {spec!r}')
 
-        spec = mo['spec']  # this is the spec that the std library understands
-
-        # logger.opt(lazy=True).debug('{}', mo.groupdict)
+        # get the spec that builtins.format understands
+        spec = mo['spec']
+        logger.opt(lazy=True).trace('{}', mo.groupdict)
 
         # if the value is a string which has effects applied, adjust the
         # width field to compensate for non-display characters
-        if isinstance(value, (str, UserString)) and mo['width']:
-            hidden = ansi.length_codes(value)
-            if hidden:
-                d = mo.groupdict()
-                [*map(d.pop, ('spec', 'effects', 'fg', 'bg'))]
-                d['width'] = str(int(d['width']) + hidden)
-                spec = ''.join(d.values())
+        spec = self._adjust_width_for_hidden_characters(spec, value, mo)
 
         # get color directives
         effects = dict(fg=mo['fg'] or '',
                        bg=mo['bg'] or '')
         for fg_or_bg, val in list(effects.items()):
-            # BracketParser('[]()')
-            for brackets in ('[]', '()'):
-                left, right = brackets
-                if left in val and right in val:
-                    break
+            # split comma separated names like "aquamarine,I"
+            # but ignore rgb color directives eg: [1,33,124], (0, 0, 0)
+            if not val:
+                continue
 
-            effects[fg_or_bg] = xsplit(effects.pop(fg_or_bg), brackets)
+            if ',' in val:
+                rgb = self._rgb_parser.match(val, must_close=True)
+                effects[fg_or_bg] = xsplit(effects[fg_or_bg],
+                                           getattr(rgb, 'brackets', None))
 
+        #
         logger.debug('parsed value={!r}, spec={!r}, effects={!r}',
                      value, spec, effects)
 
         return value, spec, effects
+
+    def _adjust_width(self, spec, value, mo):
+        if isinstance(value, (str, UserString)) and mo['width']:
+            return int(mo['width']) + ansi.length_codes(value)
+        return
+
+    def _adjust_width_for_hidden_characters(self, spec, value, mo):
+        """
+        if the value is a string which has effects applied, adjust the
+        width field to compensate for non-display characters
+        """
+        width = self._adjust_width(spec, value, mo)
+        if width:
+            spec_info = mo.groupdict()
+            # remove the base level groups in the regex
+            for _ in ('spec', 'effects', 'fg', 'bg'):
+                spec_info.pop(_)
+            spec_info['width'] = str(width)
+            return ''.join(spec_info.values())
+        return spec
 
     def format_field(self, value, spec):
         """
@@ -230,7 +261,7 @@ class Formatter(BuiltinFormatter):
         value, spec, effects = self._parse_spec(value, spec)
 
         # delegate formatting
-        # logger.debug('Formatting {!r} with {!r}', value, spec)
+        logger.debug('Formatting {!r} with {!r} at parent', value, spec)
         return _apply_style(
             super().format_field(value, spec),      # calls  builtins.format
             **effects
@@ -244,8 +275,19 @@ class Formatter(BuiltinFormatter):
         if conversion == 'q':
             return repr(str(value))
 
-    def stylize(self, format_string):
-        return Stylizer().format(format_string)
+    def stylize(self, format_string, *args, **kws):
+        return PartialFormatter().format(format_string, *args, **kws)
+        # stylized = Stylizer().format(format_string)
+        # return self.format(stylized, *args, **kws)
+
+    format_partial = stylize
+
+    # with self.temporarily(patial=True):
+    #   return self.format(format_string, *args, **kws)
+    # self._partial = True
+    # result = self.format(format_string, *args, **kws)
+    # self._partial = False
+    # return result
 
 
 class Stylizer(Formatter):
@@ -254,21 +296,12 @@ class Stylizer(Formatter):
     and adding the ansi codes into the correct positions. Field widths are
     also adapted to compensate for hidden (non-display) characters.
     """
-    _current_level = 0
+    # _current_level = 0
     # _max_level = 0
     _wrap = True
 
-    # def format(self, string, *args, **kws):
-    #     if self._current_level == 0 and self._max_level is None:
-    #         self._max_level = self.parser.depth(string)
-    #     try:
-    #         return super().format(string, *args, **kws)
-    #     except Exception:
-    #         self._current_level = 0
-    #         self._max_level = None
-    #         raise
-
     def get_field(self, field_name, args, kws):
+        # eg: field_name = '0[name]' or 'label.title' or '{some_keyword}'
         if '{' in field_name:
             # self._current_level += 1
             logger.debug('recursing on {}', field_name)
@@ -293,9 +326,32 @@ class Stylizer(Formatter):
         return _apply_style(value, **effects)
 
 
-#
-# stylizer = Stylizer()
-# stylize = stylizer.format
-#
+class PartialFormatter(Stylizer):
+
+    def get_field(self, field_name, args, kws):
+        try:
+            # logger.debug('trying at parent Formatter {}', field_name)
+            result = Formatter.get_field(self, field_name, args, kws)
+            self._wrap = False
+            return result
+
+        except KeyError:
+            self._wrap = True
+            return field_name, None
+
+    def _adjust_width(self, spec, value, mo):
+        # Subtlety: We only need to adjust the field width if the field name
+        # doesn't contain braces. This is because the result returned by this
+        # partial formatter will have the colors substituted, and will most
+        # likely be formatted again to get the fully formatted result. If there
+        # are (colourized) braces to substitute in the field name, these will be
+        # handled upon the second formatting where the width of the format spec
+        # will then be adjusted. We therefore leave it unaltered here to avoid
+        # adjusting the spec width twice.
+        return super()._adjust_width(spec, value, mo) and ('{' not in value)
+
+
 formatter = Formatter()
+stylize = formatter.stylize
+format_partial = formatter.format_partial
 format = formatter.format

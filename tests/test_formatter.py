@@ -1,9 +1,9 @@
 
-from motley.formatter import formatter
+from loguru import logger
 from recipes.testing import Expected, mock
+from motley.formatter import formatter, Formatter
 
-
-# logger.enable('motley')
+logger.enable('motley')
 
 
 # formatter = Formatter()
@@ -105,7 +105,7 @@ test_std_fmt = exp({
 # class TestExt:
 
 # TODO: test_stylize with cases below!
-test_ext_format = exp({
+test_extended_format = exp({
     **{  # Basic
         ('{0:|r}, {1:|g}, {2:|b}', 'a', 'b', 'c'):
             '\x1b[;31ma\x1b[0m, \x1b[;32mb\x1b[0m, \x1b[;34mc\x1b[0m',
@@ -138,8 +138,10 @@ test_ext_format = exp({
             'X: 3;  Y: 5',
 
         # Replacing %s and %r:
-        ("repr() shows quotes: {!r:|darksalmon}; str() doesn't: {!s:|pink}", 'test1', 'test2'):
-            "repr() shows quotes: \x1b[;38;2;233;150;122m'test1'\x1b[0m; str() doesn't: \x1b[;38;2;255;192;203mtest2\x1b[0m",
+        ("repr() shows quotes: {!r:|darksalmon}; str() doesn't: {!s:|pink}",
+         'test1', 'test2'):
+            "repr() shows quotes: \x1b[;38;2;233;150;122m'test1'\x1b[0m; str() "
+            "doesn't: \x1b[;38;2;255;192;203mtest2\x1b[0m",
 
         # Aligning the text and specifying a width:
         ('{:<30|g/c}', 'left aligned'):
@@ -217,22 +219,45 @@ test_ext_format = exp({
             '\x1b[;32mxyz\x1b[0m:\x1b[;38;2;255;165;0m666\x1b[0m              ',
 
         # abstracted effects
-        mock('{{level}: {message}:|{effects}}\n',
+        mock('{{level}: {message}:|{effects}}',
              level='WARNING', message='Dragons!', effects='Br'):
-            '\x1b[;1;31mWARNING: Dragons!\x1b[0m',
+        '\x1b[;1;31mWARNING: Dragons!\x1b[0m',
 
         # Nested field names
-        mock('{{{name}.{function}:|green}:{line:d|orange}: <52}|'
+        mock('{{{name}.{function}:|green}:{line:d|orange}: <25}|'
              '{{level}: {message}:|rB_}',
              name='test', function='func', line=1, level='INFO', message='hi!'):
-                 '\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}'
-                 '\x1b[0m:\x1b[;38;2;255;165;0m{line:d}\x1b[0m: '
-                 '<84}|\x1b[;31;1;4m{level}: {message}\x1b[0m'
+        '\x1b[;32mtest.func\x1b[0m:\x1b[;38;2;255;165;0m1\x1b[0m              |'
+        '\x1b[;31;1;4mINFO: hi!\x1b[0m',
 
+        # Format a stylized string
+        mock('\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}\x1b[0m:'
+             '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <78}|\x1b[;34;1m{level}: '
+             '{message}\x1b[0m\n',
+             elapsed='12.1', name='obstools.campaign',
+             function='shocCampaign.load_files', line=122, level='INFO',
+             message='x'):
+             '\x1b[;1;34m12.1\x1b[0m|'
+             '\x1b[;32mobstools.campaign.shocCampaign.load_files\x1b[0m:'
+             '\x1b[;38;2;255;165;0m122\x1b[0m                                 |'
+             '\x1b[;34;1mINFO: x\x1b[0m\n'
        }
+})
 
-}
-)
+# Partial resolution
+exp = Expected(Formatter().format_partial)
+exp.is_method = False
+test_partial_format = exp({
+    mock('{elapsed:s|Bb}|'
+         '{{{name}.{function}:|green}:{line:d|orange}: <52}|'
+         '{{level}: {message}:|{style}}',
+         style='crimson'
+         ): '\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}\x1b[0m:'
+            '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <84}|'
+            '\x1b[;38;2;220;20;60m{level}: {message}\x1b[0m'
+
+})
+
 
 # f"{String('Hello world'):rBI_/k}"
 # f"{String('Hello world'):red,B,I,_/k}"

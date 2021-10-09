@@ -5,6 +5,7 @@ Rocking colours. Just like in the 80s...
 # std
 import sys
 import textwrap
+import itertools as itt
 
 # third-party
 from loguru import logger
@@ -13,8 +14,9 @@ from loguru import logger
 from . import codes, image
 from .ansi import *
 from .utils import *
+from .string import Str
 from .codes import fg, bg
-from .formatter import format
+from .formatter import format, stylize, format_partial
 
 
 #
