@@ -7,7 +7,6 @@ Utility functions and classes.
 import os
 import numbers
 import functools as ftl
-import itertools as itt
 from collections import abc
 
 # third-party
@@ -15,6 +14,7 @@ import numpy as np
 
 # local
 from recipes.misc import get_terminal_size
+from recipes.string import hstack as string_hstack
 
 # relative
 from . import codes, ansi
@@ -33,71 +33,62 @@ def get_alignment(align):
     return align
 
 
-def hstack(tables, spacing=0, offset=()):
+def hstack(tables, spacing=0, offsets=0):
     """
-    Stick two or more tables (or multi-line strings) together horizontally
+    Stick two or more tables (or multi-line strings) together horizontally.
 
     Parameters
     ----------
     tables
-    spacing
-    offset
+    spacing : int
+        Number of horizontal spaces to be added as a column between the string
+        blocks.
+    offset : Sequence of int
+        Vertical offsets in number of rows between string blocks.
+
 
     Returns
     -------
-
+    str
+        Horizontally stacked string
     """
+    tables = list(filter(None, tables))
+    assert tables, '`tables` must be non-empty sequence'
 
-    assert len(tables), '`tables` must be non-empty sequence'
-
-    from motley.table import Table
-
-    #
-    if isinstance(offset, numbers.Integral):
-        offset = [0] + [offset] * (len(tables) - 1)
+    if len(tables) == 1:
+        return str(tables[0])
 
     #
-    widths = []
-    lines_list = []
-    max_length = 0
-    for i, (tbl, off) in enumerate(
-            itt.zip_longest(tables, offset, fillvalue=None)):
-        if off is None:
-            nl = tbl.n_head_lines if isinstance(tbl, Table) else 0
-            if i == 0:
-                nl0 = nl
-            off = nl0 - nl
 
-        lines = ([''] * off) + str(tbl).splitlines()
-        lines_list.append(lines)
-        max_length = max(len(lines), max_length)
-        widths.append(ansi.length_seen(lines[0]))
-        if spacing:
-            lines_list.append([])
-            widths.append(spacing)
+    if offsets == ():
+        n0, *n_header_lines = op.AttrVector('n_head_lines', default=0)(tables)
+        offsets = [n0, *np.subtract(n0, n_header_lines)]
 
-    #
-    for i, lines in enumerate(lines_list):
-        fill = ' ' * (widths[i])
-        m = max_length - len(lines)
-        lines_list[i].extend([fill] * m)
+    if isinstance(offsets, numbers.Integral):
+        offsets = [0] + [offsets] * (len(tables) - 1)
+    else:
+        offsets = list(offsets)
 
-    return '\n'.join(map(''.join, zip(*lines_list)))
+    return string_hstack(tables, spacing, offsets, _width_first)
+
+
+def _width_first(lines):
+    return ansi.length_seen(lines[0])
 
 
 def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
     """
-    Vertically stack tables while aligning column widths
+    Vertically stack tables while aligning column widths.
 
     Parameters
     ----------
     tables: list of motley.table.Table
-        Tables to stack
+        Tables to stack vertically.
     strip_titles: bool
-        Strip titles from all but the first table in the sequence
+        Strip titles from all but the first table in the sequence.
     strip_headers: bool
         Strip column group headings and column headings from all but the first
-        table in the sequence
+        table in the sequence.
 
     Returns
     -------
@@ -198,9 +189,9 @@ def vstack_groups(groups, strip_titles, braces=False, vspace=1, **kws):
                    '\n' * (tbl.has_totals + vspace))
 
     # vertical offset
-    offset = stack[0].n_head_lines
-    return hstack([vstack(stack, True, vspace), braces],
-                  spacing=1, offset=offset)
+    offsets = stack[0].n_head_lines
+    return string_hstack([vstack(stack, True, vspace), braces],
+                         spacing=1, offsets=offsets)
 
 
 def hbrace(size, name=''):
@@ -211,7 +202,7 @@ def hbrace(size, name=''):
     d, r = divmod(int(size) - 3, 2)
     return '\n'.join(['⎫'] +
                      ['⎪'] * d +
-                     ['⎬ %s' % str(name)] +
+                     ['⎬ {!s}'.format(name)] +
                      ['⎪'] * (d + r) +
                      ['⎭'])
 
@@ -269,7 +260,7 @@ def overlay(text, background='', align='^', width=None):
 
     if ansi.has_ansi(background):
         raise NotImplementedError(
-            '# fixme: will not work if background has coded strings')
+            '# FIXME: will not work if background has coded strings')
 
     # resolve alignment character
     align = get_alignment(align)
@@ -318,8 +309,7 @@ def get_width(text, count_hidden=False):
     return max(map(length, text.split(os.linesep)))
 
 
-def banner(obj, width=None, bar='—', side='⎪', middle='',
-           align='^', **props):
+def banner(text, width=None, align='^', color=None, **kws):
     """
     print pretty banner
 
@@ -346,14 +336,19 @@ def banner(obj, width=None, bar='—', side='⎪', middle='',
         [description]
     """
 
+    from .textbox import textbox
+
     if width is None:
         width = get_terminal_size()[0]
     width = int(width)
 
     # fill whitespace (so background props reflect for entire block of banner)
-    title = f'{obj!s:{middle}{align}{width - 2 * len(side)}}'
-    banner = box(title, width, bar, side, align)
-    return codes.apply(banner,  **props)
+    # title = f'{text: {align}{width - 2 * len(side)}}'
+    width = resolve_width(width)
+    # TextBox()
+    return textbox(text, sides=False, width=width, align=align, color=color,
+                   **kws)
+    # return codes.apply(banner,  **props)
 
 
 @ftl.lru_cache()
