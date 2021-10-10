@@ -108,7 +108,7 @@ class InvalidEffect(Exception):
     def __init__(self, obj, fg_or_bg):
         super().__init__(
             (f'Could not interpret object {obj!r} of type {type(obj)!r} as a '
-             f'valid colour or effect for {fg_or_bg!r}')
+             f'valid {fg_or_bg!r} colour or effect.')
         )
 
 # ---------------------------------------------------------------------------- #
@@ -172,14 +172,9 @@ def _(obj, fg_or_bg='fg'):
 @resolve.register(list)
 @resolve.register(tuple)
 def _(obj, fg_or_bg='fg'):
-    # tuple, lists are interpreted as 24-bit rgb colour codes
+    # 3-tuples, lists are interpreted as 24-bit rgb colour codes
     if is_24bit(obj):
-        if all(0 <= _ < 256 for _ in obj):
-            yield FORMAT_24BIT[fg_or_bg].format(*obj)
-        else:
-            raise ValueError(
-                f'Could not interpret key {obj!r} as a 24 bit colour.'
-            )
+        yield FORMAT_24BIT[fg_or_bg].format(*to_24bit(obj))
     else:
         for p in obj:
             yield from resolve(p, fg_or_bg)
@@ -197,12 +192,41 @@ def is_24bit(obj):
     if len(obj) != 3:
         return False
 
-    return all(isinstance(o, numbers.Integral) for o in obj)
+    types, *bad = set(map(type, obj))
+    if bad:
+        return False
+
+    return issubclass(types, numbers.Real)
 
 
-# def to_24bit(name):
-#     #
-#     return tuple((np.multiply(to_rgb(name), 255).astype(int)))
+def to_24bit(triplet):
+    if len(triplet) != 3:
+        raise ValueError(f'{triplet!r} has incorrect size for 24bit colour. 24 '
+                         'bit Colours are represented by a sequence of 3 '
+                         'integers in range (0, 256), or 3 floats in range (0, '
+                         '1).')
+    
+    triplet = list(triplet)
+    for i, val in enumerate(triplet):
+        if isinstance(val, numbers.Integral):
+            if not (0 <= val < 256):
+                raise ValueError(
+                    f'RGB colour value integer {val!r} outside range (0, 256).'
+        )
+        elif isinstance(val, numbers.Real):
+            if (0 <= val <= 1):
+                triplet[i] = int(val * 256)
+            else:
+                raise ValueError(
+                    f'RGB colour value float {val!r} outside range (0, 1).'
+        )
+        else:
+            raise TypeError(
+                f'Could not interpret key {triplet!r} as a 24 bit colour.'
+            )
+    return triplet
+
+    
 
 # to_rgb = to_24bit
 
