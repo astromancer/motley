@@ -50,11 +50,8 @@ REGEX_ANSI_FULL = re.compile(fr'''(?x)
 #  in order to make missing parameters useful.[18]:F.4.2 Bytes other than
 #  digits and semicolon seem to not be used."
 
-AnsiCode = namedtuple('AnsiCode', ('csi', 'params', 'final_byte', 'text', 'end'))
-
-
-# class CodedString:
-    
+AnsiEncodedString = namedtuple('AnsiEncodedString',
+                               ('csi', 'params', 'final_byte', 'text', 'end'))
 
 
 def has_ansi(s):
@@ -81,7 +78,7 @@ def parse(s, named=False):
     s: str
         The string to parse
     named: bool, default False
-        If True, returned items will be an 'AnsiCode` namedtuple.  This allows
+        If True, returned items will be an 'AnsiEncodedString` namedtuple.  This allows
         you to retrieve different parts of each successive coded string as
         attributes of the returned objects.
 
@@ -103,7 +100,7 @@ def parse(s, named=False):
     ';31'
     """
 
-    wrapper = AnsiCode if named else echo
+    wrapper = AnsiEncodedString if named else echo
 
     idx = 0
     for mo in REGEX_ANSI_FULL.finditer(s):
