@@ -157,10 +157,9 @@ class Formatter(BuiltinFormatter):
             yield string[match.end + 1:], None, None, None
 
     def get_field(self, field_name, args, kws):
-        if '{' in field_name:
-            logger.debug('recursing on {}', field_name)
-            # z = self.format(field_name, *args, **kws)
-            # logger.debug(f'{z=}')
+        if self.parser.match(field_name):
+            logger.debug('brace expression in field name, recursing on {}', 
+                         field_name)
             return self.format(field_name, *args, **kws), None
 
         return super().get_field(field_name, args, kws)
@@ -202,25 +201,27 @@ class Formatter(BuiltinFormatter):
 
         return value, spec, effects
 
-    def _adjust_width(self, spec, value, mo):
+    def _should_adjust_width(self, spec, value, mo):
         if isinstance(value, (str, UserString)) and mo['width']:
-            return int(mo['width']) + ansi.length_codes(value)
-        return
+            return mo['width'] and ansi.has_ansi(value)
+        return False
 
     def _adjust_width_for_hidden_characters(self, spec, value, mo):
         """
         if the value is a string which has effects applied, adjust the
         width field to compensate for non-display characters
         """
-        width = self._adjust_width(spec, value, mo)
-        if width:
-            spec_info = mo.groupdict()
-            # remove the base level groups in the regex
-            for _ in ('spec', 'effects', 'fg', 'bg'):
-                spec_info.pop(_)
-            spec_info['width'] = str(width)
-            return ''.join(spec_info.values())
-        return spec
+        if not self._should_adjust_width(spec, value, mo):
+            return spec
+        
+        spec_info = mo.groupdict()
+        # remove the base level groups in the regex
+        for _ in ('spec', 'effects', 'fg', 'bg'):
+            spec_info.pop(_)
+        
+        spec_info['width'] = str(int(mo['width']) + ansi.length_codes(value))
+        return ''.join(spec_info.values())
+        
 
     def format_field(self, value, spec):
         """
@@ -302,17 +303,19 @@ class Stylizer(Formatter):
 
     def get_field(self, field_name, args, kws):
         # eg: field_name = '0[name]' or 'label.title' or '{some_keyword}'
-        if '{' in field_name:
-            # self._current_level += 1
-            logger.debug('recursing on {}', field_name)
+        if self.parser.match(field_name):
+            # brace expression in field name!
+            logger.debug('brace expression in field name, recursing on {}', 
+                         field_name)
             sub = self.format(field_name, *args, **kws)
             self._wrap = False
-            # self._current_level -= 1
             return sub, None
+        
         self._wrap = True
         return field_name, None
 
     def format_field(self, value, spec):
+        value = str(value)  # necessary to measure field width in _parse_spec
         value, spec, effects = self._parse_spec(value, spec)
         value = ':'.join(filter(None, (value, spec)))
         # print(self._current_level, value, effects, spec)
@@ -339,7 +342,7 @@ class PartialFormatter(Stylizer):
             self._wrap = True
             return field_name, None
 
-    def _adjust_width(self, spec, value, mo):
+    def _should_adjust_width(self, spec, value, mo):
         # Subtlety: We only need to adjust the field width if the field name
         # doesn't contain braces. This is because the result returned by this
         # partial formatter will have the colors substituted, and will most
@@ -348,7 +351,11 @@ class PartialFormatter(Stylizer):
         # handled upon the second formatting where the width of the format spec
         # will then be adjusted. We therefore leave it unaltered here to avoid
         # adjusting the spec width twice.
-        return super()._adjust_width(spec, value, mo) and ('{' not in value)
+        return (
+            self.parser.match(value) is None
+            and
+            super()._should_adjust_width(spec, value, mo)
+        )
 
 
 formatter = Formatter()
