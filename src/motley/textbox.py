@@ -1,5 +1,8 @@
 
 # std
+import itertools as itt
+import more_itertools as mit
+import contextlib as ctx
 from recipes.misc import duplicate_if_scalar
 import warnings as wrn
 
@@ -9,7 +12,15 @@ from recipes.functionals import echo0
 # relative
 from . import underline
 from .utils import get_width, resolve_width
-from . import apply, format
+from . import apply, format, codes, format_partial
+
+
+# TODO
+# class Paragraph(str):
+# def  get_width, justify, frame etc
+
+
+# ' 𝇁'  U+1D100  Musical symbol longa perfecta rest
 
 # see: https://en.wikipedia.org/wiki/Box-drawing_character
 # '─'	U+2500	BOX DRAWINGS LIGHT HORIZONTAL
@@ -28,6 +39,8 @@ from . import apply, format
 # '┉'	U+2509	BOX DRAWINGS HEAVY QUADRUPLE DASH HORIZONTAL
 # '┊'	U+250A	BOX DRAWINGS LIGHT QUADRUPLE DASH VERTICAL
 # '┋'	U+250B	BOX DRAWINGS HEAVY QUADRUPLE DASH VERTICAL
+# '╵'   U+2575  BOX DRAWINGS LIGHT UP
+# '╷'   U+2577  BOX DRAWINGS LIGHT DOWN
 # '┌'	U+250C	BOX DRAWINGS LIGHT DOWN AND RIGHT
 # '┍'	U+250D	BOX DRAWINGS DOWN LIGHT AND RIGHT HEAVY
 # '┎'	U+250E	BOX DRAWINGS DOWN HEAVY AND RIGHT LIGHT
@@ -138,6 +151,9 @@ HLINES = {
     '--':   '╌',
     '.':    '┄',
     ':':    '┈',
+    '_':    ' ',
+    underline: ' ',
+    # '+':    ''
 }
 HLINES_BOLD = {
     '':     ' ',
@@ -194,7 +210,7 @@ CORNERS_BOLD = {
 }
 
 
-def resolve_emph(char):
+def resolve_line(char):
     if char is underline:
         return underline, ' '
 
@@ -217,11 +233,35 @@ def _get_corners(corners, bold):
 
 
 def textbox(text,
-            top='-', bottom=None,
-            left='|', right=None,
-            corners=None, bold=False,
+            style='_',
+            bold=False,
             color=None,
             **kws):
+    """
+    High level function that wraps multi-line strings in a text box. The
+    parameters `top`, `bottom`, `left` and `right` are mapped to unicode
+    box drawing symbols.
+
+    Parameters
+    ----------
+    text : [type]
+        [description]
+    style : str
+        frame style
+    bold : bool, optional
+        [description], by default False
+    color : [type], optional
+        [description], by default None
+
+    Examples
+    --------
+    >>> 
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
     # textbox(style='')
     # textbox(style='-')
     # textbox(style='=')
@@ -232,48 +272,72 @@ def textbox(text,
     # corners_ = (CORNERS, CORNERS_BOLD)[bold]
 
     # kws.pop('sides', None)
-    if 'style' in kws:
-        top = bottom = left = right = kws.pop('style')
-        corners = CORNERS.get(top, None)
+    if style is None:
+        return text
+
+    if style == '_':
+        return AnsiBox(**kws)(text)
+
+    if style == '+':
+        return GridFrameBox(**kws)(text)
+
+    # top = bottom = left = right = style
+    top = bottom = hlines[style]
+    # bottom = hlines[bottom] if bottom is not None else top
+    left = right = vlines[style]
+    # right = vlines[right] if right is not None else left
+    # corners = corners_[corners]
+    corners = CORNERS.get(style, None)
 
     if 'sides' in kws:
         sides = kws.pop('sides') or ''
         left, right = duplicate_if_scalar(sides)
         corners = corners or sides
 
-    corners = _get_corners(corners, bold)
-
-    top = hlines[top]
-    bottom = hlines[bottom] if bottom is not None else top
-    left = vlines[left]
-    right = vlines[right] if right is not None else left
-    # corners = corners_[corners]
+    if corners is None:
+        corners = _get_corners(corners, bold)
 
     return TextBox(top, bottom, left, right, corners, color)(text, **kws)
 
 #  TODO: AsciiTextBox
 
 
+# null singleton for default identification
+NULL = object()
+
+
 class TextBox:
+    """
+    Flexible box drawing.
+    """
 
     def __init__(self,
                  #  fmt='{text: {align}{width}|{fg}/{bg}}'
                  top='\N{BOX DRAWINGS LIGHT HORIZONTAL}',
-                 bottom=None,
+                 bottom=NULL,
                  left='\N{BOX DRAWINGS LIGHT VERTICAL}',
-                 right=None,
+                 right=NULL,
                  corners='╭╮╰╯',
-                 color=None):
+                 colors=(),
+                 **kws):
+        """
+        Initialize the TextBox. This object works at a lower level than the
+        `textbox` function. The parameters `top`, `bottom`, `left` and `right`
+        are used directly as characters for the frame, repeating until the space
+        is filled.
+        """
+
+        # TODO: parse stylized input for sides
 
         self.left = str(left)
-        self.right = str(right or left)
+        self.right = str(left if right is NULL else right or '')
         self.top = top
-        self.bottom = bottom or top
+        self.bottom = top if bottom is NULL else bottom
         self.corners = corners
-        self.color = color or ''
+
+        self.colors = duplicate_if_scalar(kws.get('color', colors) or '', 4)
 
     def __call__(self, text='', width=None, height=None, align='^'):
-        # TODO xy=(0.5, 0.5)
         text = str(text)
         text_width = get_width(text)
         if width is None:
@@ -285,63 +349,77 @@ class TextBox:
 
         return '\n'.join(self._iter_lines(text, width, align))
 
-    def _iter_lines(self, text, width, align):
-        try:
-            ulc, urc, llc, lrc = self.corners
-        except Exception as err:
-            from IPython import embed
-            import textwrap, traceback
-            embed(header=textwrap.dedent(
-                    f"""\
-                    Caught the following {type(err).__name__} at 'textbox.py':288:
-                    %s
-                    Exception will be re-raised upon exiting this embedded interpreter.
-                    """) % traceback.format_exc())
-            raise
-            
-        width = width - len(self.left) - len(self.right)
-        yield format('{{ulc}{{top}:{top}^{width}}{urc}:|{color}}',
-                     **locals(), **vars(self))
-        # yield apply(f'{ulc}{self.top * width}{urc}', self.color)
-#
-        # left = apply(self.left, self.color)
-        # right = apply(self.right, self.color)
-        for line in text.splitlines():
-            yield format('{left:|{color}}{line: {align}{width}}{right:|{color}}',
-                         **locals(), **vars(self))
-            # yield f'{left}{line!s: {align}{width}}{right}'
+    # line_formats = {
+    #     'top': '{{corners[0]}{{top}:{top}^{width}}{corners[1]}:|{colors[0]}}',
+    #     'bot': '{{corners[2]}{{bot}:{bot}^{width}}{corners[3]}:|{colors[1]}}',
+    #     'mid': '{left:|{colors[2]}}{line: {align}{width}}{right:|{colors[3]}}'
+    # }
+    line_fmt = '{left:|{colors[2]}}{line: {align}{width}}{right:|{colors[3]}}'
 
-        yield apply(f'{llc}{self.bottom * width}{lrc}', self.color)
+    def _iter_lines(self, text, width, align, **kws):
+        width = width - len(self.left) - len(self.right)
+        kws = {**locals(), **vars(self), **kws}
+        kws.pop('self')
+        yield make_hline(self.top, self.corners[:2], width, self.colors[0])
+
+        line_fmt = format_partial(self.line_fmt, **kws)
+        for line in text.splitlines():
+            yield format(line_fmt, **kws, line=line)
+
+        if self.bottom:
+            yield make_hline(self.bottom, self.corners[2:], width, self.colors[1])
+
+
+def make_hline(characters, corners, width, color):
+    n = len(characters)
+    line = (characters * (width // n) + characters[:(width % n)]).join(corners)
+    return apply(line, color)
 
 
 class AnsiBox(TextBox):
-    def __init__(self):
-        self.overline, self.top = resolve_emph(top)
-        self.underline, self.bottom = resolve_emph(bottom or top)
+    def __init__(self, **kws):
+        super().__init__(**{**dict(top=' ',
+                                   corners=CORNERS[' '],
+                                   colors=('_', '', '', '')),
+                            **kws})
 
-    def __call__(self, text='', width=None, xy=(0.5, 0.5), ):
-        width = resolve_width(width)
-        text_width = get_width(text)
-        if text_width > width:
-            wrn.warn(f'Text too wide for box {text_width} > {width}.')
-
-        *lines, last = self._iter_lines(text, width, '^')
-        parts = (*lines, self.underline(last))
-        if self.bottom:
-            parts = (*parts, self.bottom * width)
-
-        return '\n'.join(filter(None, parts))
-
-    def _iter(self, text, width, align):
-        if self.top:
-            yield self.overline(self.top * width)
-
-        width = width - len(self.left) - len(self.right)
-        for line in text.split('\n'):
-            motley.format('{{left}{line}{right}: {align}{width}}',
-                          **locals(), **vars(self))
-            yield f'{self.left}{line!s: {align}{width}}{self.right}'
+    def _iter_lines(self, text, width, align, **kws):
+        # from IPython import embed
+        # embed(header="Embedded interpreter at 'src/motley/textbox.py':386")
+        itr = super()._iter_lines(text, width, align)
+        itr = mit.islice_extended(itr)
+        upto = text.count('\n') + bool(self.top) - bool(self.bottom) #- 1
+        yield from itr[:upto]
+        yield underline(next(itr))
 
 
-clear_box = TextBox('', '')
-box = TextBox('—', '⎪')
+class GridFrameBox(AnsiBox):
+    def __init__(self, **kws):
+        super().__init__(**{**dict(top='𝇁 ',  # ' ╷',
+                                   bottom=' 𝇁',  # ' ╵',
+                                   left='▕',
+                                   right='▏',
+                                   color='_',  # underline
+                                   corners=(' ', '𝇁', '', '')),
+                            **kws})
+
+    def _iter_lines(self, text, width, align, **kws):
+        bottom = self.bottom
+        self.bottom = ' '
+        yield from super()._iter_lines(text, width, align)
+        self.bottom = bottom
+        yield make_hline(bottom, self.corners[2:], width, '')
+
+
+class TickedGridFrame(GridFrameBox):
+    def __init__(self, xticks=(), yticks=(), **kws):
+        self.xticks = list(xticks)
+        self.yticks = list(yticks)
+
+    def _iter_lines(self, text, width, align):
+        itr = super()._iter_lines(text, width, align)
+        for tick, line in itt.zip_longest(self.yticks, itr, fill_value=None):
+            yield tick + line
+
+        if self.xticks:
+            yield ''.join(self.xticks)
