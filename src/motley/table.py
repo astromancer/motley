@@ -23,7 +23,8 @@ from pyxides.grouping import Groups
 from pyxides.vectorize import AttrTabulate
 from recipes.string import sub
 from recipes import pprint as ppr
-from recipes.sets import OrderedSet
+from recipes.iter import cofilter
+# from recipes.sets import OrderedSet
 from recipes.functionals import echo0
 from recipes.synonyms import Synonyms
 from recipes.lists import tally, where
@@ -1922,6 +1923,135 @@ CONVERTERS = {
 SENTINEL = object()
 
 
+class Column(LoggingMixin):
+    # count = itt.count()
+
+    def __init__(self, data, title=None, unit=None, fmt=None, align='.',
+                 width=None, total=False):
+        # TODO: fmt = '. 14.5?f|gBi_/teal'
+        self.title - title
+        self.data = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
+        assert self.data.ndim == 1
+        self.dtypes = set(map(type, np.ma.compressed(self.data)))
+        self.unit = unit
+        self.align = get_alignment(align)
+        self.width = width
+        self.total = self.data.sum() if total else None
+
+        if fmt is None:
+            fmt = self.get_default_formatter()
+        assert callable(fmt)
+        self.fmt = fmt
+
+    def resolve_formatter(self, fmt):
+        ''
+
+    def get_default_formatter(self, precision, short):
+        """
+
+        Parameters
+        ----------
+        precision
+        short
+
+        Returns
+        -------
+
+        """
+
+        # NOTE: single dispatch not a good option here due to formatting
+        #   subtleties
+
+        if len(self.dtypes) != 1:
+            return ppr.PrettyPrinter(
+                precision=precision, minimalist=short).pformat
+
+        # nb since it's a set, don't try types_[0]
+        type_, = self.dtypes
+        # all data in this column is of the same type
+        if issubclass(type_, str):  # NOTE -  this includes np.str_!
+            return echo0
+
+        if not issubclass(type_, numbers.Real):
+            return str
+
+        # right_pad = 0
+        sign = ''
+        if issubclass(type_, numbers.Integral):
+            if short:
+                precision = 0
+
+        else:  # real numbers
+            # if short and (self.align[col_idx] in '<>'):
+            #     right_pad = precision + 1
+            sign = (' ' * int(np.any(self.data < 0)))
+
+        return ftl.partial(ppr.decimal,
+                           precision=precision,
+                           short=short,
+                           sign=sign,
+                           thousands=' ')
+
+    def formatted(self, fmt, masked_str='--', flags=None):
+        # Todo: formatting for row_headers...
+        if fmt is None:
+            # null format means convert to str, need everything in array
+            # to be str to prevent errors downstream
+            # (data is dtype='O')
+            fmt = str
+
+        use = (np.logical_not(self.data.mask)
+               if np.ma.is_masked(self.data) else ...)
+        values = self.data[use]
+
+        # wrap the formatting in try, except since it's usually not
+        # critical that it works and getting some info is better than none
+        try:
+            data[use] = np.vectorize(fmt, (str, ))(values)
+        except Exception as err:
+            title = self.title or "\b"
+            wrn.warn(f'Could not format column {title} with {fmt!r} '
+                     f'due to the following exception:\n{err}')
+
+            data[use] = np.vectorize(str, (str, ))(values)
+
+        # special alignment on '.' for float columns
+        if self.align == '.':
+            data[use] = ppr.align_dot(values)
+
+        # concatenate data with flags
+        # flags = flags.get(i)
+        if i in flags:
+            try:
+                data[use] = np.char.add(data[use].astype(str),
+                                        list(map(str, flags[i])))
+            except Exception as err:
+                wrn.warn(f'Could not append flags to formatted data for '
+                         f'column {i} due to the following '
+                         f'exception:\n{err}')
+
+
+class AttrColumn(Column):
+    def __init__(self, title=None, unit=None, convert=None, fmt=None,
+                 total=False):
+
+        # TODO: fmt = '. 14.5?f|gBi_/teal'
+        self.title = title
+        # self.data = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
+        # assert self.data.ndim == 1
+        # self.dtypes = set(map(type, np.ma.compressed(self.data)))
+        self.unit = unit
+        # self.align = get_alignment(align)
+        # self.width = width
+        self.total = bool(total)  # self.data.sum() if total else None
+
+        # if fmt is None:
+        #     fmt = self.get_default_formatter()
+        # assert callable(fmt)
+        self.convert = convert
+        self.fmt = fmt
+
+
 class AttrTable:
     """
     Helper class for tabulating attributes / properties of lists of objects.
@@ -1933,6 +2063,30 @@ class AttrTable:
 
     # @classmethod
     # def from_dict(cls, mapping=(), **kws):
+
+    @classmethod
+    def from_columns(cls, mapping=(), **kws):
+        mapping = dict(mapping)
+        option_names = ('headers', 'units', 'converters', 'formatters')
+        options = [{}, {}, {}, {}]
+        col_keys = 'title', 'unit', 'convert', 'fmt'
+        totals = []
+        for attr, col in mapping.items():
+            if col in (..., ''):
+                continue
+
+            assert isinstance(col, AttrColumn)
+
+            # populate the headers, units, converters, formatters
+            col_opts = cofilter(None, map(vars(col).get, col_keys), options)
+            for val, opt in zip(*col_opts):
+                opt[attr] = val
+
+            if col.total:
+                totals.append(attr)
+
+        kws.update(zip(option_names, options))
+        return cls(mapping.keys(),totals=totals, **kws)
 
     @classmethod
     def from_spec(cls, mapping=(), **kws):
@@ -2324,7 +2478,7 @@ class AttrTable:
                      **{**self.kws,  # defaults
                         **{**dict(title=container.__class__.__name__,
                                   col_headers=self.get_headers(attrs),
-                                  col_groups=self.get_col_groups(attrs)),
+                                  col_groups=self.get_groups(attrs)),
                            **{key: self.get_defaults(attrs, key)
                               for key in ('units', 'formatters')},
                            **kws},  # input
@@ -2354,7 +2508,7 @@ class AttrTable:
         headers = self.get_headers(attrs)
 
         # handle column totals
-        totals = kws.pop('totals', self.kws['totals'])
+        totals = self.totals  # kws.pop('totals', self.kws['totals'])
         if totals:
             # don't print totals for columns used for grouping since they will
             # not be displayed
@@ -2363,7 +2517,7 @@ class AttrTable:
             # lower tables
             totals = list(map(headers.index, self.get_headers(totals)))
 
-        units = kws.pop('units', self.units)
+        units = self.units  # kws.pop('units', self.units)
         if units:
             want_units = set(units.keys())
             nope = set(units.keys()) - set(headers)
