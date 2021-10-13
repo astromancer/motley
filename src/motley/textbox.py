@@ -1,18 +1,20 @@
 
 # std
-import itertools as itt
-import more_itertools as mit
-import contextlib as ctx
-from recipes.misc import duplicate_if_scalar
+import unicodedata
 import warnings as wrn
+import itertools as itt
+
+# third-party
+import more_itertools as mit
 
 # local
 from recipes.functionals import echo0
+from recipes.misc import duplicate_if_scalar
+from recipes.language.unicode import subscripts
 
 # relative
-from . import underline
+from . import ansi, apply, format, format_partial, underline
 from .utils import get_width, resolve_width
-from . import apply, format, codes, format_partial
 
 
 # TODO
@@ -20,7 +22,7 @@ from . import apply, format, codes, format_partial
 # def  get_width, justify, frame etc
 
 
-# ' 𝇁'  U+1D100  Musical symbol longa perfecta rest
+# '⎿'
 
 # see: https://en.wikipedia.org/wiki/Box-drawing_character
 # '─'	U+2500	BOX DRAWINGS LIGHT HORIZONTAL
@@ -142,6 +144,59 @@ from . import apply, format, codes, format_partial
 #
 # \N{EM DASH}
 # \N{CURLY BRACKET EXTENSION}
+
+
+# '𝇁'   U+1D100     Musical symbol longa perfecta rest
+# '𝄅'   U+1D105      Musical symbol short barline
+# '𝆠'   U+1D1A0     Musical symbol ornament stroke-6
+# '𝇃' 1D1C3   Musical symbol brevis rest
+
+# '⏐' Vertical line extension
+
+# ' ᑊ' Canadian syllabics west-cree p
+# ' ᴵ' Modifier letter capital i
+
+# '⌙'    2319        Turned not sign
+# '⌜'   '\u231C'      Top left corner
+# '⌝'   '\u231D'
+# '⌞'   '\u231E'
+# '⌟'   '\u231F'
+# '⎾'    23be       Dentistry symbol light vertical and top right
+# '⎿'   23bF        Dentistry symbol light vertical and bottom right
+
+# '―'   2015        Horizontal bar
+#       23D7  Metrical triseme
+
+
+# '⁅' Left Square Bracket with Quill
+# '⁆'
+
+# '｢'   Halfwidth Left Corner Bracket
+# '｣'
+
+# '⎹' RIGHT VERTICAL BOX LINE
+# '⎸' LEFT VERTICAL BOX LINE
+# '⎺' HORIZONTAL SCAN LINE-1
+# '⎽' HORIZONTAL SCAN LINE-9
+# '⎥' RIGHT SQUARE BRACKET EXTENSION
+# '▏' LEFT ONE EIGHTH BLOCK
+# '▕' RIGHT ONE EIGHTH BLOCK
+# '▔' UPPER ONE EIGHTH BLOCK
+# '▁' LOWER ONE EIGHTH BLOCK
+
+# '⎢' Left square bracket extension 023A2
+# '⎥' Right square bracket extension 023A5
+# '⎜' Left parenthesis extension 0239C
+# '⎟' Right parenthesis extension  0239F
+
+
+# '＿' Fullwidth Low Line (U+FF3F)
+# '￣' Fullwidth Macron U+FFE3
+# '｜' Fullwidth Vertical Line (U+FF5C)
+# '［' Fullwidth Left Square Bracket(U+FF3B)
+# '］' Fullwidth Right Square Bracket (U+FF3D)
+# '⎴' Top square bracket 023B4
+# '⎵' Bottom square bracket 023B5
 
 HLINES = {
     '':     ' ',
@@ -278,8 +333,35 @@ def textbox(text,
     if style == '_':
         return AnsiBox(**kws)(text)
 
+    if style == '[':
+        return GridFrameBox(
+            top='\N{Combining short vertical line overlay}  ',        # ' ╷',
+            bottom=' ᑊ',     # ' ╵',
+            left='▕',
+            right='▏',
+            color='_',       # underline
+            corners=('  ',
+                     '\N{Combining short vertical line overlay}', '', ''),
+            **kws)(text)
+
     if style == '+':
-        return GridFrameBox(**kws)(text)
+        box = GridFrameBox(top='  \N{Combining short vertical line overlay}',
+                           bottom=' ᑊ',
+                           left='┤', right='├',
+                           corners=(' ', ' ', ' ', ''),
+                           color=('_', '_', '', ''))
+        return box(text).strip(box.bottom[1])
+
+    if style == 'E':
+        box = GridFrameBox(**kws, 
+                            top=' \N{Combining short vertical line overlay}𝇃',
+                            bottom='𝇁ᑊ',
+                            left='┤', right='├',
+                            corners=(' ', 
+                                     ' \N{Combining short vertical line overlay}',
+                                     ' ', ' '),
+                            color='_')
+        return box(text)[:-2]
 
     # top = bottom = left = right = style
     top = bottom = hlines[style]
@@ -371,7 +453,7 @@ class TextBox:
 
 
 def make_hline(characters, corners, width, color):
-    n = len(characters)
+    n = sum((len(s) - unicodedata.combining(s) for s in characters))
     line = (characters * (width // n) + characters[:(width % n)]).join(corners)
     return apply(line, color)
 
@@ -388,18 +470,18 @@ class AnsiBox(TextBox):
         # embed(header="Embedded interpreter at 'src/motley/textbox.py':386")
         itr = super()._iter_lines(text, width, align)
         itr = mit.islice_extended(itr)
-        upto = text.count('\n') + bool(self.top) - bool(self.bottom) #- 1
+        upto = text.count('\n') + bool(self.top) - bool(self.bottom)  # - 1
         yield from itr[:upto]
         yield underline(next(itr))
 
 
 class GridFrameBox(AnsiBox):
     def __init__(self, **kws):
-        super().__init__(**{**dict(top='𝇁 ',  # ' ╷',
-                                   bottom=' 𝇁',  # ' ╵',
+        super().__init__(**{**dict(top='𝇁 ',        # ' ╷',
+                                   bottom=' 𝇁',     # ' ╵',
                                    left='▕',
                                    right='▏',
-                                   color='_',  # underline
+                                   color='_',       # underline
                                    corners=(' ', '𝇁', '', '')),
                             **kws})
 
@@ -413,12 +495,17 @@ class GridFrameBox(AnsiBox):
 
 class TickedGridFrame(GridFrameBox):
     def __init__(self, xticks=(), yticks=(), **kws):
-        self.xticks = list(xticks)
-        self.yticks = list(yticks)
+        super().__init__(**kws)
+        for xy, ticks in zip('xy', (xticks, yticks)):
+            ticks = [str(subscripts.get(t, t)) for t in ticks]
+            w = max(map(ansi.length_seen, ticks)) if ticks else 0
+            setattr(self, f'{xy}ticks',
+                    list(map(f'{{: >{w}}}'.format, ('', *ticks)))
+                    )
 
     def _iter_lines(self, text, width, align):
         itr = super()._iter_lines(text, width, align)
-        for tick, line in itt.zip_longest(self.yticks, itr, fill_value=None):
+        for tick, line in itt.zip_longest(self.yticks, itr, fillvalue=' '):
             yield tick + line
 
         if self.xticks:

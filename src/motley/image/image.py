@@ -19,7 +19,7 @@ from recipes.functionals import echo0
 
 # relative
 from .. import ansi, apply, codes, format, hstack, length, underline
-from ..textbox import textbox, AnsiBox
+from ..textbox import TickedGridFrame, textbox
 from .trace import trace_boundary
 
 
@@ -36,30 +36,6 @@ BLOCKS = tuple(' ▄▀█')
 # '▀'   UPPER HALF BLOCK    U+2580
 # '▄'   LOWER HALF BLOCK    U+2584
 # '█'   FULL BLOCK          U+2588
-
-
-# '⎹' RIGHT VERTICAL BOX LINE
-# '⎸' LEFT VERTICAL BOX LINE
-# '⎺' HORIZONTAL SCAN LINE-1
-# '⎽' HORIZONTAL SCAN LINE-9
-# '⎥' RIGHT SQUARE BRACKET EXTENSION
-# '▏' LEFT ONE EIGHTH BLOCK
-# '▕' RIGHT ONE EIGHTH BLOCK
-# '▔' UPPER ONE EIGHTH BLOCK
-# '▁' LOWER ONE EIGHTH BLOCK
-
-# '⎢' Left square bracket extension 023A2
-# '⎥' Right square bracket extension 023A5
-# '⎜' Left parenthesis extension 0239C
-# '⎟' Right parenthesis extension  0239F
-
-# '＿' Fullwidth Low Line (U+FF3F)
-# '￣' Fullwidth Macron U+FFE3
-# '｜' Fullwidth Vertical Line (U+FF5C)
-# '［' Fullwidth Left Square Bracket(U+FF3B)
-# '］' Fullwidth Right Square Bracket (U+FF3D)
-# '⎴' Top square bracket 023B4
-# '⎵' Bottom square bracket 023B5
 
 
 def _add_edge(pixel, left, char, color):
@@ -301,13 +277,16 @@ class TextImage:
         # format here for ineractive use
         return self.format()
 
-    def format(self, frame=None, ):
+    def format(self, frame=None, xticks=(), yticks=()):
         if frame is None:
             frame = self.frame
 
         if not frame:
             return stack(self.pixels)
 
+        if xticks or yticks:
+            return TickedGridFrame(xticks, yticks)(stack(self.pixels))
+        
         # if frame in ('_', underline, True):
         #     return AnsiBox()(stack(self.pixels))
             # return stack(frame_inpixel(self.pixels, None))
