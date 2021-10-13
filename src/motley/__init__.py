@@ -16,7 +16,7 @@ from .ansi import *
 from .utils import *
 from .string import Str
 from .codes import fg, bg
-from .formatter import format, stylize, format_partial
+from .formatter import format, stylize, format_partial, formatter # pylint: disable=redefined-builtin
 
 
 #

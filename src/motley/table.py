@@ -5,30 +5,35 @@ Pretty printed tables for small data sets
 
 # std
 import os
-import logging
 import numbers
 import warnings as wrn
 import functools as ftl
 import itertools as itt
 from collections import abc
+from _string import formatter_parser
 from shutil import get_terminal_size
 
 # third-party
 import numpy as np
+import more_itertools as mit
+from loguru import logger
 
 # local
 from pyxides.grouping import Groups
-from pyxides.vectorize import AttrVectorizerMixin
-from recipes.lists import where
+from pyxides.vectorize import AttrTabulate
+from recipes.string import sub
 from recipes import pprint as ppr
 from recipes.sets import OrderedSet
+from recipes.functionals import echo0
 from recipes.synonyms import Synonyms
+from recipes.lists import tally, where
+from recipes.logging import LoggingMixin
 from recipes.decorators import raises as bork
-from recipes.logging import LoggingMixin, get_module_logger
+from recipes.string.brackets import BracketParser
 
 # relative
-from . import ansi, codes
-from .utils import get_width, get_alignment, make_group_title
+from . import ansi, codes, formatter
+from .utils import get_alignment, get_width, make_group_title
 
 
 # if __name__ == '__main__':
@@ -37,12 +42,6 @@ from .utils import get_width, get_alignment, make_group_title
 # http://misc.flogisoft.com/bash/tip_colors_and_formatting
 # http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
 # https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
-
-
-# module level logger
-logger = get_module_logger()
-logging.basicConfig()
-logger.setLevel(logging.INFO)
 
 
 # defaults as module constants
@@ -101,10 +100,6 @@ def _convert_astropy_table(tbl):
         units = None
 
     return data, heads, units
-
-
-def _echo(_):
-    return _
 
 
 def str2tup(keys):
@@ -1079,7 +1074,7 @@ class Table(LoggingMixin):
             type_, = types_  # nb since it's a set, don't try types_[0]
             # all data in this column is of the same type
             if issubclass(type_, str):  # this includes np.str_!
-                return _echo
+                return echo0
 
             if not issubclass(type_, numbers.Real):
                 return str
@@ -1293,7 +1288,8 @@ class Table(LoggingMixin):
             for i in np.where(l)[0]:
                 self.pre_table[i, j] = truncate(self.pre_table[i, j], w)
 
-    def get_column_widths(self, data=None, count_hidden=False, with_borders=False):
+    def get_column_widths(self, data=None, count_hidden=False,
+                          with_borders=False):
         """data should be string type array"""
         # note now pretty much redundant
 
@@ -1913,16 +1909,96 @@ class Table(LoggingMixin):
     # return table
 
 
+CONVERTERS = {
+    's': str,
+    'r': repr,
+    'a': ascii,
+    'o': ord,
+    'c': chr,
+    't': str.title,
+    'q': lambda _: repr(str(_))
+}
+
 SENTINEL = object()
 
 
 class AttrTable:
     """
-    Helper class for tabulating data. Attributes of the objects in the container
-    are mapped to the columns of the table.
+    Helper class for tabulating attributes / properties of lists of objects.
+    Attributes of the objects in the container are mapped to the columns of the
+    table.
     """
 
-    def _get_input(self, obj):
+    _unit_parser = BracketParser('[]')
+
+    # @classmethod
+    # def from_dict(cls, mapping=(), **kws):
+
+    @classmethod
+    def from_spec(cls, mapping=(), **kws):
+        attrs, *opts = cls._resolve_opts(mapping)
+        parsed_option_names = ('headers', 'units', 'converters', 'formatters')
+        for key, opt in zip(parsed_option_names, opts):
+            if key in kws:
+                kws[key].update(opt)
+            else:
+                kws[key] = opt
+        return cls(attrs, **kws)
+
+    @classmethod
+    def _resolve_opts(cls, mapping):
+        # headers, units, converters, formatters
+        info = {}, {}, {}, {}
+        attrs = []
+        for attr, *options in cls._iter_from_spec(dict(mapping)):
+            # header, unit, converter, formatter
+            for i, opt in enumerate(options):
+                if opt:
+                    info[i][attr] = opt
+
+            attrs.append(attr)
+        # attrs, headers, units, converters, formatters
+        return attrs, *info
+
+    @classmethod
+    def _iter_from_spec(cls, mapping):
+        for header, spec in mapping.items():
+            # parse units
+            if spec in (..., ''):
+                #     attr, header, unit, converter, formatter
+                yield header, None, None, None, None
+                continue
+
+            unit = cls._unit_parser.match(header)
+            if unit:
+                unit = unit.full
+                header = header.replace(unit, '').strip()
+
+            attr, converter, spec = cls._parse_spec(spec)
+            yield (attr or header), header, unit, converter, spec
+
+    @staticmethod
+    def _parse_spec(spec):
+        # literal_text, field_name, format_spec, conversion
+        items = next(formatter_parser(f'{{{spec}}}'))
+        _, attr, format_spec, conversion = items
+        # if items is None:
+        #     raise NotImplementedError()
+        # formatter._parse_spec()
+        converter = CONVERTERS.get(conversion.lower()) if conversion else None
+        return attr, converter, format_spec
+
+    # @classmethod
+    # def from_spec(cls, name_spec_list):
+    #     value, spec, effects = formatter._parse_spec('', name_spec_list)
+    #     for key, col in columns.items():
+
+    def __get__(self, instance, kls):
+        if instance:  # lookup from instance
+            self.parent = instance
+        return self  # lookup from class
+
+    def _ensure_dict(self, obj):
         if obj is None:
             return dict()
 
@@ -1931,7 +2007,21 @@ class AttrTable:
 
         return dict(zip(self.attrs, obj))
 
-    def __init__(self, attrs, aliases=None, formatters=None, units=None, **kws):
+    def __new__(cls, attrs, *args, **kws):
+        if isinstance(attrs, dict):
+            return cls.from_dict(attrs)
+        return super().__new__(cls)
+
+    def __init__(self,
+                 attrs,
+                 headers=None,
+                 converters=None,
+                 formatters=None,
+                 units=None,
+                 header_levels=None,
+                 show_groups=True,
+                 totals=(),
+                 **kws):
 
         # set default options for table
         self.kws = {**dict(row_nrs=0,
@@ -1941,12 +2031,19 @@ class AttrTable:
                     **kws}
 
         self.attrs = list(attrs)
-        self.formatters = self._get_input(formatters)
-        self.units = self._get_input(units)
-        self.aliases = self._get_input(aliases)
-        self.aliases = dict(zip(attrs, self.get_headers(attrs)))
+        self.converters = self._ensure_dict(converters)
+        self.formatters = self._ensure_dict(formatters)
+        self.header_levels = self._ensure_dict(header_levels)
+        self.headers = self._ensure_dict(headers)
+        self.units = self._ensure_dict(units)
+        self.totals = [totals] if isinstance(totals, str) else list(totals)
+        self.show_groups = bool(show_groups)
 
-    def __call__(self, container, attrs=None, **kws):
+        # self.headers = dict(zip(attrs, self.get_headers(attrs)))
+        # self._heads = {a: self.get_header_parts(a) for a in self.attrs}
+        self.parent = None
+
+    def __call__(self, attrs=None, container=None, **kws):
         """
         Print the table of attributes for this container as a table.
 
@@ -1962,52 +2059,76 @@ class AttrTable:
         Returns
         -------
 
-
         """
-        if isinstance(container, AttrVectorizerMixin):
-            return self.get_table(container, attrs, **kws)
 
-        if isinstance(container, Groups):
-            return self.get_tables(container, attrs, **kws)
+        container = container or self.parent
+        if isinstance(self.parent, AttrTabulate):
+            return self.get_table(self.parent, attrs, **kws)
 
-        raise TypeError(f'Cannot tabulate object of type {type(container)}.')
+        if isinstance(self.parent, Groups):
+            return self.get_tables(self.parent, attrs, **kws)
 
-    def convert_aliases(self, kws):
-        # ok = set(map(self.aliases.get, kws)) - {None}
-        if isinstance(kws, dict):
-            return {self.aliases.get(k, k): v for k, v in kws.items()}
-        elif isinstance(kws, abc.Collection):
-            return [self.aliases.get(k, k) for k in kws]
-
-        raise TypeError(f'Cannot convert aliases from object type: {type(kws)}.'
-                        ' Expected a Collection.')
+        raise TypeError(f'Cannot tabulate object of type {type(self.parent)}.')
 
     def get_defaults(self, attrs, which):
         defaults = getattr(self, which)
         out = {}
-        for a in attrs:
-            alias = self.get_header(a)
-            use = defaults.get(a, defaults.get(alias, SENTINEL))
+        for attr in attrs:
+            header = self.get_header(attr)
+            use = defaults.get(attr, defaults.get(header, SENTINEL))
             if use is not SENTINEL:
-                out[alias] = use
+                out[header] = use
         return out
 
+    @ftl.lru_cache()
+    def _get_header_parts(self, attr):
+        base, *rest = attr.split('.')
+        group = base if rest else ''
+        if attr in self.headers:
+            header = self.headers[attr]
+        else:
+            header = rest[0] if group else base
+
+        #
+        unit = self.units.get(attr, '')
+
+        # shift levels if needed
+        level = self.header_levels.get(base, 0)
+        if level:
+            group, header, unit = [''] * level + [group, header, unit][:-level]
+            return group, header, f'[{unit}]'
+
+        return group, header, unit
+
+    def get_group(self, attr):
+        return self._get_header_parts(attr)[0]
+
     def get_header(self, attr):
-        return self.aliases.get(attr, attr.split('.')[-1])
+        return self._get_header_parts(attr)[1]
 
-    def get_headers(self, attrs):
-        return list(map(self.get_header, attrs))
+    def get_unit(self, attr):
+        return self._get_header_parts(attr)[-1]
 
-    def _col_group(self, attrs):
-        for a in attrs:
-            first, *second = a.split('.')
-            yield first if second else ''
+    def get_groups(self, attrs=None):
+        if self.show_groups:
+            return [self.get_group(_) for _ in (attrs or self.attrs)]
 
-    def get_col_groups(self, attrs):
-        return list(self._col_group(attrs))
+    def get_headers(self, obj=None):
+        # ok = set(map(self.headers.get, kws)) - {None}
+        if obj is None:
+            obj = self.attrs
 
-    # def get_formatters(self, attrs):
-    #     return {a: self.formatters[a] for a in attrs if a in self.formatters}
+        if isinstance(obj, dict):
+            return {self.get_header(k): v for k, v in obj.items()}
+
+        elif isinstance(obj, abc.Collection):
+            return list(map(self.get_header, obj))
+
+        raise TypeError(f'Cannot get headers from object type: {type(obj)}.'
+                        ' Expected a Collection.')
+
+    def get_units(self, attrs=None):
+        return [self.get_unit(_) for _ in (attrs or self.attrs)]
 
     def add_attr(self, attr, column_header=None, formatter=None):
 
@@ -2031,6 +2152,154 @@ class AttrTable:
         if formatter is not None:
             self.formatters[column_header] = formatter
 
+    def get_data(self, container=None, attrs=None, converters=None):
+        if container is None:
+            container = self.parent
+
+        if len(container) == 0:
+            return []
+
+        if attrs is None:
+            attrs = self.attrs
+
+        values = container.attrs(*attrs)
+        converters = converters or self.converters
+        if not converters:
+            return values
+
+        tmp = dict(zip(attrs, zip(*values)))
+        for key, convert in converters.items():
+            if key in tmp:
+                tmp[key] = list(map(convert, tmp[key]))
+
+        return list(zip(*tmp.values()))
+
+    def to_xlsx(self, path,):
+
+        from openpyxl import Workbook
+        from openpyxl.cell import Cell
+        from openpyxl.styles import NamedStyle, Font, Alignment, Border, Side
+
+        data = self.get_data(self.parent.sort_by('t.t0'))
+
+        workbook = Workbook()
+        worksheet = ws = workbook.active
+        # worksheet.title = ""
+
+        # font_normal = 'Ubuntu Mono'
+        font_normal_size = 10
+        font_normal_name = 'Ubuntu Mono'
+        font_normal = Font(font_normal_name, font_normal_size)
+        font_header = Font('Libertinus Sans', 12, bold=True)
+        align_center_top = Alignment(horizontal='center', vertical='top')
+
+        def get_col_width(attr, data, fallback=4, minimum=3):
+            try:
+                width = max(map(len, data))
+            except:
+                width = fallback
+
+            fwidth = len(sub(self.formatters.get(attr, ''),
+                             {'"': '', '[': '', ']': ''}))
+            header = self.get_header(attr)
+            repeats = self.get_headers().count(header)
+            hwidth = (len(header) * 1.2 / repeats)   # fudge factor for font
+            # print(attr, hwidth, fwidth, width, minimum)
+            return max(hwidth, fwidth, width, minimum)
+
+        def set_block_attrs(block, **kws):
+            itr = [block] if isinstance(block, Cell) else mit.flatten(block)
+            for cell in itr:
+                for key, val in kws.items():
+                    setattr(cell, key, val)
+
+        # row_nr = itt.count(1)
+
+        def append(row, **props):
+            ws.append(row)
+            r = ws._current_row
+            set_block_attrs(ws[f'A{r}:{len(row) + 64:c}{r}'], **props)
+            return r
+
+        def make_header_row(row, trigger=1,
+                            font=font_header, alignment=align_center_top,
+                            **props):
+            if not row:
+                return
+
+            i = 65
+            r = ws._current_row + 1  # next(row_nr)
+            for group_name, count in tally(row).items():
+                j = i + count
+                cell = f'{i:c}{r}'
+                if group_name and count > trigger:
+                    # print(group_name, f'{cell}:{j:c}1')
+                    ws[cell] = group_name.title()
+                    ws.merge_cells(f'{cell}:{j - 1:c}{r}')
+                i = j
+
+            set_block_attrs(ws[f'A{r}:{j - 1:c}{r}'],
+                            font=font, alignment=alignment,
+                            **props)
+
+        # col group headers
+        make_header_row(self.get_groups())
+
+        # row headers
+        ncols = len(self.attrs)
+        j = ncols + 65
+
+        # headers
+        headers = self.get_headers()
+        make_header_row(headers, 0)
+
+        # units
+        append(self.get_units(),
+               font=font_normal,
+               alignment=align_center_top,
+               border=Border(bottom=Side('double')))
+
+        # populate data
+        r0 = ws._current_row
+        for r, row in enumerate(data, r0):
+            append(row)
+        r = ws._current_row
+
+        # Totals
+        if self.totals:
+            totals = [f'=SUM({c:c}{r0}:{c:c}{r})' if attr in self.totals else ''
+                      for c, attr in enumerate(self.attrs, 65)]
+            append(totals,
+                   # style for totals line
+                   border=Border(bottom=Side('thin'), top=Side('thin')),
+                   font=Font(font_normal_name, font_normal_size, bold=True))
+            r += 1
+
+        # ---------------------------------------------------------------------------- #
+        # Set number formats
+        for attr, fmt in self.formatters.items():
+            col = chr(self.attrs.index(attr) + 65)
+            # print(col, fmt)
+            set_block_attrs(ws[f'{col}{r0}:{col}{r}'], number_format=fmt)
+
+        # set font for all other cells
+        set_block_attrs(ws[f'A{r0}:{j-1:c}{r-1}'], font=font_normal)
+
+        # set col widths
+        # double_row = False
+        itr = zip(self.attrs, headers, zip(*data))
+        for col, (attr, hdr, data) in enumerate(itr, 65):
+            width = get_col_width(attr, data)
+            # print(hdr, width)
+            ws.column_dimensions[chr(col)].width = width
+            # double_row |= ('\n' in hdr)
+
+        # if double_row:
+        #     ws.row_dimensions[2].height = font_normal_size * 3
+
+        workbook.save(path)
+        return workbook
+
     def get_table(self, container, attrs=None, **kws):
         """
         Keyword arguments passed directly to the `motley.table.Table`
@@ -2041,9 +2310,9 @@ class AttrTable:
         motley.table.Table
         """
 
-        if not isinstance(container, AttrVectorizerMixin):
-            raise TypeError('Container does not support vectorized attribute '
-                            'lookup on items.')
+        if not isinstance(container, AttrTabulate):
+            raise TypeError(f'Object of type {type(container)} does not '
+                            f'support vectorized attribute lookup on items.')
 
         if len(container) == 0:
             return Table(['Empty'])
@@ -2092,7 +2361,7 @@ class AttrTable:
             totals = list(set(totals) - set(attrs_grouped_by) - compactable)
             # convert totals to numeric since we remove column headers for
             # lower tables
-            totals = list(map(headers.index, self.convert_aliases(totals)))
+            totals = list(map(headers.index, self.get_headers(totals)))
 
         units = kws.pop('units', self.units)
         if units:
@@ -2117,11 +2386,13 @@ class AttrTable:
             titled = make_group_title
 
         attrs, compactable, headers, units, totals = self.prepare(groups)
+        grand_total = grand_total or totals
+
         tables = {}
         empty = []
         footnotes = OrderedSet()
-        for i, (gid, items) in enumerate(groups.items()):
-            if items is None:
+        for i, (gid, group) in enumerate(groups.items()):
+            if group is None:
                 empty.append(gid)
                 continue
 
@@ -2132,7 +2403,7 @@ class AttrTable:
                 title = titled(gid)
                 # title = titled(i, gid, kws.get('title_props'))
 
-            tables[gid] = tbl = self.get_table(items, attrs,
+            tables[gid] = tbl = self.get_table(group, attrs,
                                                title=title,
                                                totals=totals,
                                                units=units,
@@ -2148,6 +2419,20 @@ class AttrTable:
             # only last table gets footnote
             footnotes |= set(tbl.footnotes)
             tbl.footnotes = []
+
+        # grand total
+        if grand_total:
+            # gt = np.ma.sum(op.AttrVector('totals').filter(tables.values()), 0)
+            grand = np.ma.sum([_.totals for _ in tables.values()
+                               if _.totals is not None], 0)
+
+            tables['totals'] = tbl = Table(grand,
+                                           title='Totals:',
+                                           title_align='<',
+                                           formatters=tbl.formatters,
+                                           row_headers='',
+                                           masked='')
+
         #
         tbl.footnotes = list(footnotes)
 
