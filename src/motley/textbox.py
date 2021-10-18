@@ -198,6 +198,12 @@ from .utils import get_width, resolve_width
 # '⎴' Top square bracket 023B4
 # '⎵' Bottom square bracket 023B5
 
+
+MAJOR_TICK_TOP = '\N{COMBINING SHORT VERTICAL LINE OVERLAY}'
+MINOR_TICK_TOP = '\N{MUSICAL SYMBOL BREVIS REST}'
+MAJOR_TICK_BOTTOM = '\N{MUSICAL SYMBOL LONGA PERFECTA REST}'
+MINOR_TICK_BOTTOM = '\N{CANADIAN SYLLABICS WEST-CREE P}'
+
 HLINES = {
     '':     ' ',
     ' ':    ' ',
@@ -208,15 +214,20 @@ HLINES = {
     ':':    '┈',
     '_':    ' ',
     underline: ' ',
+    '[':    (f'{MAJOR_TICK_TOP}  ', f' {MINOR_TICK_BOTTOM}'),
+    '+':    (f'  {MAJOR_TICK_TOP}', f' {MINOR_TICK_BOTTOM}'),
+    'E':    (f' {MAJOR_TICK_TOP}{MINOR_TICK_TOP}',
+             f'{MAJOR_TICK_BOTTOM}{MINOR_TICK_BOTTOM}'),
     # '+':    ''
 }
 HLINES_BOLD = {
-    '':     ' ',
-    ' ':    ' ',
-    '-':    '━',
-    '--':   '╍',
-    '.':    '┅',
-    ':':    '┉',
+    **HLINES,
+    **{'':     ' ',
+       ' ':    ' ',
+       '-':    '━',
+       '--':   '╍',
+       '.':    '┅',
+       ':':    '┉'}
 }
 
 VLINES = {
@@ -227,21 +238,31 @@ VLINES = {
     '||':   '║',
     '--':   '╎',
     '.':    '┆',
-    ':':    '┊'
+    ':':    '┊',
+    '[':    ('▕', '▏'),
+    '+':    ('┤', '├'),
+    'E':     ('┤', '├')
+
 }
 VLINES_BOLD = {
-    '':     '',
-    ' ':    '',
-    '-':    '┃',
-    '|':    '┃',
-    '--':   '╏',
-    '.':    '┇',
-    ':':    '┋'
+    **VLINES,
+    **{'':     '',
+       ' ':    '',
+       '-':    '┃',
+       '|':    '┃',
+       '--':   '╏',
+       '.':    '┇',
+       ':':    '┋'}
 }
 
 CORNERS = {
     '':         [''] * 4,
+    '_':        [''] * 4,
     ' ':        '    ',
+    '[':        ('  ', f'{MAJOR_TICK_TOP}', '', ''),
+    '+':        (' ', ' ', ' ', ''),
+    'E':        (' ', f' {MAJOR_TICK_TOP}', ' ', ' '),
+
     'round':    '╭╮╰╯',
     'square':   '┌┐└┘',
     'L':        '┌┐└┘',
@@ -257,11 +278,11 @@ CORNERS = {
     # ■ 	BLACK SQUARE
     # □ 	WHITE SQUARE
 
+
 }
 CORNERS_BOLD = {
-    # 'round': '',
+    **CORNERS,
     'square': '┏┓┗┛',
-    # 'double': ''
 }
 
 
@@ -310,7 +331,7 @@ def textbox(text,
 
     Examples
     --------
-    >>> 
+    >>>
 
     Returns
     -------
@@ -324,62 +345,43 @@ def textbox(text,
 
     hlines = (HLINES, HLINES_BOLD)[bold]
     vlines = (VLINES, VLINES_BOLD)[bold]
-    # corners_ = (CORNERS, CORNERS_BOLD)[bold]
-
-    # kws.pop('sides', None)
-    if style is None:
-        return text
-
-    if style == '_':
-        return AnsiBox(**kws)(text)
-
-    if style == '[':
-        return GridFrameBox(
-            top='\N{Combining short vertical line overlay}  ',        # ' ╷',
-            bottom=' ᑊ',     # ' ╵',
-            left='▕',
-            right='▏',
-            color='_',       # underline
-            corners=('  ',
-                     '\N{Combining short vertical line overlay}', '', ''),
-            **kws)(text)
-
-    if style == '+':
-        box = GridFrameBox(top='  \N{Combining short vertical line overlay}',
-                           bottom=' ᑊ',
-                           left='┤', right='├',
-                           corners=(' ', ' ', ' ', ''),
-                           color=('_', '_', '', ''))
-        return box(text).strip(box.bottom[1])
-
-    if style == 'E':
-        box = GridFrameBox(**kws, 
-                            top=' \N{Combining short vertical line overlay}𝇃',
-                            bottom='𝇁ᑊ',
-                            left='┤', right='├',
-                            corners=(' ', 
-                                     ' \N{Combining short vertical line overlay}',
-                                     ' ', ' '),
-                            color='_')
-        return box(text)[:-2]
+    corners_ = (CORNERS, CORNERS_BOLD)[bold]
 
     # top = bottom = left = right = style
-    top = bottom = hlines[style]
-    # bottom = hlines[bottom] if bottom is not None else top
-    left = right = vlines[style]
-    # right = vlines[right] if right is not None else left
-    # corners = corners_[corners]
-    corners = CORNERS.get(style, None)
-
+    top, bottom = duplicate_if_scalar(hlines[style])
+    corners = kws.pop('corners', style)
+    
     if 'sides' in kws:
         sides = kws.pop('sides') or ''
         left, right = duplicate_if_scalar(sides)
         corners = corners or sides
+    else:
+        left, right = duplicate_if_scalar(vlines[style])
+        
+    corners = corners_.get(corners, corners)
+    sides = dict(left=left, right=right, top=top, bottom=bottom, corners=corners)
 
-    if corners is None:
-        corners = _get_corners(corners, bold)
+    # kws.pop('sides', None)
+    if style is None:
+        return text  # TODO: justify
 
-    return TextBox(top, bottom, left, right, corners, color)(text, **kws)
+    if style == '_':
+        # from IPython import embed
+        # embed(header="Embedded interpreter at 'src/motley/textbox.py':371")
+        return AnsiBox(**sides)(text, **kws)
+
+    if style == '[':
+        return GridFrameBox(**sides, color='_')(text)
+
+    if style == '+':
+        box = GridFrameBox(**sides, color=('_', '_', '', ''))
+        return box(text)[:-2]
+
+    if style == 'E':
+        box = GridFrameBox(**sides, color='_')
+        return box(text)[:-2]
+
+    return TextBox(**sides, color=color)(text, **kws)
 
 #  TODO: AsciiTextBox
 
@@ -400,7 +402,9 @@ class TextBox:
                  left='\N{BOX DRAWINGS LIGHT VERTICAL}',
                  right=NULL,
                  corners='╭╮╰╯',
-                 colors=(),
+                 edgecolors=(),
+                 fg=None, 
+                 bg=None,
                  **kws):
         """
         Initialize the TextBox. This object works at a lower level than the
@@ -417,7 +421,7 @@ class TextBox:
         self.bottom = top if bottom is NULL else bottom
         self.corners = corners
 
-        self.colors = duplicate_if_scalar(kws.get('color', colors) or '', 4)
+        self.edgecolors = duplicate_if_scalar(kws.get('color', edgecolors) or '', 4)
 
     def __call__(self, text='', width=None, height=None, align='^'):
         text = str(text)
@@ -432,24 +436,24 @@ class TextBox:
         return '\n'.join(self._iter_lines(text, width, align))
 
     # line_formats = {
-    #     'top': '{{corners[0]}{{top}:{top}^{width}}{corners[1]}:|{colors[0]}}',
-    #     'bot': '{{corners[2]}{{bot}:{bot}^{width}}{corners[3]}:|{colors[1]}}',
-    #     'mid': '{left:|{colors[2]}}{line: {align}{width}}{right:|{colors[3]}}'
+    #     'top': '{{corners[0]}{{top}:{top}^{width}}{corners[1]}:|{edgecolors[0]}}',
+    #     'bot': '{{corners[2]}{{bot}:{bot}^{width}}{corners[3]}:|{edgecolors[1]}}',
+    #     'mid': '{left:|{edgecolors[2]}}{line: {align}{width}}{right:|{edgecolors[3]}}'
     # }
-    line_fmt = '{left:|{colors[2]}}{line: {align}{width}}{right:|{colors[3]}}'
+    line_fmt = '{left:|{edgecolors[2]}}{line: {align}{width}}{right:|{edgecolors[3]}}'
 
     def _iter_lines(self, text, width, align, **kws):
         width = width - len(self.left) - len(self.right)
         kws = {**locals(), **vars(self), **kws}
         kws.pop('self')
-        yield make_hline(self.top, self.corners[:2], width, self.colors[0])
+        yield make_hline(self.top, self.corners[:2], width, self.edgecolors[0])
 
         line_fmt = format_partial(self.line_fmt, **kws)
         for line in text.splitlines():
             yield format(line_fmt, **kws, line=line)
 
         if self.bottom:
-            yield make_hline(self.bottom, self.corners[2:], width, self.colors[1])
+            yield make_hline(self.bottom, self.corners[2:], width, self.edgecolors[1])
 
 
 def make_hline(characters, corners, width, color):
@@ -462,15 +466,13 @@ class AnsiBox(TextBox):
     def __init__(self, **kws):
         super().__init__(**{**dict(top=' ',
                                    corners=CORNERS[' '],
-                                   colors=('_', '', '', '')),
+                                   edgecolors=('_', '', '', '')),
                             **kws})
 
     def _iter_lines(self, text, width, align, **kws):
-        # from IPython import embed
-        # embed(header="Embedded interpreter at 'src/motley/textbox.py':386")
         itr = super()._iter_lines(text, width, align)
         itr = mit.islice_extended(itr)
-        upto = text.count('\n') + bool(self.top) - bool(self.bottom)  # - 1
+        upto = text.count('\n') + bool(self.top)  # - bool(self.bottom)  # - 1
         yield from itr[:upto]
         yield underline(next(itr))
 

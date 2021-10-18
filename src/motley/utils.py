@@ -346,7 +346,8 @@ def banner(text, width=None, align='^', color=None, **kws):
     # title = f'{text: {align}{width - 2 * len(side)}}'
     width = resolve_width(width)
     # TextBox()
-    return textbox(text, sides=False, width=width, align=align, color=color,
+    return textbox(text, style='_', sides=False, 
+                   width=width, align=align, color=color,
                    **kws)
     # return codes.apply(banner,  **props)
 
