@@ -11,11 +11,11 @@ import textwrap
 import functools as ftl
 from io import StringIO
 
-# third-party libs
+# third-party
 import numpy as np
 import more_itertools as mit
 
-# local libs
+# local
 from recipes.iter import where_true, where_false
 from recipes.introspect import get_class_that_defined_method
 from recipes import pprint
@@ -142,7 +142,7 @@ def _ast_func_index(source):
 
 
 # ****************************************************************************************************
-class ReportStats(object):
+class ReportStats:
     """
     Helper class that prints profiling results for a single function when called.
     This base class is essentially an OO (and therefore extensible) version of
