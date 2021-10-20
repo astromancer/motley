@@ -76,69 +76,114 @@ def _width_first(lines):
     return ansi.length_seen(lines[0])
 
 
-def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
-    """
-    Vertically stack tables while aligning column widths.
+class _Vstack:
 
-    Parameters
-    ----------
-    tables: list of motley.table.Table
-        Tables to stack vertically.
-    strip_titles: bool
-        Strip titles from all but the first table in the sequence.
-    strip_headers: bool
-        Strip column group headings and column headings from all but the first
-        table in the sequence.
+    def __call__(self, tables, strip_titles=True, strip_headers=True, spacing=1):
+        """
+        Vertically stack tables while aligning column widths.
 
-    Returns
-    -------
-    str
-    """
-    # check that all tables have same number of columns
-    ncols = [tbl.shape[1] for tbl in tables]
-    if len(set(ncols)) != 1:
-        raise ValueError(
-            f'Cannot stack tables with unequal number of columns: {ncols}.'
-        )
+        Parameters
+        ----------
+        tables: list of motley.table.Table
+            Tables to stack vertically.
+        strip_titles: bool
+            Strip titles from all but the first table in the sequence.
+        strip_headers: bool
+            Strip column group headings and column headings from all but the first
+            table in the sequence.
 
-    w = np.max([tbl.col_widths for tbl in tables], 0)
-    vspace = '\n' * (spacing + 1)
-    s = ''
-    nnl = 0
-    for i, tbl in enumerate(tables):
-        tbl.col_widths = w  # set all column widths equal
-        if i and strip_headers:
-            nnl = (tbl.frame + tbl.has_title + tbl.n_head_rows)
-        *head, r = str(tbl).split('\n', nnl)
-        keep = []
-        if head:
-            if not strip_titles:
-                keep += head[tbl.frame:(-tbl.n_head_rows or None)]
-            if not strip_headers:
-                keep += head[(tbl.frame + tbl.has_title):]
+        Returns
+        -------
+        str
+        """
+        # check that all tables have same number of columns
+        ncols = [tbl.shape[1] for tbl in tables]
+        if len(set(ncols)) != 1:
+            raise ValueError(f'Cannot stack tables with unequal number of '
+                             f'columns: {ncols}.')
 
-        s += '\n'.join((vspace, *keep, r))
+        w = np.max([tbl.col_widths for tbl in tables], 0)
+        vspace = '\n' * (spacing + 1)
+        s = ''
+        for i, tbl in enumerate(tables):
+            tbl.col_widths = w  # set all column widths equal
+            nnl = tbl.n_head_lines * bool(i and strip_headers)
+            *head, r = str(tbl).split('\n', nnl)
+            keep = []
+            if head:
+                if not strip_titles:
+                    keep += head[tbl.frame:(-tbl.n_head_rows or None)]
+                if not strip_headers:
+                    keep += head[(tbl.frame + tbl.has_title):]
 
-    return s.lstrip('\n')
+            s += '\n'.join((vspace, *keep, r))
+
+        return s.lstrip('\n')
+
+    @staticmethod
+    def compact(tables):
+        # figure out which columns can be compactified
+        # note. the same thing can probs be accomplished with table groups ...
+        assert tables
+        varies = set()
+        ok_size = tables[0].data.shape[1]
+        for i, tbl in enumerate(tables):
+            if (size := tbl.data.shape[1]) != ok_size:
+                raise ValueError(f'Table {i:d} has {size:d} columns while the '
+                                 f'preceding {i-1:d} tables have {ok_size:d} '
+                                 f'columns.')
+            # check compactable
+            varies |= set(tbl.compactable())
+
+        return varies
+
+    @staticmethod
+    def from_dict(groups, strip_titles=False, braces=False, vspace=1):
+        """
+        Pretty print dict of table objects.
+
+        Parameters
+        ----------
+        groups : dict
+            Values are `motley.table.Table`. Keys will be used to make the title. 
+        strip_titles : bool
+            Whether to strip each table's title.
+        braces : bool, optional
+            Whether to use curly braces to mark the groups by their keys, by default
+            False
+        vspace : int, optional
+            Vertical space between tables in number of newlines, by default 1
+
+        Returns
+        -------
+        str
+            The formatted stack of tables.
+        """
+
+        # ΤΟDO: could accomplish the same effect by colour coding...
+        groups = dict(groups)
+        ordered_keys = list(groups.keys())  # key=sort
+        stack = [groups[key] for key in ordered_keys]
+
+        if not braces:
+            return vstack(stack, strip_titles, True, vspace)
+
+        braces = ''
+        for i, gid in enumerate(ordered_keys):
+            tbl = groups[gid]
+            braces += ('\n' * bool(i) +
+                       hbrace(tbl.data.shape[0], gid) +
+                       '\n' * (tbl.has_totals + vspace))
+
+        # vertical offset
+        offsets = stack[0].n_head_lines
+        return string_hstack([vstack(stack, strip_titles, True, vspace),
+                              braces],
+                             spacing=1, offsets=offsets)
 
 
-def vstack_compact(tables):
-    # figure out which columns can be compactified
-    # note. the same thing can probs be accomplished with table groups ...
-    assert tables
-    varies = set()
-    ok_size = tables[0].data.shape[1]
-    for i, tbl in enumerate(tables):
-        size = tbl.data.shape[1]
-        if size != ok_size:
-            raise ValueError(
-                'Table %d has %d columns while the preceding %d tables have %d '
-                'columns.' % (i, size, i - 1, ok_size)
-            )
-        # check compactable
-        varies |= set(tbl.compactable())
-
-    return varies
+# singleton
+vstack = _Vstack()
 
 
 def make_group_title(keys):
@@ -149,49 +194,6 @@ def make_group_title(keys):
         return "; ".join(map(str, keys))
     except:
         return str(keys)
-
-
-def vstack_groups(groups, strip_titles, braces=False, vspace=1, **kws):
-    """
-    Pretty print dict of table objects.
-
-    Parameters
-    ----------
-    groups : dict
-        Keys are `motley.table.Tables`.
-    strip_titles : bool
-        Whether to strip table titles.
-    braces : bool, optional
-        Whether to use curly braces to mark the groups by their keys, by default
-        False
-    vspace : int, optional
-        Vertical space between tables in number of newlines, by default 1
-
-    Returns
-    -------
-    str
-        The formatted stack of tables.
-    """
-
-    # ΤΟDO: could accomplish the same effect by colour coding...
-    groups = dict(groups)
-    ordered_keys = list(groups.keys())  # key=sort
-    stack = [groups[key] for key in ordered_keys]
-
-    if not braces:
-        return vstack(stack, strip_titles, True, vspace)
-
-    braces = ''
-    for i, gid in enumerate(ordered_keys):
-        tbl = groups[gid]
-        braces += ('\n' * bool(i) +
-                   hbrace(tbl.data.shape[0], gid) +
-                   '\n' * (tbl.has_totals + vspace))
-
-    # vertical offset
-    offsets = stack[0].n_head_lines
-    return string_hstack([vstack(stack, True, vspace), braces],
-                         spacing=1, offsets=offsets)
 
 
 def hbrace(size, name=''):
@@ -346,7 +348,7 @@ def banner(text, width=None, align='^', color=None, **kws):
     # title = f'{text: {align}{width - 2 * len(side)}}'
     width = resolve_width(width)
     # TextBox()
-    return textbox(text, style='_', sides=False, 
+    return textbox(text, style='_', sides=False,
                    width=width, align=align, color=color,
                    **kws)
     # return codes.apply(banner,  **props)
