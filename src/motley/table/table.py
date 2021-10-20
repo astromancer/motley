@@ -2051,9 +2051,9 @@ class Table(LoggingMixin):
     #     # TODO
     # to_xlsx = XlsxWriter().write
 
-    def to_xlsx(self, path, widths=None, show_singular_groups=False):
+    def to_xlsx(self, path=None, widths=None, **kws):
         # may need to set widths manually eg. for cells that contain formulae
-        return XlsxWriter().write(self, path, widths, show_singular_groups)
+        return XlsxWriter().write(self, path, widths, **kws)
 
 
 CONVERTERS = {
@@ -2073,7 +2073,7 @@ class Column(LoggingMixin):
     # count = itt.count()
 
     def __init__(self, data, title=None, unit=None, fmt=None, align='.',
-                 width=None, total=False):
+                 width=None, total=False, group=None):
         # TODO: fmt = '. 14.5?f|gBi_/teal'
         self.title = title
         self.data = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
@@ -2337,7 +2337,8 @@ class AttrTable:
         self.header_levels = self._ensure_dict(header_levels)
         self.headers = self._ensure_dict(headers)
         self.units = self._ensure_dict(units)
-        self.totals = [totals] if isinstance(totals, str) else list(totals)
+        totals = [totals] if isinstance(totals, str) else list(totals)
+        self.totals = [self.get_header(attr) for attr in totals]
         self.show_groups = bool(show_groups)
 
         # self.headers = dict(zip(attrs, self.get_headers(attrs)))
@@ -2475,26 +2476,6 @@ class AttrTable:
         return list(zip(*tmp.values()))
 
     def to_xlsx(self, path, widths=None):
-        def get_col_widths(table, fallback=4, minimum=3):
-            # headers = table.col_headers
-            for i, col in enumerate(zip(*table.data)):
-
-                try:
-                    width = max(map(len, col))
-                except:
-                    width = fallback
-
-                formatter = table.formatters.get(i)
-                fwidth = 0
-                if isinstance(formatter, str):
-                    # sub non-display characters in excel format string
-                    fwidth = len(sub(formatter, {'"': '', '[': '', ']': ''}))
-
-                header = table.col_headers[i]
-                repeats = list(table.col_headers).count(header)
-                hwidth = (len(header) * 1.2 / repeats)   # fudge factor for font
-                # print(i, header, hwidth, fwidth, width, minimum)
-                yield max(hwidth, fwidth, width, minimum)
 
         data = self.get_data(self.parent.sort_by('t.t0'))
 
@@ -2538,7 +2519,8 @@ class AttrTable:
                      **{**self.kws,  # defaults
                         **{**dict(title=container.__class__.__name__,
                                   col_headers=self.get_headers(attrs),
-                                  col_groups=self.get_groups(attrs)),
+                                  col_groups=self.get_groups(attrs),
+                                  totals=self.totals),
                            **{key: self.get_defaults(attrs, key)
                               for key in ('units', 'formatters')},
                            **kws},  # input
@@ -2601,7 +2583,7 @@ class AttrTable:
 
         attrs, compactable, headers, units, totals = self.prepare(groups)
         grand_total = grand_total or totals
-
+        
         tables = {}
         empty = []
         footnotes = OrderedSet()
