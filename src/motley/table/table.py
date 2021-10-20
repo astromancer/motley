@@ -23,18 +23,20 @@ from pyxides.grouping import Groups
 from pyxides.vectorize import AttrTabulate
 from recipes.lists import where
 from recipes import pprint as ppr
-from recipes.iter import cofilter
+from recipes.iter import cofilter, non_unique
+from recipes.dicts import AttrDict
 from recipes.sets import OrderedSet
 from recipes.functionals import echo0
 from recipes.synonyms import Synonyms
 from recipes.logging import LoggingMixin
-from recipes.decorators import raises as bork
 from recipes.string.brackets import BracketParser
+from recipes.decorators import fallback, raises as bork
 
 # relative
 from .. import ansi, codes, formatter
 from ..utils import get_alignment, get_width, make_group_title
 from .xlsx import XlsxWriter
+
 
 # if __name__ == '__main__':
 # do Tests
@@ -185,25 +187,47 @@ def resolve_width(width, data, headers=None):
                      f'{data.shape}')
 
 
-def resolve_input(obj,
-                  data,
-                  col_headers,
-                  what,
-                  converter=None,
-                  default_factory=None,
-                  args=(),
-                  raises=True,
-                  **kws):
+def _ensure_list(obj):
+    return [] if obj is None else list(obj)
+
+
+def _ensure_dict(obj, n_cols, what='\r'):
+    if obj in (None, False):
+        return {}
+
+    if isinstance(obj, abc.Mapping):
+        return obj
+
+    # convert obj to dict
+    if not isinstance(obj, abc.Collection):
+        raise TypeError(f'Cannot resolve {type(obj)} to columns of table.')
+
+    n_obj = len(obj)
+    if n_obj == 1:
+        # duplicate for all columns
+        return dict(enumerate(itt.repeat(obj, n_cols)))
+
+    if n_obj == n_cols:
+        return dict(enumerate(obj))
+
+    raise ValueError(
+        f'Incorrect number of {what!r} specifiers ({n_obj}) for table with '
+        f'{n_cols} columns'
+    )
+
+
+def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
+                  default_factory=None, args=(), **kws):
     """
     Resolve user input for parameters that need to have either
         - the same number of elements as there are columns in the table or
-        - need `col_headers` to be provided.
+        - need `aliases` to be provided.
 
     Parameters
     ----------
     obj
     data
-    col_headers
+    aliases
     what
     converter: callable
     raises
@@ -215,51 +239,22 @@ def resolve_input(obj,
     -------
 
     """
-    n_cols = data.shape[1]
-    if obj is None:
-        obj = {}
-
-    # convert obj to dict
-    if isinstance(obj, abc.Collection) and not isinstance(obj, abc.Mapping):
-        n_obj = len(obj)
-        if n_obj == 1:
-            # duplicate for all columns
-            obj = [obj] * n_cols  # itt.repeat??
-
-        elif n_obj != n_cols:
-            raise ValueError(
-                f'Incorrect number of {what!r} specifiers ({n_obj}) for '
-                f'table with {n_cols} columns'
-            )
-
-        #
-        obj = dict(enumerate(obj))
+    obj = _ensure_dict(obj, n_cols, what)
 
     # set action raise / warn
     emit = bork(ValueError) if raises else logger.warning
 
-    keys = list(obj.keys())
-    if (str in set(map(type, keys))) and col_headers is None:
-        # only really a problem if formatter is not None
+    aliases = list(aliases or ())
+    if not aliases and (str in set(map(type, obj.keys()))):
         emit(f'Could not assign {what} due to missing `column_headers`')
 
-    # convert all keys in format dict to int
-    if col_headers is not None:
-        col_headers = list(col_headers)
-        for key, _ in obj.copy().items():
-            # copy to prevent RuntimeError dictionary changed size during iteration
-            if isinstance(key, str):
-                if key not in col_headers:
-                    emit(f'Could not interpret {what}. Key {key!r} not in '
-                         '`column_headers`')
-                    continue
-                #
-                new_key = col_headers.index(key)
-                # at this point key should be int
-                obj[new_key] = obj.pop(key)
-
-            elif not isinstance(key, numbers.Integral):
-                emit(f'Key {key!r} invalid type for mapping to column.')
+    # convert all keys in input dict to int
+    if aliases:
+        # copy dict to prevent RuntimeError on pop
+        for key in list(obj.keys()):
+            item = obj.pop(key)
+            for i in _resolve_column_alias(key, aliases, n_cols, what, emit):
+                obj[i] = item
 
     # convert values
     if converter:
@@ -268,11 +263,39 @@ def resolve_input(obj,
 
     # get default obj
     if default_factory:
-        idx_no_fmt = set(range(n_cols)) - set(obj.keys())
-        for i in idx_no_fmt:
+        # idx_no_fmt =
+        for i in set(range(n_cols)) - set(obj.keys()):
             obj[i] = default_factory(i, *args, **kws)
 
     return obj
+
+
+def _resolve_column_alias(key, aliases, ncols, what, emit):
+    if isinstance(key, numbers.Integral):
+        # wrap negative indices
+        if key < 0:
+            return key + ncols
+
+        if key > ncols:
+            emit(f'Key {key!r} for {what} greater than number of columns '
+                 f'in table ({ncols}).')
+        yield key
+        return
+
+    if not isinstance(key, str):
+        emit(f'Key {key!r} for {what} has invalid type {type(key)} for '
+             f'mapping to a column of the table.')
+        yield key
+        return
+
+    for aliases in aliases:
+        if key in aliases:
+            # at this point key should be int
+            yield from where(aliases, key)
+            return
+
+    emit(f'Could not interpret {what}. Key {key!r} not in any '
+         f'`column_headers` or `column_groups`.')
 
 
 def resolve_borders(col_borders, where, ncols, frame):
@@ -332,7 +355,7 @@ def resolve_converters(converters):
         return type_convert, defaultdict(lambda: converters)
 
     assert isinstance(converters, abc.Mapping)
-    col_converters = defaultdict(lambda: echo0)
+    col_converters = {}  # defaultdict(lambda: echo0)
 
     for type_or_col, fun in converters.items():
         if isinstance(type_or_col, type):
@@ -350,21 +373,24 @@ def resolve_converters(converters):
     return type_convert, col_converters
 
 
-def convert_column(data, type_convert, func):
-    return map(func, map(type_convert, data))
+# def convert_column(data, type_convert, func):
+#     return map(func or type_convert, data)
+#     if func:
+#         return map(func, data)
+#     return data
 
 
-def unpack_dict(data, split_cell_types=set(), group=''):
+def unpack_dict(data, split_nested_types=set(), group=(''), level=0):
     #
     for name, col in data.items():
         # Dict indicates group of columns
         if isinstance(col, dict):
-            # group, title, data
-            # values = map(convert, col.values())
-            yield from unpack_dict(col, split_cell_types, name)
+            # logger.trace(f'{group=}, {name=}, {level=}')
+            yield from unpack_dict(col, split_nested_types, [*group, name], level + 1)
         else:
-            for col in split_columns(col, split_cell_types):
-                yield group, name, col
+            # print(f'{group=}, {name=}, {level=}')
+            for col in split_columns(col, split_nested_types):
+                yield [*group, name], col
 
 
 def wrap_strings(column):
@@ -372,39 +398,46 @@ def wrap_strings(column):
         yield [cell] if isinstance(cell, str) else cell
 
 
-def split_columns(column, split_cell_types):
-    if not (set(split_cell_types) & set(map(type, column))):
+def split_columns(column, split_nested_types):
+    if not (set(split_nested_types) & set(map(type, column))):
         yield column
         return
 
     # wrap strings
-    if str not in split_cell_types:
+    if str not in split_nested_types:
         column = wrap_strings(column)
 
     yield from itt.zip_longest(*column, fillvalue='')
 
 
 def _unpack_convert_dict(data, ignore_keys, converters, header_levels,
-                         split_cell_types):
+                         split_nested_types):
 
     keep = OrderedSet(data.keys()) - set(ignore_keys)
     data = dict(zip(keep, map(data.get, keep)))
 
+    # headings, columns
+    headings, columns = zip(*unpack_dict(data, split_nested_types))
+    headings = list(itt.zip_longest(*headings, fillvalue=''))
+
     # get conversion functions
     type_convert, col_converters = resolve_converters(converters)
+    col_converters = resolve_input(col_converters, len(columns),
+                                   headings, 'converter')
 
-    for group, title, col in unpack_dict(data, split_cell_types):
-        # print(group, title, col)
-        col = convert_column(col, type_convert, col_converters[title])
+    for i, (headings, column) in enumerate(zip(zip(*headings), columns)):
+        # print(headings, column)
+        column = map(col_converters.get(i, type_convert), column)
 
+        title = headings[-1]
         if header_levels.get(title, 0) < 0:
-            group, title = title, ''
+            headings = [*headings[1:], '']
 
-        yield group, title, list(col)
+        yield *headings, list(column)
 
 
-def dict_to_list(data, ignore_keys={}, order='r', converters={},
-                 header_levels={}, split_cell_types=set()):
+def dict_to_list(data, ignore_keys={}, converters={}, header_levels={},
+                 split_nested_types=set(),  order='r'):
     """
     Convert input dict to list of values with keys as column / row_headers
     (depending on `order`)
@@ -421,24 +454,24 @@ def dict_to_list(data, ignore_keys={}, order='r', converters={},
     """
     assert isinstance(data, abc.Mapping)
 
-    if isinstance(split_cell_types, type):
-        split_cell_types = {split_cell_types}
+    if isinstance(split_nested_types, type):
+        split_nested_types = {split_nested_types}
 
-    col_groups, headers, data = zip(*_unpack_convert_dict(
-        data, ignore_keys, converters, header_levels, split_cell_types))
-    col_groups = col_groups if any(col_groups) else None
+    *headers, data = zip(*_unpack_convert_dict(
+        data, ignore_keys, converters, header_levels, split_nested_types))
 
     # transpose if needed
     if order.startswith('r'):
-        return None, headers, col_groups, list(zip(*data))
+        return None, headers, list(zip(*data))
 
     if order.startswith('c'):
-        return headers, None, col_groups, data
+        return headers, None, data
 
-    raise ValueError(f'Invalid order: {order}')
+    raise ValueError(f'Invalid value for parameter: {order=!r}')
 
 
-def _rindex(s, char):
+# fallback0 = fallback(0, ValueError)
+def rindex0(s, char):
     try:
         return s.rindex(char)
     except ValueError as e:
@@ -450,7 +483,7 @@ def _underline(s):
     Underline last line of multi-line string, or entire string if single line
     """
 
-    idx = _rindex(s, '\n')
+    idx = rindex0(s, '\n')
     return s[:idx] + codes.apply(s[idx:], 'underline')
 
 
@@ -497,6 +530,19 @@ class Table(LoggingMixin):
 
     # title_fmt = cell_fmt.join(_default_border * 2)
 
+    def _resolve_input(self, obj, n_cols, what, converter=None,
+                       raises=True, default_factory=None, args=(), **kws):
+        # resolve aliases from bottommost header line upwards
+        aliases = (self._col_headers, *self.col_groups[::-1])
+        return resolve_input(obj, n_cols, aliases, what, converter, raises,
+                             default_factory, args, **kws)
+
+    def _resolve_column_alias(self, key, n_cols, what, raises=True):
+        aliases = (self._col_headers, *self.col_groups[::-1])
+        # set action raise / warn
+        return _resolve_column_alias(key, aliases, n_cols, what,
+                                     bork(ValueError) if raises else wrn.warn)
+
     @classmethod
     def from_columns(cls, *columns, **kws):
         """
@@ -522,6 +568,11 @@ class Table(LoggingMixin):
         #                       col_headers=['key in `data` dict'])
         # in which case chead will silently be ignored
         # eg: Table({'hi': [1, 2, 3]}, chead=['haha'])
+
+        # check arguments valid
+        assert isinstance(data, dict)
+        # assert (order in 'rc'), f'Invalid value for parameter: {order=!r}'
+
         data, kws = cls._data_from_dict(data, ignore_keys, order, **kws)
         return cls(data, **kws)
 
@@ -529,18 +580,16 @@ class Table(LoggingMixin):
     def _data_from_dict(data, ignore_keys=(), order='r',  **kws):
         # helper for initialization from dict
 
-        # check arguments valid
-        assert isinstance(data, dict)
-        assert order in 'rc', f'Invalid order: {order}'
-
         converters = kws.pop('converters', kws.pop('convert', {}))
 
-        *headers, data = dict_to_list(data, ignore_keys, order,
-                                      converters,
+        *headers, data = dict_to_list(data, ignore_keys, converters,
                                       kws.pop('header_levels', {}),
-                                      kws.pop('split_cell_if', ()))
-        return data, {**dict(zip(['row_headers', 'col_headers', 'col_groups'],
-                                 headers)),
+                                      kws.pop('split_nested', ()),
+                                      order)
+        row_headers, (*col_groups, col_headers) = headers
+        return data, {'row_headers': row_headers,
+                      'col_headers': col_headers,
+                      'col_groups': zip(*col_groups),
                       **kws}
 
     # TODO: test mappings!!
@@ -816,24 +865,12 @@ class Table(LoggingMixin):
 
         # FIXME: make this table base for data manipulation and have separate
         # console formatter for ansi...
-        self._object_array = data
+        # self._object_array = data
 
-        # column headers
-        self._col_headers = col_headers
-
-        # units
-        self.has_units = (units not in (None, {}))
-        self.units = None
-        if self.has_units:
-            units = resolve_input(units, data, col_headers, 'units')
-            self.units = []
-            for i in range(data.shape[1]):
-                u = units.get(i)
-                self.units.append('[{}]'.format(u) if u else '')
+        #
+        n_cols = data.shape[1]
 
         # title
-        # if title is not None:
-        #     title = str
         self.title = title
         self.has_title = title is not None
         self.title_props = title_props
@@ -846,35 +883,46 @@ class Table(LoggingMixin):
             self.col_data_types.append(set(map(type, col[use])))
 
         # headers
+        self._col_headers = _ensure_list(col_headers)
         self.frame = bool(frame)
         self.has_row_nrs = hrn = (row_nrs is not False)
         self.has_row_head = hrh = (row_headers is not None)
-        self.has_col_head = (col_headers is not None)
+        self.has_col_head = bool(self._col_headers)
         self.n_head_col = hrh + hrn
-        n_cols = data.shape[1] + self.n_head_col
+        self.col_groups = self.resolve_groups(col_groups, n_cols)
+
+        # units
+        self.has_units = (units not in (None, {}))
+        self.units = None
+
+        if self.has_units:
+            units = self._resolve_input(units, data, 'units')
+            self.units = []
+            for i in range(n_cols):
+                u = units.get(i)
+                self.units.append('[{}]'.format(u) if u else '')
 
         # get alignment based on column data types
-        self.align = self.get_alignment(
-            align, data, col_headers, self.get_default_align)
+        self.align = self.get_alignment(align, data, self.get_default_align)
         self.dot_aligned = np.array(where(self.align, '.')) - self.n_head_col
         self.align = np.array(list(self.align.replace('.', '<')), 'U1')
 
         # column headers will be center aligned unless requested otherwise.
         self.col_head_align = np.array(list(self.get_alignment(
-            col_head_align, data, col_headers, lambda _: HEADER_ALIGN)))
+            col_head_align, data, lambda _: HEADER_ALIGN)))
 
         # column formatters
         if formatter and not formatters:
-            formatters = [formatter] * data.shape[1]
+            formatters = [formatter] * n_cols
 
-        self.formatters = resolve_input(
-            formatters, data, col_headers, 'formatters',
+        self.formatters = self._resolve_input(
+            formatters, n_cols, 'formatters',
             default_factory=self.get_default_formatter,
             args=(precision, minimalist, data)
         )
 
         # get flags
-        flags = resolve_input(flags, data, col_headers, 'flags')
+        flags = self._resolve_input(flags, n_cols, 'flags')
 
         # calculate column totals if required
         self.totals = self.get_totals(data, totals)
@@ -890,7 +938,8 @@ class Table(LoggingMixin):
             data = np.vstack((data, totals))
 
         # col borders (rhs)
-        self.borders = resolve_borders(col_borders, vlines, n_cols, frame)
+        self.borders = resolve_borders(col_borders, vlines,
+                                       n_cols + self.n_head_col, frame)
         self.lcb = lengths(self.borders)
 
         # TODO: row / col sort here
@@ -911,20 +960,15 @@ class Table(LoggingMixin):
             self.insert[max_rows - 1] = f'< ... {nomit} rows omitted ... >'
             data = data[:max_rows]
 
+        # FIXME: ALL STUFF BELOW HERE SHOULD BE DYNAMIC!!
+
         # add the (row/column) headers / row numbers / totals
         self.pre_table = self.add_headers(data, row_headers, col_headers,
                                           row_nrs)
+
         # note `pre_table` is dtype='O'
 
         self.cell_white = int(cell_whitespace)
-
-        # handle group headers
-        if col_groups is not None:
-            assert len(col_groups) == self.data.shape[1]
-            col_groups = ([''] * self.n_head_col) + list(col_groups)
-
-        self.col_groups = col_groups
-        # FIXME: too wide col_groups should truncate
 
         # compactify
         if not isinstance(compact, numbers.Integral):
@@ -1108,9 +1152,7 @@ class Table(LoggingMixin):
 
     @property
     def n_head_rows(self):
-        return sum((self.col_groups is not None,
-                    self.has_col_head,
-                    self.has_units))
+        return sum((len(self.col_groups), self.has_col_head, self.has_units))
 
     @property
     def max_width(self):
@@ -1124,10 +1166,7 @@ class Table(LoggingMixin):
     def n_head_lines(self):
         """number of newlines in the table header"""
         n = (self.title.count('\n') + 1) if self.has_title else 0
-        m = 0
-        if self.compact:
-            m = len(self.compact_items)
-            m //= int(self.compact)
+        m = len(self.compact_items) // int(self.compact) if self.compact else 0
         return n + m + self.n_head_rows + self.frame
 
     @property
@@ -1148,6 +1187,20 @@ class Table(LoggingMixin):
         return Table([filler] * n_rows,
                      width=self.get_column_widths()[self._idx_shown],
                      **kws)
+
+    def resolve_groups(self, col_groups, n_cols):
+        # handle column group headers
+        if col_groups is None:
+            return []
+
+        col_groups = list(col_groups)
+        assert len(col_groups) == n_cols
+
+        col_groups = itt.chain(itt.repeat('', self.n_head_col), col_groups)
+        col_groups = wrap_strings(col_groups)
+        col_groups = itt.zip_longest(*col_groups, fillvalue='')
+        # FIXME: too wide col_groups should truncate
+        return list(col_groups)
 
     def get_default_formatter(self, col_idx, precision, short, data):
         """
@@ -1417,10 +1470,11 @@ class Table(LoggingMixin):
         # this excludes the lhs starting border
         return (self.col_widths[indices] + self.lcb[indices]).sum()
 
-    def get_alignment(self, align, data, col_headers, default_factory):
+    def get_alignment(self, align, data, default_factory):
         """get alignment array for columns"""
-        alignment = resolve_input(align, data, col_headers, 'alignment',
-                                  get_alignment, default_factory)
+        alignment = self._resolve_input(align, data.shape[1],
+                                        'alignment', get_alignment,
+                                        default_factory=default_factory)
         # make align an array with same size as nr of columns in table
 
         # row headers are left aligned
@@ -1435,36 +1489,30 @@ class Table(LoggingMixin):
         # suppress totals for tables with single row
         if data.shape[0] <= 1:
             if col_indices is not None:
-                self.logger.debug('Suppressing totals line since table has only'
-                                  ' a single row of data.')
+                self.logger.debug('Suppressing redundant totals line for table '
+                                  'with single row of data.')
             return
 
         if col_indices in (None, False):
             return
 
         # boolean True ==> compute totals for all
+        n_cols = data.shape[1]
         if col_indices is True:
-            col_indices = np.arange(data.shape[1])
+            col_indices = np.arange(n_cols)
 
-        #
-        totals = np.ma.masked_all(data.shape[1], 'O')
-        # TODO: use resolve_input here?
+        totals = np.ma.masked_all(n_cols, 'O')
         for i in col_indices:
-            # handle str keys for total compute
-            if isinstance(i, str) and (self._col_headers is not None) and \
-                    (i in self._col_headers):
-                i = list(self._col_headers).index(i)
-
-            if not isinstance(i, numbers.Integral):
-                raise TypeError(f'Could not interpret {i!r} as a pointer to a '
-                                'column of the table.')
-
-            # negative indexing
-            if i < 0:
-                i += data.shape[1]
-
-            # attempt to compute total
-            totals[i] = sum(data[:, i])
+            for i in self._resolve_column_alias(i, n_cols, 'totals'):
+                if totals[i]:
+                    continue
+                
+                # attempt to compute total
+                try:
+                    totals[i] = sum(data[:, i])
+                except Exception as err:
+                    wrn.warn(f'Could not compute total for column {i} due to the '
+                            f'following exception: {err}')
 
         return totals  # np.ma.array(totals, object)
 
@@ -1754,14 +1802,14 @@ class Table(LoggingMixin):
             table.append(compact_rows)
 
         # column groups
-        if self.col_groups is not None:
+        for groups in self.col_groups:
             line = self._default_border
-            lbl = self.col_groups[idx[0]]  # name of current group
+            lbl = groups[idx[0]]  # name of current group
             gw = 0  # width of current column group header
 
             # FIXME: this code below in `format cell??`
             for i, j in enumerate(idx):
-                name = self.col_groups[j]
+                name = groups[j]
                 w = self.col_widths[j] + self.lcb[j]
                 if name == lbl:  # still within the same group
                     gw += w
