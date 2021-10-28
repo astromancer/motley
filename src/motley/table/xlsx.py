@@ -73,32 +73,32 @@ def set_block_style(cells, **kws):
         #     setattr(cell, key, val)
 
 
-def get_col_widths(table, requested=(), fallback=4, minimum=3):
+# def get_col_widths(table, requested=(), fallback=4, minimum=3):
 
-    # headers = table.col_headers
-    width = fallback
-    requested = mit.padded(requested, 0)
-    for i, (reqw, col) in enumerate(zip(requested, zip(*table.data))):
-        if reqw:
-            yield reqw
-            continue
+#     # headers = table.col_headers
+#     width = fallback
+#     requested = mit.padded(requested, 0)
+#     for i, (reqw, col) in enumerate(zip(requested, zip(*table.data))):
+#         if reqw:
+#             yield reqw
+#             continue
 
-        if (fmt := table.formatters.get(i)) and isinstance(fmt, str):
-            # sub non-display characters in excel format string
-            width = max((len(sub(square_brackets.remove(f), _xl_fmt_nondisplay))
-                         for f in fmt.split(';')))
-        else:
-            # width = table.col_width[i]
-            try:
-                width = max(map(len, col))
-            except TypeError:
-                pass
+#         if (fmt := table.formatters.get(i)) and isinstance(fmt, str):
+#             # sub non-display characters in excel format string
+#             width = max((len(sub(square_brackets.remove(f), _xl_fmt_nondisplay))
+#                          for f in fmt.split(';')))
+#         else:
+#             # width = table.col_width[i]
+#             try:
+#                 width = max(map(len, col))
+#             except TypeError:
+#                 pass
 
-        header = table.col_headers[i]
-        repeats = list(table.col_headers).count(header)
-        hwidth = (len(header) * 1.2 / repeats)   # fudge factor for font
-        # logger.debug(i, header, hwidth, fwidth, width, minimum)
-        yield max(hwidth, width, minimum)
+#         header = table.col_headers[i]
+#         repeats = list(table.col_headers).count(header)
+#         hwidth = (len(header) * 1.2 / repeats)   # fudge factor for font
+#         # logger.debug(i, header, hwidth, fwidth, width, minimum)
+#         yield max(hwidth, width, minimum)
 
 
 class XlsxWriter:
@@ -127,20 +127,24 @@ class XlsxWriter:
     )
     style_data = dict(
         font=font_data,
-        alignment=Alignment(horizontal='center',
-                            vertical='center')
+        # alignment=Alignment(horizontal='center',
+        #                     vertical='center')
     )
     style_totals = dict(
         font=Font(**font, bold=True),
         border=Border(bottom=rule, top=rule)
     )
 
-    def __init__(self, table, widths={}, align={}, merge_unduplicate=()):
+    def __init__(self, table, widths={}, align={},
+                 merge_unduplicate=('headers'),
+                 header_formatter=str):
 
         self.table = table
         self.workbook = Workbook()
         self.worksheet = self.workbook.active
         # worksheet.title = ""
+
+        self.header_formatter = header_formatter
 
         col_widths = self.table.resolve_input(
             widths, what='width', default_factory=self.get_col_width)
@@ -158,13 +162,13 @@ class XlsxWriter:
         # self.alignments = [) for _ in table.align]
         self.merge_unduplicate = merge_unduplicate
 
-    def get_col_width(self, i, fallback=4, minimum=3):
+    def get_col_width(self, i, fallback=4, minimum=3, padding=1):
         width = fallback
         table = self.table
         if (fmt := table.formatters.get(i)) and isinstance(fmt, str):
             # sub non-display characters in excel format string
             width = max((len(sub(square_brackets.remove(f), _xl_fmt_nondisplay))
-                         for f in fmt.split(';')))
+                         for f in fmt.split(';'))) + padding
         else:
             # width = table.col_width[i]
             try:
@@ -174,7 +178,8 @@ class XlsxWriter:
 
         header = table.col_headers[i]
         repeats = list(table.col_headers).count(header)
-        hwidth = (len(header) * 1.2 / repeats)   # fudge factor for font
+        hwidth = ((len(header) + 3 * padding) / repeats)
+        #                        fudge factor for font
         # logger.debug(i, header, hwidth, fwidth, width, minimum)
         return max(hwidth, width, minimum)
 
@@ -182,13 +187,12 @@ class XlsxWriter:
         # ('rows', 'cells')
 
         table = self.table
-        ncols = table.shape[1]
+        ncols = table.data.shape[1]
         j = ncols + 65  # column index: ord(65) == 'A'
 
+        # -------------------------------------------------------------------- #
+        # headers
         self.make_header_block()
-
-        # units
-        self.append(table.units, **self.style_units)
 
         # -------------------------------------------------------------------- #
         # data
@@ -237,7 +241,7 @@ class XlsxWriter:
         #     if tf:
         #         ws.row_dimensions[r].height = 10 * 3
 
-        if 'rows' in self.merge_unduplicate:
+        if 'data' in self.merge_unduplicate:
             self.merge_duplicate_rows(table.data, r0,)
 
         if path:
@@ -274,7 +278,7 @@ class XlsxWriter:
 
     def make_header_block(self):
         table = self.table
-        ncols = table.shape[1]
+        ncols = table.data.shape[1]
 
         # title
         self.make_header_row([table.title] * ncols)
@@ -286,11 +290,16 @@ class XlsxWriter:
 
         # headers
         # headers = table.get_headers()
-        self.make_header_row(table.col_headers, False)
+        col_headers = list(map(self.header_formatter, table.col_headers))
+        style = {'border': Border()} if table.units else {}
+        self.make_header_row(col_headers, False, **style)
 
-        if 'cells' in self.merge_unduplicate:
-            headings = (*table.col_groups, table.col_headers)
+        if 'headers' in self.merge_unduplicate:
+            headings = (*table.col_groups, col_headers)
             self.merge_duplicate_cells(headings, r + 1)
+
+        # units
+        self.append(table.units, **self.style_units)
 
     def make_header_row(self, data, merge_duplicate_cells=2, **style):
         if data is None:
@@ -329,7 +338,7 @@ class XlsxWriter:
     def merge_duplicate_cells(self, data, row_index, trigger=2):
 
         data = np.atleast_2d(data)
-        logger.debug('{:=}', data)
+        logger.debug('data = {}', data)
 
         nrows, _ = data.shape
         r0 = row_index
@@ -347,7 +356,7 @@ class XlsxWriter:
                 if idx:
                     to_merge.append(idx)
 
-            # print(r, to_merge)
+            logger.debug('Row {}: to_merge {}', r, to_merge)
             for idx in to_merge:
                 j, *_, k = duplicate_if_scalar(sorted(idx), raises=False)
                 # print(j, k, row[j:k+1])
@@ -357,10 +366,10 @@ class XlsxWriter:
                 for t in range(s + 1):
                     merged[r + t] |= (idx)
 
-                # print( ((k - j >= trigger) | s > 0), j, k, trigger, s)
-                if ((k - j >= trigger) | s > 0):
+                # logger.debug('{}', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
+                if ((k - j + 1 >= trigger) | s > 0):
                     cells = f'{j+65:c}{r1}:{k+65:c}{r1 + s}'
-                    print('merge: {}', cells)
+                    logger.debug('merge: {}', cells)
                     self.worksheet.merge_cells(cells)
 
         # logger.debug(row, self.should_double_height(row, merged))
