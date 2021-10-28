@@ -25,7 +25,7 @@ ALIGNMENT_MAP = {'r': '>',
                  'c': '^'}
 
 
-def get_alignment(align):
+def resolve_alignment(align):
     # resolve_align  # alignment.resolve() # alignment[align]
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
     if align not in '<^>':
@@ -97,7 +97,7 @@ class _Vstack:
         str
         """
         # check that all tables have same number of columns
-        ncols = [tbl.shape[1] for tbl in tables]
+        ncols = [tbl.n_cols + tbl.n_head_col for tbl in tables]
         if len(set(ncols)) != 1:
             raise ValueError(f'Cannot stack tables with unequal number of '
                              f'columns: {ncols}.')
@@ -265,7 +265,7 @@ def overlay(text, background='', align='^', width=None):
             '# FIXME: will not work if background has coded strings')
 
     # resolve alignment character
-    align = get_alignment(align)
+    align = resolve_alignment(align)
 
     # center aligned
     if align == '^':
@@ -558,7 +558,7 @@ class GroupTitle:
         self.s = codes.apply(self.format_key(keys), props)
         # self.props = props
 
-        self.align = get_alignment(align)
+        self.align = resolve_alignment(align)
 
     @staticmethod
     def format_key(keys):

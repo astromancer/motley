@@ -135,7 +135,7 @@ class XlsxWriter:
         border=Border(bottom=rule, top=rule)
     )
 
-    def __init__(self, table, widths=(), align=(), merge_unduplicate=()):
+    def __init__(self, table, widths={}, align={}, merge_unduplicate=()):
 
         self.table = table
         self.workbook = Workbook()

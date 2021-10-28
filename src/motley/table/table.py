@@ -192,7 +192,7 @@ def _ensure_list(obj):
 
 
 def _ensure_dict(obj, n_cols, what='\r'):
-    if obj in (None, False):
+    if not obj: # in (None, False, ()):
         return {}
 
     if isinstance(obj, abc.Mapping):
@@ -211,8 +211,8 @@ def _ensure_dict(obj, n_cols, what='\r'):
         return dict(enumerate(obj))
 
     raise ValueError(
-        f'Incorrect number of {what!r} specifiers ({n_obj}) for table with '
-        f'{n_cols} columns'
+        f'Incorrect number of {what} specifiers ({n_obj}) for table with '
+        f'{n_cols} columns.'
     )
 
 
@@ -239,63 +239,75 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
     -------
 
     """
-    obj = _ensure_dict(obj, n_cols, what)
+    out = OrderedDict(_ensure_dict(obj, n_cols, what))
 
     # set action raise / warn
     emit = bork(ValueError) if raises else logger.warning
 
     aliases = list(aliases or ())
-    if not aliases and (str in set(map(type, obj.keys()))):
+    if not aliases and (str in set(map(type, out.keys()))):
         emit(f'Could not assign {what} due to missing `column_headers`')
 
     # convert all keys in input dict to int
     if aliases:
         # copy dict to prevent RuntimeError on pop
-        for key in list(obj.keys()):
-            item = obj.pop(key)
-            for i in _resolve_column_alias(key, aliases, n_cols, what, emit):
-                obj[i] = item
+        if ... in out:
+            out.move_to_end(..., last=False)
+
+        for key in list(out.keys()):
+            item = out.pop(key)
+            for i in resolve_column(key, aliases, n_cols, what, emit):
+                out[i] = item
 
     # convert values
     if converter:
-        for i, item in obj.items():
-            obj[i] = converter(item)
+        for i, item in out.items():
+            out[i] = converter(item)
 
     # get default obj
     if default_factory:
         # idx_no_fmt =
-        for i in set(range(n_cols)) - set(obj.keys()):
-            obj[i] = default_factory(i, *args, **kws)
+        for i in set(range(n_cols)) - set(out.keys()):
+            out[i] = default_factory(i, *args, **kws)
 
-    return obj
+    return out
 
 
-def _resolve_column_alias(key, aliases, ncols, what, emit):
-    if isinstance(key, numbers.Integral):
-        # wrap negative indices
-        if key < 0:
-            return key + ncols
+@ftl.singledispatch
+def resolve_column(key, aliases, ncols, what, emit):
+    emit(f'Key {key!r} for {what} has invalid type {type(key)} for '
+         f'mapping to a column of the table.')
+    return key
+    # emit(f'Could not interpret {what}. Key {key!r} not in any '
+    #      f'`column_headers` or `column_groups`.')
 
-        if key > ncols:
-            emit(f'Key {key!r} for {what} greater than number of columns '
-                 f'in table ({ncols}).')
-        yield key
-        return
 
-    if not isinstance(key, str):
-        emit(f'Key {key!r} for {what} has invalid type {type(key)} for '
-             f'mapping to a column of the table.')
-        yield key
-        return
+@resolve_column.register(numbers.Integral)
+def _(key, aliases, ncols, what, emit):
+    # wrap negative indices
+    if key < 0:
+        return [key + ncols]
 
+    if key > ncols:
+        emit(f'Key {key!r} for {what} greater than number of columns '
+             f'in table ({ncols}).')
+    return [key]
+
+
+@resolve_column.register(str)
+def _(key, aliases, ncols, what, emit):
     for aliases in aliases:
         if key in aliases:
             # at this point key should be int
-            yield from where(aliases, key)
-            return
+            return where(aliases, key)
 
     emit(f'Could not interpret {what}. Key {key!r} not in any '
          f'`column_headers` or `column_groups`.')
+
+
+@resolve_column.register(type(...))
+def _(key, aliases, ncols, what, emit):
+    return list(range(ncols))
 
 
 def resolve_borders(col_borders, where, ncols, frame):
@@ -516,13 +528,14 @@ def truncate(item, width):
 
 
 class Table(LoggingMixin):
+    # TODO split ConsoleWriter(TableWriter)
     """
     A table formatter. Good for displaying data. Definitely not for data
     manipulation (yet). Plays nicely with ANSI colours and multi-line cell
     elements.
     """
 
-    _default_border = BORDER  # TODO odo move to module scope
+    _default_border = BORDER  # TODO move to module scope
 
     # The column format specification:
     #  0 - item; 1 - fill width; 2 - align; 3 - border (rhs); 4 - border (lhs)
@@ -530,18 +543,20 @@ class Table(LoggingMixin):
 
     # title_fmt = cell_fmt.join(_default_border * 2)
 
-    def _resolve_input(self, obj, n_cols, what, converter=None,
-                       raises=True, default_factory=None, args=(), **kws):
+    def resolve_input(self, obj, n_cols=None, what='\r', converter=None,
+                      raises=True, default_factory=None, args=(), **kws):
         # resolve aliases from bottommost header line upwards
         aliases = (self._col_headers, *self.col_groups[::-1])
+        if n_cols is None:
+            n_cols = self.data.shape[1]
         return resolve_input(obj, n_cols, aliases, what, converter, raises,
                              default_factory, args, **kws)
 
-    def _resolve_column_alias(self, key, n_cols, what, raises=True):
+    def resolve_column(self, key, n_cols, what, raises=True):
         aliases = (self._col_headers, *self.col_groups[::-1])
         # set action raise / warn
-        return _resolve_column_alias(key, aliases, n_cols, what,
-                                     bork(ValueError) if raises else wrn.warn)
+        return resolve_column(key, aliases, n_cols, what,
+                              bork(ValueError) if raises else wrn.warn)
 
     @classmethod
     def from_columns(cls, *columns, **kws):
@@ -822,6 +837,8 @@ class Table(LoggingMixin):
         # FIXME: hlines with cell elements that have ansi ... effects don't
         #  stack...
 
+        # FIXME: move construction for types dispatch to __new__
+
         # special case: dict
         if isinstance(data, dict):
             data, kws = self._from_dict(data, **kws)
@@ -896,7 +913,7 @@ class Table(LoggingMixin):
         self.units = None
 
         if self.has_units:
-            units = self._resolve_input(units, data, 'units')
+            units = self.resolve_input(units, data, 'units')
             self.units = []
             for i in range(n_cols):
                 u = units.get(i)
@@ -915,14 +932,14 @@ class Table(LoggingMixin):
         if formatter and not formatters:
             formatters = [formatter] * n_cols
 
-        self.formatters = self._resolve_input(
+        self.formatters = self.resolve_input(
             formatters, n_cols, 'formatters',
             default_factory=self.get_default_formatter,
             args=(precision, minimalist, data)
         )
 
         # get flags
-        flags = self._resolve_input(flags, n_cols, 'flags')
+        flags = self.resolve_input(flags, n_cols, 'flags')
 
         # calculate column totals if required
         self.totals = self.get_totals(data, totals)
@@ -1115,7 +1132,7 @@ class Table(LoggingMixin):
     def __str__(self):
         if self.data.size:
             return self.format()
-        return '{0}Empty Table{0}'.format(self._default_border)
+        return '<Empty Table>'
 
     def __format__(self, spec):
         return str(self)
@@ -1472,9 +1489,9 @@ class Table(LoggingMixin):
 
     def get_alignment(self, align, data, default_factory):
         """get alignment array for columns"""
-        alignment = self._resolve_input(align, data.shape[1],
-                                        'alignment', get_alignment,
-                                        default_factory=default_factory)
+        alignment = self.resolve_input(align, data.shape[1],
+                                       'alignment', get_alignment,
+                                       default_factory=default_factory)
         # make align an array with same size as nr of columns in table
 
         # row headers are left aligned
@@ -1503,16 +1520,17 @@ class Table(LoggingMixin):
 
         totals = np.ma.masked_all(n_cols, 'O')
         for i in col_indices:
-            for i in self._resolve_column_alias(i, n_cols, 'totals'):
+            for i in self.resolve_column(i, n_cols, 'totals'):
                 if totals[i]:
                     continue
-                
+
                 # attempt to compute total
                 try:
                     totals[i] = sum(data[:, i])
                 except Exception as err:
-                    wrn.warn(f'Could not compute total for column {i} due to the '
-                            f'following exception: {err}')
+                    wrn.warn(
+                        f'Could not compute total for column {i} due to the '
+                        f'following exception: {err}')
 
         return totals  # np.ma.array(totals, object)
 
@@ -2051,12 +2069,12 @@ class Table(LoggingMixin):
     #     # TODO
     # to_xlsx = XlsxWriter().write
 
-    def to_xlsx(self, path=None, widths=None, **kws):
+    def to_xlsx(self, path=None, widths=(), **kws):
         # may need to set widths manually eg. for cells that contain formulae
-        return XlsxWriter().write(self, path, widths, **kws)
+        return XlsxWriter(self, widths, **kws).write(path)
 
 
-CONVERTERS = {
+CONVERTERS = {  # TODO: MOVE TO formatter
     's': str,
     'r': repr,
     'a': ascii,
@@ -2414,6 +2432,7 @@ class AttrTable:
     def get_groups(self, attrs=None):
         if self.show_groups:
             return [self.get_group(_) for _ in (attrs or self.attrs)]
+        return []
 
     def get_headers(self, obj=None):
         # ok = set(map(self.headers.get, kws)) - {None}
@@ -2475,25 +2494,38 @@ class AttrTable:
 
         return list(zip(*tmp.values()))
 
-    def to_xlsx(self, path, widths=None):
+    def to_xlsx(self, path, widths={}):
 
-        data = self.get_data(self.parent.sort_by('t.t0'))
+        data = np.array(self.get_data(self.parent.sort_by('t.t0')))
 
         # FIXME: better to use get_table here, but then we need to keep
         # table.data as objects not convert to str prematurely!
+         # PLEASE FIX THIS UNGODLY HACK
+        
+        col_headers=self.get_headers()
         tmp = AttrDict(
             data=data,
             col_groups=self.get_groups(),
-            col_headers=self.get_headers(),
+            col_headers=col_headers,
+            _col_headers=col_headers,
             units=self.get_units(),
             formatters={self.attrs.index(k): v for k, v in self.formatters.items()},
-            totals=[self.get_header(attr) for attr in self.totals],
             title=self.title,
-            shape=(len(data), len(self.attrs))
+            shape=(len(data), len(self.attrs)),
+            
         )
+        
         # may need to set widths manually eg. for cells that contain formulae
         # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
-        return XlsxWriter().write(tmp, path, widths)
+        # table = tmp()
+        tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
+        
+        from IPython import embed
+        embed(header="Embedded interpreter at 'src/motley/table/table.py':2544")
+        tmp.totals = tmp.resolve_input(self.totals, what='totals'),
+            
+
+        return XlsxWriter(tmp, widths).write(path)
 
     def get_table(self, container, attrs=None, **kws):
         """
@@ -2583,7 +2615,7 @@ class AttrTable:
 
         attrs, compactable, headers, units, totals = self.prepare(groups)
         grand_total = grand_total or totals
-        
+
         tables = {}
         empty = []
         footnotes = OrderedSet()
