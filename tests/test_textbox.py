@@ -1,27 +1,23 @@
-# std
-import itertools as itt
-
-# local
 from motley.textbox import textbox
 from recipes.testing import Expected, mock
 
-
 # texts = [  # 'Hello world!',
 #     'Hello\nworld!']
-# linestyles = ('', '-', '--', '.', ':', '=', '+', '[', 'E')
+# linestyles = ('', '_', '-', '--', '.', ':', '=', '+', '[', 'E')
 # # ('E', ):   #'_', '-', '=', '+', '['):
-# boldness = '', 'Bold'
-# for text, linestyle, bold in itt.product(texts, linestyles, boldness):
+# boldness = ('', 'Bold')
+# sides = (True, False)
+# for text, linestyle, bold, sides in itt.product(texts, linestyles, boldness, sides):
 #     # try:
 #     if bold:
 #         linestyle = (linestyle, bold)
-#     print(f'{linestyle=}\n{bold=}')
-#     print(str(textbox(text, linestyle=linestyle)))
+#     print(f'{linestyle=}\n{bold=}\n{sides=}')
+#     print(str(textbox(text, linestyle, sides=sides)))
 #     # except Exception as err:
 #     #     print(str(err))
 
 
-# # ◆──────◆
+# ◆──────◆
 # │Hello │
 # │world!│
 # ◆──────◆
@@ -116,7 +112,7 @@ test_textbox = Expected(textbox, text='Hello\nworld!',
             '\x1b[;4m   ⃓  ⃓  ⃓ \x1b[0m',
             '┤Hello ├',
             '\x1b[;4m┤world!├\x1b[0m',
-            '  ᑊ ᑊ ᑊ'
+            '  ᑊ ᑊ ᑊ '
         ),
         # mock(linestyle=('+', 'bold')):
         #     '\x1b[;4m   ⃓  ⃓  ⃓ \x1b[0m',

@@ -348,17 +348,11 @@ def banner(text, width=None, align='^', fg=None, bg=None, **kws):
     # title = f'{text: {align}{width - 2 * len(side)}}'
     width = resolve_width(width)
     # TextBox()
-    return textbox(text, linestyle='_', sides=False,
-                   width=width, align=align, fg=fg, bg=bg,
-                   **kws)
+    return textbox(text, width=width, align=align,
+                   fg=fg, bg=bg,
+                   **{**dict(linestyle='_', sides=False),
+                      **kws})
     # return codes.apply(banner,  **props)
-
-
-@ftl.lru_cache()
-def resolve_width(width):
-    if width is None:
-        return get_terminal_size()[0]
-    return int(width)
 
 
 # def rainbow(words, effects=(), **kws):

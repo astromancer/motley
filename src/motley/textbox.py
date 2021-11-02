@@ -1,5 +1,8 @@
 
 # std
+from IPython.terminal.embed import embed
+from recipes.string import backspaced
+from recipes.oo import iter_subclasses
 import unicodedata
 import itertools as itt
 import warnings
@@ -8,14 +11,17 @@ from collections.abc import Collection
 
 # third-party
 import more_itertools as mit
+from more_itertools.more import collapse
 
 # local
 from recipes import api
+from recipes.iter import where
 from recipes.string import justify
 from recipes.functionals import echo0
 from recipes.dicts import AttrReadItem
 from recipes.misc import duplicate_if_scalar
 from recipes.language.unicode import subscripts
+from recipes.string.string import delete
 
 # relative
 from . import ansi, apply, format, stylize, underline
@@ -204,9 +210,6 @@ from .utils import get_width, resolve_width
 # '⎵' Bottom square bracket 023B5
 
 
-# null singleton for default identification
-NULL = object()
-
 MAJOR_TICK_TOP = '\N{COMBINING SHORT VERTICAL LINE OVERLAY}'
 MINOR_TICK_TOP = '\N{MUSICAL SYMBOL BREVIS REST}'
 MAJOR_TICK_BOTTOM = '\N{MUSICAL SYMBOL LONGA PERFECTA REST}'
@@ -238,6 +241,7 @@ HLINES_HEAVY = {
 VLINES = {
     '':     '',
     ' ':    '',
+    '_':    '│',
     '-':    '│',
     '|':    '│',
     '=':    '║',
@@ -259,12 +263,12 @@ VLINES_HEAVY = {
 
 CORNERS = {
     '':         [''] * 4,
-    '_':        [''] * 4,
+    '_':        [' ', ' ', '', ''],
     ' ':        '    ',
 
     '[':        ('  ', f'{MAJOR_TICK_TOP}', '', ''),
-    '+':        (' ', ' ', ' ', ''),
-    'E':        (' ', f' {MAJOR_TICK_TOP}', ' ', ' '),
+    '+':        (' ', ' ', ' ', '\b'),
+    'E':        (' ', f' {MAJOR_TICK_TOP}', ' ', '\b'),
 
     'round':    '╭╮╰╯',
     '-':        '╭╮╰╯',
@@ -286,13 +290,16 @@ CORNERS = {
 CORNERS_HEAVY = '┏┓┗┛'
 
 
-LINESTYLE_TO_EDGESTYLES = {
+LINESTYLE_TO_EFFECTS = {
+    # top, bottom, left, right
+    '_': ('_', '_', '', ''),
     '[': '_',
     '+': ('_', '_', '', ''),
     'E': '_'
 }
 
-BOLD_OK = {'heavy', 'thick', 'bold'}
+
+BOLD_OK = {'heavy', 'thick', 'bold', 'b'}
 
 
 def resolve_line(char):
@@ -318,17 +325,24 @@ def resolve_line(char):
     # assert len(corners) == 4
 
 def resolve_linestyle(linestyle):
-    if linestyle is None:
+    if (linestyle is None) or isinstance(linestyle, str):
         return linestyle, False
 
+    if not isinstance(linestyle, Collection):
+        raise TypeError(f'Parameter `linestyle` should be of a str or '
+                        f'Collection, not {type(linestyle)}.')
+
     linestyle, *heavy = linestyle
-    heavy = (heavy.lower() in BOLD_OK) if heavy else False
+    heavy = (heavy[0].lower() in BOLD_OK) if heavy else False
 
     if heavy and (linestyle not in HLINES_HEAVY):
         warnings.warn(f'Bold line not available for style: {linestyle!r}.')
         heavy = False
 
     return linestyle, heavy
+
+
+EMPTY = object()
 
 
 @api.Synonyms({
@@ -372,55 +386,46 @@ def textbox(text,
     if linestyle is None:
         return justify(text, kws.get('align', '^'), kws.get('width'))
 
+    # top = bottom = left = right = style
     hlines = (HLINES, HLINES_HEAVY)[heavy]
     vlines = (VLINES, VLINES_HEAVY)[heavy]
-    udef_corners = 'corners' in kws
-
-    # top = bottom = left = right = style
     top, bottom = duplicate_if_scalar(hlines[linestyle])
 
-    if udef_corners:
-        corners = kws.pop('corners') or ''
-        corners = CORNERS.get(corners, corners)
-    else:
-        corners = (CORNERS_HEAVY if heavy else
-                   CORNERS.get(linestyle, CORNERS['round']))
+    # sides can be separately specified or toggled
+    sides = kws.pop('sides', EMPTY) or ''
+    corners = kws.pop('corners', EMPTY)
+    if sides in {EMPTY, True}:
+        sides = vlines[linestyle]
 
-    if 'sides' in kws:
-        sides = kws.pop('sides') or ''
-        left, right = duplicate_if_scalar(sides)
-        corners = corners if udef_corners else sides
+    left, right = duplicate_if_scalar(sides)
+
+    if corners in {EMPTY, True}:
+        # default corners to match linestyle
+        if sides:
+            corners = (CORNERS_HEAVY if heavy else
+                       CORNERS.get(linestyle, CORNERS['round']))
+        else:
+            corners = CORNERS['']
     else:
-        left, right = duplicate_if_scalar(vlines[linestyle])
+        # corners explicitly given
+        corners = CORNERS.get(corners, corners)
 
     init_kws = dict(
         fg=fg, bg=bg,
-        left=left, right=right,
-        top=top, bottom=bottom,
+        left=left, top=top,
+        right=right, bottom=bottom,
         corners=corners,
-        linecolor=LINESTYLE_TO_EDGESTYLES.get(linestyle, linecolor)
+        linecolor=LINESTYLE_TO_EFFECTS.get(linestyle, linecolor)
     )
+    # return (TextBox.for_style(linestyle), init_kws)
     return TextBox.for_style(linestyle)(**init_kws)(text, **kws)
-
-    # if linestyle == '_':
-    #     return AnsiBox(**init_kws)(text, **kws)
-
-    # if linestyle == '[':
-    #     return GridFrameBox(**init_kws, linecolor='_')(text)
-
-    # if linestyle == '+':
-    #     box = GridFrameBox(**init_kws, linecolor=('_', '_', '', ''))
-    #     return box(text)[:-2]
-
-    # if linestyle == 'E':
-    #     box = GridFrameBox(**init_kws, linecolor='_')
-    #     return box(text)[:-2]
-
-    # return TextBox(**init_kws, linecolor=linecolor)(text, **kws)
 
 #  TODO: AsciiTextBox
 # def effect_as_string(effects):
-    #
+  #
+
+# null singleton for default identification
+TOP = LEFT = object()
 
 
 class TextBox:
@@ -434,17 +439,17 @@ class TextBox:
 
     @classmethod
     def for_style(cls, style):
-        for kls in cls.__subclasses__():
+        for kls in iter_subclasses(cls):
             if style in kls.linestyles:
                 return kls
         return TextBox
 
     def __init__(self,
                  #  fmt='{text: {align}{width}|{fg}/{bg}}'
-                 top='\N{BOX DRAWINGS LIGHT HORIZONTAL}',
-                 bottom=NULL,
                  left='\N{BOX DRAWINGS LIGHT VERTICAL}',
-                 right=NULL,
+                 top='\N{BOX DRAWINGS LIGHT HORIZONTAL}',
+                 right=LEFT,
+                 bottom=TOP,
                  corners='╭╮╰╯',
                  linecolor=(),
                  fg=None,
@@ -458,21 +463,23 @@ class TextBox:
         """
 
         # TODO: parse stylized input for sides
+        self.left = (left or '')
+        self.right = self.left if (right is LEFT) else (right or '')
+        assert isinstance(self.left, str) and isinstance(self.right, str)
 
-        self.left = str(left)
-        self.right = str(left if right is NULL else right or '')
         self.top = top
-        self.bottom = top if bottom is NULL else bottom
+        self.bottom = top if bottom is TOP else bottom
         self.corners = corners
-        self.style = dict(fg=(fg or ''),
+        self.style = AttrReadItem(fg=(fg or ''),
                           bg=(bg or ''))
-        self.linecolor = duplicate_if_scalar(
-            kws.get('color', linecolor) or '', 4)
+        # get line colors for edges
+        linecolor = kws.get('color', linecolor) or ''
+        self.linecolor = list(duplicate_if_scalar(linecolor, 4))
 
         # stylize(line_fmt_template,
-        self.line_fmt = (apply(left, linecolor[2]) +
+        self.line_fmt = (apply(left, self.linecolor[2]) +
                          apply('{line: {align}{width}}', **self.style) +
-                         apply(right, linecolor[3]))
+                         apply(right, self.linecolor[3]))
 
     def __call__(self, text='', width=None, height=None, align='^'):
         text = str(text)
@@ -496,6 +503,7 @@ class TextBox:
         width = width - len(self.left) - len(self.right)
         kws = {**locals(), **vars(self), **kws}
         kws.pop('self')
+        # lc0, lc1 = self.linecolor
         yield make_hline(self.top, self.corners[:2], width, self.linecolor[0])
 
         for line in text.splitlines():
@@ -508,7 +516,7 @@ class TextBox:
 def make_hline(characters, corners, width, color):
     n = sum((len(s) - unicodedata.combining(s) for s in characters))
     line = (characters * (width // n) + characters[:(width % n)]).join(corners)
-    return apply(line, color)
+    return apply(backspaced(line), color)
 
 
 class AnsiBox(TextBox):
@@ -517,8 +525,9 @@ class AnsiBox(TextBox):
     def __init__(self, **kws):
         super().__init__(**{**dict(top=' ',
                                    corners=CORNERS[' '],
-                                   linecolor=('_', '', '', '')),
+                                   linecolor=('_', '_', '', '')),
                             **kws})
+        self.linecolor[0] = (self.linecolor[0], self.style.fg)
 
     def _iter_lines(self, text, width, align, **kws):
         itr = super()._iter_lines(text, width, align)
