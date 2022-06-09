@@ -1,6 +1,5 @@
 numpy
-ipython
 matplotlib
 more_itertools
 line_profiler
-recipes
+git+https://github.com/astromancer/recipes
