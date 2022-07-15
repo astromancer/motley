@@ -2,6 +2,8 @@
 Rocking colours. Just like in the 80s...
 """
 
+# pylint: disable=redefined-builtin
+
 # std
 import sys
 import textwrap
@@ -15,8 +17,8 @@ from . import codes
 from .ansi import *
 from .utils import *
 from .string import Str
-from .codes import fg, bg
-from .formatter import format, stylize, format_partial, formatter # pylint: disable=redefined-builtin
+from .codes import bg, fg
+from .formatter import format, format_partial, formatter, stylize
 
 
 #

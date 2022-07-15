@@ -4,10 +4,12 @@ Stylizing strings with extended format directives.
 
 
 # std
+import traceback as tb
 import re
 import functools as ftl
 from collections import UserString
 from string import Formatter as BuiltinFormatter
+from textwrap import dedent
 
 # third-party
 from loguru import logger
@@ -15,6 +17,7 @@ from loguru import logger
 # local
 from recipes.regex import unflag
 from recipes.string.brackets import BracketParser, csplit, level
+from recipes.oo.temp import temporary
 
 # relative
 from . import ansi, codes
@@ -148,13 +151,14 @@ def _apply_style(string, **effects):
 #                        sign=sign,
 #                        thousands=' ')
 
-
 class Formatter(BuiltinFormatter):
     """
     Implements a formatting syntax for string colorization and styling.
     """
 
-    _rgb_parser = BracketParser('[]', '()')
+    _rgb_parser = BracketParser('()')
+    # supporting [] is more complicated because of ansi codes containing these:
+    # Eg '\x1b[;1;34m'
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
@@ -164,27 +168,30 @@ class Formatter(BuiltinFormatter):
         self.parser = BracketParser('{}')
 
     def parse(self, string):
-        try:
-            # parsed = list(super().parse(string))
-            # logger.debug('PARSED: {}', parsed)
-            yield from super().parse(string)
-            return
-        except ValueError as err:
-            msg = str(err)
-            if not msg.endswith(("Single '}' encountered in format string",
-                                 "unexpected '{' in field name",
-                                 "expected '}' before end of string")):
-                logger.debug('builtin format parser failed with: {}', err)
-                raise err
+        # try:
+        #     # parsed = list(super().parse(string))
+        #     # logger.debug('PARSED: {}', parsed)
+        #     yield from super().parse(string)
+        #     logger.debug('BuiltinFormatter.parse succeeded.')
+        #     return
 
-        logger.debug('parsing string: {!r}', string)
+        # except ValueError as err:
+        #     msg = str(err)
+        #     if not msg.endswith(("Single '}' encountered in format string",
+        #                          "unexpected '{' in field name",
+        #                          "expected '}' before end of string")):
+        #         logger.debug('Builtin format parser failed with: {}', err)
+        #         raise err
+
+        # logger.debug('BuiltinFormatter.parse failed. Parsing with motley.')
+        # logger.debug('Parsing string: {!r}', string)
 
         pos = 0
         match = None
-        itr = self.parser.iterate(string, must_close=True,
-                                  condition=(level == 0))
+        itr = self.parser.iterate(string, must_close=True, condition=(level == 0))
+        # buffer = ''
         for match in itr:
-            *field, spec = csplit(match.enclosed, delimeter=':')
+            *field, spec = match.enclosed.rsplit(':', 1)
             if field:
                 # handle edge case: filling with colon: "{::<10s}"
                 if '::' in match.enclosed:
@@ -197,23 +204,29 @@ class Formatter(BuiltinFormatter):
                 spec = ''
 
             #  (literal_text, field_name, format_spec, conversion)
-            logger.debug('literal_text={0!r}, field_name={1!r}, format_spec={2!r}',
-                         lambda: (string[pos:match.start], field, spec))
+            logger.opt(lazy=True).debug(
+                '{}', lambda: dedent(f'''
+                    match = {match!r}
+                    pos = {pos!r} 
+                    literal_text={string[pos:match.start]!r}
+                    field_name={field!r}
+                    format_spec={spec!r}
+                    '''),
+            )
+
+            # if match.level > 0:
+            #     buffer +=
+
             yield string[pos:match.start], field, spec, None
 
             pos = match.end + 1
 
-        if match and (match.end + 1 != len(string)):
-            yield string[match.end + 1:], None, None, None
-
-    def get_field(self, field_name, args, kws):
-        logger.debug(f'{field_name=:}, {args=:}, {kws=:}', )
-        if self.parser.match(field_name):
-            logger.debug('Found braced expression in field name, recursing on '
-                         '{!r}', field_name)
-            return self.format(field_name, *args, **kws), None
-
-        return super().get_field(field_name, args, kws)
+        if match:
+            if match.end + 1 != len(string):
+                yield string[match.end + 1:], None, None, None
+        else:
+            logger.debug('NO MATCH: {}', string)
+            yield from super().parse(string)
 
     def _parse_spec(self, value, spec):
 
@@ -273,6 +286,20 @@ class Formatter(BuiltinFormatter):
         spec_info['width'] = str(int(mo['width']) + ansi.length_codes(value))
         return ''.join(spec_info.values())
 
+    def get_field(self, field_name, args, kws):
+        logger.opt(lazy=True).debug('{}', lambda: f'{field_name=:}, {args=:}, {kws=:}', )
+        # eg: field_name = '0[name]' or 'label.title' or 'some_keyword'
+
+        if self.parser.match(field_name):
+            # brace expression in field name!
+            logger.debug('Found braced expression in field name, recursing on '
+                         '{!r}', field_name)
+            # with temporary(self, _wrap_field=True):
+            sub = self.format(field_name, *args, **kws)
+            return sub, None
+
+        return super().get_field(field_name, args, kws)
+
     def format_field(self, value, spec):
         """
         [summary]
@@ -294,7 +321,7 @@ class Formatter(BuiltinFormatter):
         >>> fmt.format_field('Hello world', '|gBI_/k')
         >>> fmt.format_field(101.101, ' >15.4d|red,B,I,_/k}"
         >>> fmt.format_field('Hello world', ':s|aquamarine,I/lightgrey}')
-        >>> fmt.format('Hello world', '[122,0,0],B,I,_/k}')
+        >>> fmt.format('Hello world', '(122,0,0),B,I,_/k}')
 
         Returns
         -------
@@ -308,11 +335,11 @@ class Formatter(BuiltinFormatter):
         motley.codes.resolve.InvalidEffect
             If the colour / style directives could not be resolved.
         """
-
+        logger.debug('Formatting {!r} with {!r} at parent', value, spec)
         value, spec, effects = self._parse_spec(value, spec)
 
         # delegate formatting
-        logger.debug('Formatting {!r} with {!r} at parent', value, spec)
+        # logger.debug('Formatting {!r} with {!r} at parent', value, spec)
         return _apply_style(
             super().format_field(value, spec),      # calls  builtins.format
             **effects
@@ -344,20 +371,23 @@ class Stylizer(Formatter):
     # _max_level = 0
     _wrap_field = True
 
-    def get_field(self, field_name, args, kws):
-        # eg: field_name = '0[name]' or 'label.title' or '{some_keyword}'
-        if self.parser.match(field_name):
-            # brace expression in field name!
-            logger.debug('Found braced expression in field name, recursing on '
-                         '{!r}', field_name)
-            sub = self.format(field_name, *args, **kws)
-            self._wrap_field = False
-            return sub, None
+    # def get_field(self, field_name, args, kws):
+    #     # eg: field_name = '0[name]' or 'label.title' or 'some_keyword'
+    #     if self.parser.match(field_name):
+    #         # brace expression in field name!
+    #         logger.debug('Found braced expression in field name, recursing on '
+    #                      '{!r} WRAP_FIELD = {}', field_name, self._wrap_field)
+    #         sub = self.format(field_name, *args, **kws)
+    #         self._wrap_field = False
+    #         return sub, None
 
-        self._wrap_field = True
-        return field_name, None
+    #     self._wrap_field = True
+    #     return field_name, None
 
     def format_field(self, value, spec):
+
+        logger.debug('value = {!r}, spec = {!r}', value, spec)
+
         value = str(value)  # necessary to measure field width in _parse_spec
         value, spec, effects = self._parse_spec(value, spec)
         value = ':'.join(filter(None, (value, spec)))
@@ -365,11 +395,17 @@ class Stylizer(Formatter):
         # Can we remove the enclosing braces?
         # if self._current_level < self._max_level or spec:
         # logger.
-        logger.debug('wrap = {}, spec = {!r}', self._wrap_field, spec)
+        logger.debug('wrap_field = {}, value = {!r}, spec = {!r}',
+                     self._wrap_field, value, spec)
+
         if self._wrap_field or spec:
-            value = value.join('{}')
+            value = value.join(('{}'))
+        # else:
+
         logger.debug('applying {} to {!r}', effects, value)
         return _apply_style(value, **effects)
+        # logger.debug('Formatted field:\n{}', ff)
+        # return ff
 
 
 class PartialFormatter(Stylizer):
@@ -381,29 +417,40 @@ class PartialFormatter(Stylizer):
             yield literal_text, field_name, format_spec, conversion
 
     def get_field(self, field_name, args, kws):
-        logger.debug(f'{field_name=:}, {args=:}, {kws=:}', )
-        try:
-            # logger.debug('trying at parent Formatter {}', field_name)
-            result = Formatter.get_field(self, field_name, args, kws)
-            self._wrap_field = False
-            return result
 
-        except KeyError:
+        logger.debug(f'{field_name=:}, {args=:}, {kws=:}', )
+        logger.debug('Trying BuiltinFormatter.get_field\nfield_name = {}, args = {}, kws = {}',
+                     field_name, args, kws)
+
+        #
+        self._wrap_field = True
+
+        try:
+            result = Formatter.get_field(self, field_name, args, kws)
+
+        except KeyError as err:
             # If the builtin `get_field` failed, this field name is unavailable
             # and needs to be kept unaltered. We do that by replacing
             # `field_name` with `{field_name}` wrapped in braces. This leaves
             # the string unaltered after substitution.
-            self._wrap_field = True
-            return field_name, None
+            result = (field_name, None)
+            logger.debug('BuiltinFormatter.get_field failed with {!r}\nReturning:\n{}',
+                         err, result)
 
-        except IndexError:
+        except IndexError as err:
             # by this time the `auto_arg_index` will have been substituted for
             # empty field names. We have to undo that to obtain the original
             # field specifier which may have been empty.
-            self._wrap_field = True
             if self._empty_field_name:
-                return '', None
-            return result
+                result = ('', None)
+            logger.debug('BuiltinFormatter.get_field failed with {!r}\nReturning:\n{}',
+                         err, result)
+        else:
+            self._wrap_field = False
+            logger.debug('BuiltinFormatter.get_field succeeded. Recursion ends. '
+                         'field: {}, spec: {}', *result)
+
+        return result
 
     def get_value(self, key, args, kwargs):
         logger.debug(f'{key=:}, {args=:}, {kwargs=:}', )
