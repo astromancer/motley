@@ -291,7 +291,7 @@ class TextImage:
         #     return AnsiBox()(stack(self.pixels))
             # return stack(frame_inpixel(self.pixels, None))
 
-        return textbox(stack(self.pixels), style=frame)
+        return textbox(stack(self.pixels), linestyle=frame)
 
         # # underline first and last row
         # top = underline(' ' * self._pixel_size * (self.shape[1] + 1))

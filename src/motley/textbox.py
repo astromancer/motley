@@ -19,8 +19,8 @@ from recipes.iter import where
 from recipes.string import justify
 from recipes.functionals import echo0
 from recipes.dicts import AttrReadItem
-from recipes.misc import duplicate_if_scalar
-from recipes.language.unicode import subscripts
+from recipes.utils import duplicate_if_scalar
+from recipes.unicode import subscripts
 from recipes.string.string import delete
 
 # relative
@@ -299,7 +299,7 @@ LINESTYLE_TO_EFFECTS = {
 }
 
 
-BOLD_OK = {'heavy', 'thick', 'bold', 'b'}
+BOLD_OK = {'heavy', 'thick', 'bold', 'b', '*'}
 
 
 def resolve_line(char):
@@ -345,12 +345,7 @@ def resolve_linestyle(linestyle):
 EMPTY = object()
 
 
-@api.Synonyms({
-    # 'bold|heavy':           'thick',
-    # 'effect[s]':               'color',
-    '(line|edge)_?colou?rs?':   'linecolor',
-    # 'linecolor':            'linecolor'
-})
+@api.Synonyms({'((line|edge)_?)?colou?rs?':   'linecolor'}, mode='regex')
 def textbox(text,
             linestyle='_',
             linecolor=None,
@@ -410,19 +405,21 @@ def textbox(text,
         # corners explicitly given
         corners = CORNERS.get(corners, corners)
 
-    init_kws = dict(
+    return TextBox.for_style(linestyle)(
         fg=fg, bg=bg,
         left=left, top=top,
         right=right, bottom=bottom,
         corners=corners,
         linecolor=LINESTYLE_TO_EFFECTS.get(linestyle, linecolor)
-    )
+    )(text, **kws)
+
     # return (TextBox.for_style(linestyle), init_kws)
-    return TextBox.for_style(linestyle)(**init_kws)(text, **kws)
+    # return TextBox.for_style(linestyle)(**init_kws)(text, **kws)
 
 #  TODO: AsciiTextBox
 # def effect_as_string(effects):
   #
+
 
 # null singleton for default identification
 TOP = LEFT = object()
@@ -439,10 +436,9 @@ class TextBox:
 
     @classmethod
     def for_style(cls, style):
-        for kls in iter_subclasses(cls):
-            if style in kls.linestyles:
-                return kls
-        return TextBox
+        return next((kls for kls in iter_subclasses(cls)
+                     if style in kls.linestyles),
+                    TextBox)
 
     def __init__(self,
                  #  fmt='{text: {align}{width}|{fg}/{bg}}'
@@ -451,7 +447,7 @@ class TextBox:
                  right=LEFT,
                  bottom=TOP,
                  corners='╭╮╰╯',
-                 linecolor=(),
+                 linecolors=(),
                  fg=None,
                  bg=None,
                  **kws):
@@ -471,15 +467,15 @@ class TextBox:
         self.bottom = top if bottom is TOP else bottom
         self.corners = corners
         self.style = AttrReadItem(fg=(fg or ''),
-                          bg=(bg or ''))
+                                  bg=(bg or ''))
         # get line colors for edges
-        linecolor = kws.get('color', linecolor) or ''
-        self.linecolor = list(duplicate_if_scalar(linecolor, 4))
+        linecolors = kws.get('color', linecolors) or ''
+        self.linecolors = list(duplicate_if_scalar(linecolors, 4))
 
         # stylize(line_fmt_template,
-        self.line_fmt = (apply(left, self.linecolor[2]) +
+        self.line_fmt = (apply(left, self.linecolors[2]) +
                          apply('{line: {align}{width}}', **self.style) +
-                         apply(right, self.linecolor[3]))
+                         apply(right, self.linecolors[3]))
 
     def __call__(self, text='', width=None, height=None, align='^'):
         text = str(text)
@@ -494,26 +490,27 @@ class TextBox:
         return '\n'.join(self._iter_lines(text, width, align))
 
     # line_formats = {
-    #     'top': '{{corners[0]}{{top}:{top}^{width}}{corners[1]}:|{linecolor[0]}}',
-    #     'bot': '{{corners[2]}{{bot}:{bot}^{width}}{corners[3]}:|{linecolor[1]}}',
-    #     'mid': '{left:|{linecolor[2]}}{line: {align}{width}}{right:|{linecolor[3]}}'
+    #     'top': '{{corners[0]}{{top}:{top}^{width}}{corners[1]}:|{linecolors[0]}}',
+    #     'bot': '{{corners[2]}{{bot}:{bot}^{width}}{corners[3]}:|{linecolors[1]}}',
+    #     'mid': '{left:|{linecolors[2]}}{line: {align}{width}}{right:|{linecolors[3]}}'
     # }
 
     def _iter_lines(self, text, width, align, **kws):
         width = width - len(self.left) - len(self.right)
         kws = {**locals(), **vars(self), **kws}
         kws.pop('self')
-        # lc0, lc1 = self.linecolor
-        yield make_hline(self.top, self.corners[:2], width, self.linecolor[0])
+        # lc0, lc1 = self.linecolors
+        yield make_hline(self.top, self.corners[:2], width, self.linecolors[0])
 
         for line in text.splitlines():
             yield format(self.line_fmt, **kws, line=line)
 
         if self.bottom:
-            yield make_hline(self.bottom, self.corners[2:], width, self.linecolor[1])
+            yield make_hline(self.bottom, self.corners[2:], width, self.linecolors[1])
 
 
 def make_hline(characters, corners, width, color):
+    # draw horizontal frame edge
     n = sum((len(s) - unicodedata.combining(s) for s in characters))
     line = (characters * (width // n) + characters[:(width % n)]).join(corners)
     return apply(backspaced(line), color)
@@ -525,14 +522,14 @@ class AnsiBox(TextBox):
     def __init__(self, **kws):
         super().__init__(**{**dict(top=' ',
                                    corners=CORNERS[' '],
-                                   linecolor=('_', '_', '', '')),
+                                   linecolors=('_', '_', '', '')),
                             **kws})
-        self.linecolor[0] = (self.linecolor[0], self.style.fg)
+        self.linecolors[0] = (self.linecolors[0], self.style.fg)
 
     def _iter_lines(self, text, width, align, **kws):
         itr = super()._iter_lines(text, width, align)
         itr = mit.islice_extended(itr)
-        upto = text.count('\n') + bool(self.top)  # - bool(self.bottom)  # - 1
+        upto = text.count('\n') + bool(self.top) - bool(self.bottom)  # - 1
         yield from itr[:upto]
         yield underline(next(itr))
 
@@ -545,7 +542,7 @@ class GridFrameBox(AnsiBox):
                                    bottom=' 𝇁',     # ' ╵',
                                    left='▕',
                                    right='▏',
-                                   linecolor='_',       # underline
+                                   linecolors='_',       # underline
                                    corners=(' ', '𝇁', '', '')),
                             **kws})
 
@@ -560,6 +557,7 @@ class GridFrameBox(AnsiBox):
 class TickedGridFrame(GridFrameBox):
     def __init__(self, xticks=(), yticks=(), **kws):
         super().__init__(**kws)
+
         for xy, ticks in zip('xy', (xticks, yticks)):
             ticks = [str(subscripts.get(t, t)) for t in ticks]
             w = max(map(ansi.length_seen, ticks)) if ticks else 0
