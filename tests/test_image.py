@@ -9,7 +9,10 @@ from motley.textbox import TextBox
 from loguru import logger
 
 from recipes.testing import Expected, mock
-# logger.enable('motley')
+
+
+logger.enable('motley.image')
+logger.enable('recipes')
 
 # r = np.random.randint(0, 256, (10, 10))
 # # im = AnsiImage(r, frame=True).render()
@@ -66,7 +69,7 @@ test_display = Expected(display_with_overlay)({
 
 if __name__ == "__main__":
     #  
-    for frame in ('E', ):   #'_', '-', '=', '+', '['):
+    for frame in ('_', '-', '=', '+', '['):# ('E', ):   #
         print(frame * 80)
         
         img = display_with_overlay(frame, )
@@ -75,3 +78,4 @@ if __name__ == "__main__":
         print(img)
         print(repr(img))
         print('*' * 80)
+        # break

@@ -1,7 +1,10 @@
 
+# third-party
 from loguru import logger
+
+# local
 from recipes.testing import Expected, mock
-from motley.formatter import formatter, Formatter
+from motley.formatter import Formatter, formatter
 
 logger.enable('motley')
 
@@ -93,7 +96,7 @@ test_std_fmt = exp({
                                      '>>>>>>>>>>>right'))},
 
     **{('{:02X}{:02X}{:02X}{:02X}', *[192, 168, 0, 1]):
-       'C0A80001'}
+        'C0A80001'}
 })
 
 # width = 5

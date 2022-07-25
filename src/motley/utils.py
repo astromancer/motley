@@ -13,24 +13,57 @@ from collections import abc
 import numpy as np
 
 # local
+from recipes import op
 from recipes.misc import get_terminal_size
-from recipes.string import hstack as string_hstack
+from recipes.oo.singleton import Singleton
+from recipes.string import hstack as string_hstack, justify as string_justify
+from recipes.dicts import invert
 
 # relative
-from . import codes, ansi
+from . import ansi, codes, formatter
 
 
 ALIGNMENT_MAP = {'r': '>',
                  'l': '<',
                  'c': '^'}
-
+ALIGNMENT_MAP_INV = invert(ALIGNMENT_MAP)
 
 def resolve_alignment(align):
     # resolve_align  # alignment.resolve() # alignment[align]
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
     if align not in '<^>':
-        raise ValueError('Unrecognised alignment {!r}'.format(align))
+        raise ValueError(f'Unrecognised alignment {align!r}.')
     return align
+
+
+@ftl.lru_cache()
+def resolve_width(width):
+    return get_terminal_size()[0] if width is None else int(width)
+
+
+# @ftl.lru_cache()
+def get_width(text, count_hidden=False):
+    """
+    For string `text` get the maximal line width in number of characters.
+
+    Parameters
+    ----------
+    text: str
+        String, possibly multi-line, possibly containing non-display characters
+        such as ANSI colour codes.
+    count_hidden: bool
+        Whether to count the "hidden" non-display characters such as ANSI escape
+        codes.  If True, this function returns the same result as you would get
+        from `len(text)`. If False, the length of the string as it would appear
+        on screen when printed is returned.
+
+    Returns
+    -------
+    int
+    """
+    length = ftl.partial(ansi.length, raw=count_hidden)
+    # deal with cell elements that contain newlines
+    return max(map(length, text.split(os.linesep)))
 
 
 def hstack(tables, spacing=0, offsets=0):
@@ -58,8 +91,6 @@ def hstack(tables, spacing=0, offsets=0):
     if len(tables) == 1:
         return str(tables[0])
 
-    #
-
     if offsets == ():
         n0, *n_header_lines = op.AttrVector('n_head_lines', default=0)(tables)
         offsets = [n0, *np.subtract(n0, n_header_lines)]
@@ -76,7 +107,10 @@ def _width_first(lines):
     return ansi.length_seen(lines[0])
 
 
-class _Vstack:
+class _vstack(Singleton):  # NOTE this could just be a module...
+    """
+    Singleton helper class for vertical text stacking.
+    """
 
     def __call__(self, tables, strip_titles=True, strip_headers=True, spacing=1):
         """
@@ -89,13 +123,17 @@ class _Vstack:
         strip_titles: bool
             Strip titles from all but the first table in the sequence.
         strip_headers: bool
-            Strip column group headings and column headings from all but the first
-            table in the sequence.
+            Strip column group headings and column headings from all but the
+            first table in the sequence.
 
         Returns
         -------
         str
         """
+        return self.stack(tables, strip_titles, strip_headers, spacing)
+
+    def stack(self, tables, strip_titles=True, strip_headers=True, spacing=1):
+
         # check that all tables have same number of columns
         ncols = [tbl.n_cols + tbl.n_head_col for tbl in tables]
         if len(set(ncols)) != 1:
@@ -137,22 +175,22 @@ class _Vstack:
 
         return varies
 
-    @staticmethod
-    def from_dict(groups, strip_titles=False, braces=False, vspace=1):
+    def from_dict(self, groups, strip_titles=False, braces=False, vspace=1):
         """
         Pretty print dict of table objects.
 
         Parameters
         ----------
         groups : dict
-            Values are `motley.table.Table`. Keys will be used to make the title. 
+            Values are `motley.table.Table`. Keys will be used to make the
+            title.
         strip_titles : bool
             Whether to strip each table's title.
         braces : bool, optional
-            Whether to use curly braces to mark the groups by their keys, by default
-            False
+            Whether to use curly braces to mark the groups by their keys, by
+            default False.
         vspace : int, optional
-            Vertical space between tables in number of newlines, by default 1
+            Vertical space between tables in number of newlines, by default 1.
 
         Returns
         -------
@@ -166,7 +204,7 @@ class _Vstack:
         stack = [groups[key] for key in ordered_keys]
 
         if not braces:
-            return vstack(stack, strip_titles, True, vspace)
+            return self.stack(stack, strip_titles, True, vspace)
 
         braces = ''
         for i, gid in enumerate(ordered_keys):
@@ -177,13 +215,17 @@ class _Vstack:
 
         # vertical offset
         offsets = stack[0].n_head_lines
-        return string_hstack([vstack(stack, strip_titles, True, vspace),
+        return string_hstack([self.stack(stack, strip_titles, True, vspace),
                               braces],
                              spacing=1, offsets=offsets)
 
 
 # singleton
-vstack = _Vstack()
+vstack = _vstack()
+
+
+def justify(text, align='<', width=None):
+    return string_justify(text, align, width, ansi.length_seen, formatter.format)
 
 
 def make_group_title(keys):
@@ -197,16 +239,48 @@ def make_group_title(keys):
 
 
 def hbrace(size, name=''):
-    #
-    if size < 3:
-        return '← ' + str(name) + '\n' * (int(size) // 2)
+    """
+    Create a multi-line right brace.
+
+    Parameters🏴‍☠️
+    ----------
+    size : int
+        Number of lines to span.
+    name : str, optional
+        Text to place on the right and vertically in center, by default ''.
+
+    Examples
+    --------
+    >>> hbrace(5, 'Text!')
+    '⎫\n'
+    '⎪\n'
+    '⎬ Text!\n'
+    '⎪\n'
+    '⎭\n'
+
+    Returns
+    -------
+    str
+        [description]
+
+
+    """
+    # TODO: recipes.strings.unicode.long_brace ???
+    # Various other brace styles
+    
+    if size == 1:
+        return '} ' + str(name)
+
+    if size == 2:
+        return ('⎱\n'       # Upper right or lower left curly bracket section
+                '⎰')        # Upper left or lower right curly bracket section
 
     d, r = divmod(int(size) - 3, 2)
-    return '\n'.join(['⎫'] +
-                     ['⎪'] * d +
-                     ['⎬ {!s}'.format(name)] +
-                     ['⎪'] * (d + r) +
-                     ['⎭'])
+    return '\n'.join((r'⎫',             # 23AB: Right curly bracket upper hook
+                      *'⎪' * d,         # 23AA Curly bracket extension
+                      f'⎬ {name}',      # 23AC Right curly bracket middle piece
+                      *'⎪' * (d + r),
+                      r'⎭'))            # 23AD Right curly bracket lower hook
 
 
 def overlay(text, background='', align='^', width=None):
@@ -284,31 +358,6 @@ def overlay(text, background='', align='^', width=None):
      # right aligned
     if align == '>':
         return background[:-text_size] + text
-
-
-# @ftl.lru_cache()
-def get_width(text, count_hidden=False):
-    """
-    For string `text` get the maximal line width in number of characters.
-
-    Parameters
-    ----------
-    text: str
-        String, possibly multi-line, possibly containing non-display characters
-        such as ANSI colour codes.
-    count_hidden: bool
-        Whether to count the "hidden" non-display characters such as ANSI escape
-        codes.  If True, this function returns the same result as you would get
-        from `len(text)`. If False, the length of the string as it would appear
-        on screen when printed is returned.
-
-    Returns
-    -------
-    int
-    """
-    length = ftl.partial(ansi.length, raw=count_hidden)
-    # deal with cell elements that contain newlines
-    return max(map(length, text.split(os.linesep)))
 
 
 def banner(text, width=None, align='^', fg=None, bg=None, **kws):

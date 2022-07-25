@@ -2,25 +2,26 @@
 Output tables to Excel spreadsheet
 """
 
+# std
+import contextlib
+from collections import defaultdict
 
 # third-party
 import numpy as np
 import more_itertools as mit
+from loguru import logger
 from openpyxl import Workbook
 from openpyxl.cell import Cell
 from openpyxl.styles import Alignment, Border, Font, Side
 
 # local
 from recipes import op
-from recipes.iter import where
+from recipes.iter import where, cofilter
 from recipes.string import sub
+from recipes.dicts import AttrDict
 from recipes.lists import where_duplicate
-from recipes.misc import duplicate_if_scalar
+from recipes.utils import duplicate_if_scalar
 from recipes.string.brackets import BracketParser
-from loguru import logger
-# relative
-
-from collections import defaultdict
 
 
 ALIGNMENT_MAP = {'>': 'right',
@@ -105,6 +106,8 @@ class XlsxWriter:
 
     # -------------------------------------------------------------------- #
     # styling defaults
+
+    # TODO: move to config
     font = dict(name='Ubuntu Mono',
                 size=10)
     font_data = Font(**font)
@@ -135,10 +138,13 @@ class XlsxWriter:
         border=Border(bottom=rule, top=rule)
     )
 
-    def __init__(self, table, widths={}, align={},
-                 merge_unduplicate=('headers'),
-                 header_formatter=str):
+    def __init__(self, table, widths=None, align=None,
+                 merge_unduplicate=('headers'), header_formatter=str):
 
+        if widths is None:
+            widths = {}
+        if align is None:
+            align = {}
         self.table = table
         self.workbook = Workbook()
         self.worksheet = self.workbook.active
@@ -171,14 +177,14 @@ class XlsxWriter:
                          for f in fmt.split(';'))) + padding
         else:
             # width = table.col_width[i]
-            try:
+            with contextlib.suppress(TypeError):
                 width = max(map(len, table.data[:, i]))
-            except TypeError:
-                pass
 
-        header = table.col_headers[i]
-        repeats = list(table.col_headers).count(header)
-        hwidth = ((len(header) + 3 * padding) / repeats)
+        hwidth = 0
+        if table.col_headers:
+            header = table.col_headers[i]
+            repeats = list(table.col_headers).count(header)
+            hwidth = ((len(header) + 3 * padding) / repeats)
         #                        fudge factor for font
         # logger.debug(i, header, hwidth, fwidth, width, minimum)
         return max(hwidth, width, minimum)
@@ -201,18 +207,23 @@ class XlsxWriter:
 
         for r, row in enumerate(table.data, r0):
             self.append(row)
+
         r = ws._current_row
 
         # -------------------------------------------------------------------- #
         # Totals
-        if table.totals:
-            totals = [''] * ncols
+        totals = [''] * ncols
+        # HACK
+        if isinstance(table, AttrDict):
             for i in table.totals:
                 totals[i] = f'=SUM({(c:=i+65):c}{r0}:{c:c}{r})'
+        elif table.totals:
+            for t, i in zip(*cofilter(None, table.totals, range(ncols))):
+                totals[i] = f'=SUM({(c:=i+65):c}{r0}:{c:c}{r})'
 
+        if any(totals):
             #           data    row style
             self.append(totals, **self.style_totals)
-
             r += 1
 
         # -------------------------------------------------------------------- #
@@ -257,6 +268,7 @@ class XlsxWriter:
         sheet.append(list(data))
         r = sheet._current_row
         cells = sheet[f'A{r}:{len(data) + 64:c}{r}'][0]
+
         # if self.alignments:
         for i, cell in enumerate(cells):
             if align := self.alignments.get(i):
@@ -352,8 +364,7 @@ class XlsxWriter:
                 unique = zip(set(range(len(row))) - set(sum(duplicate, [])))
             to_merge = []
             for idx in (*duplicate, *unique):
-                idx = set(idx) - set(merged[r])
-                if idx:
+                if idx := (set(idx) - set(merged[r])):
                     to_merge.append(idx)
 
             logger.debug('Row {}: to_merge {}', r, to_merge)
