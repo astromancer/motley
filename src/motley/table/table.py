@@ -54,7 +54,7 @@ OVERLINE = '‾'  # U+203E
 HEADER_ALIGN = '^'
 # MAX_WIDTH = None  # TODO
 # MAX_LINES = None  # TODO
-
+KNOWN_COMPACT_KEYS = {'header', 'ignore', 'footnote'}
 
 # TODO: dynamical set attributes like title/headers/nrs/data/totals
 # TODO: unit tests!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -577,7 +577,7 @@ class Table(LoggingMixin):
     # title_fmt = cell_fmt.join(_default_border * 2)
 
     _foot_fmt = '{}: {}'
-    
+
     _nrs_header = '#'
 
     def resolve_input(self, obj, n_cols=None, what='\r', converter=None,
@@ -789,14 +789,29 @@ class Table(LoggingMixin):
         minimalist : bool
             Represent floating point numbers with least possible number of
             significant digits
-        compact : bool or int
+        compact : bool or int or str #TODO or list of str ??
             Suppress columns for which data values are all identical and print
-            them in a inset table below the title. If an integer is passed,
-            this specifies the number of columns to use in the inset table.
-            If boolean, the number of columns will be decided automatically
-            to optimize space.
-            Compact representation will only be applied if the table contains
-            more  than one row of data.
+            them in a compact fashion as key-value pairs. There are various
+            styles of doing this, depending on the type and value of this
+            parameter. Compact representation will only be applied if the table
+            contains more than one row of data.
+            If str: {'drop', 'footnote', 'header'}
+                'drop': Compactable columns are simply ignored.
+                'footnote': Compactable columns are printed as key value pairs 
+                            in the table footnote.
+                'header': Key-value pairs printed in the table header below the
+                          table title and above the column headers. An integer
+                          value can be used to control the number of columns to
+                          use for this compact inset table. By default the
+                          maximum allowable number of columns given the
+                          available space is used (see below).
+            If int: 
+                This specifies the number of columns to use in the inset table.
+            If True, the default:
+                The number of columns will be decided automatically to optimize
+                space.
+        core_columns: tuple or list
+            Names of the column's that cannot be removed by compacting.
 
         ignore_keys : sequence of str
             if dictionary is passed as data, optionally specify the keys that
@@ -894,7 +909,7 @@ class Table(LoggingMixin):
 
         # from recipes import pprint
         # pprint.mapping(locals(), ignore=['self'])
-        
+
         # special case: dict
         if isinstance(data, dict):
             data, kws = self._data_from_dict(data, **kws)
@@ -1032,28 +1047,24 @@ class Table(LoggingMixin):
         self.cell_white = int(cell_whitespace)
 
         # compactify
-        if not isinstance(compact, (numbers.Integral, str)):
-            raise ValueError(f'`compact` parameter should be bool, int, or str, '
-                             f'not {type(compact)}.')
-
-        self.compact = (False, compact)[self.compactable()]
         self.compact_items = {}
         self._idx_shown = np.arange(n_cols + hrh + hrn)
 
-        if compact:
-            self.compactify()
-            # requested_width = requested_width[shown]
-            # borders = borders[shown]
+        self._compact_footer = False
+        self.compact, dont_remove = self._resolve_compact(compact)
 
-        # get column widths (without borders)
-        # these are either those input by the user, or determined from the
+        if self.compact:
+            self.compactify(dont_remove)
+            # requested_width = requested_width[shown]
+
+        # Next get column widths (without borders)
+        # These are either those input by the user, or determined from the
         # content of the columns
-        # FIXME: too-wide columns in compact table!!
         self.col_widths = get_column_widths(self.pre_table) + self.cell_white
 
-        # next block needs to happen after `self.col_widths` assigned
+        # NOTE: next block needs to happen after `self.col_widths` assigned
         self._compact_table = None
-        has_compact = (compact != 'drop' and self.compact_items)
+        has_compact = self.has_compact()
         if has_compact:
             # this is an instance of `Table`!!
             self._compact_table = self._get_compact_table()
@@ -1228,7 +1239,7 @@ class Table(LoggingMixin):
 
     @property
     def idx_compact(self):
-        n = self.data.shape[1] + self.n_head_cols
+        n = self.data.shape[1] + self.n_head_col
         return np.setdiff1d(np.arange(n), self._idx_shown)
 
     def empty_like(self, n_rows, **kws):
@@ -1255,6 +1266,32 @@ class Table(LoggingMixin):
         col_groups = itt.zip_longest(*col_groups, fillvalue='')
         # FIXME: too wide col_groups should truncate
         return list(col_groups)
+
+    def _resolve_compact(self, compact):
+        dont_remove = ()
+        if self.allow_compact():
+            if isinstance(compact, abc.MutableMapping):
+                if (nope := set(compact.keys()) - KNOWN_COMPACT_KEYS):
+                    raise ValueError(f'Invalid keys: {nope} in `compact` dict.')
+
+                dont_remove = compact.pop('ignore', ())
+
+                for key in ('header', 'headnotes', 'footnotes'):
+                    if key in compact:
+                        compact = compact[key]
+                        self._compact_footer = key.startswith('foot')
+                        break
+
+            elif not isinstance(compact, (numbers.Integral, str)):
+                raise ValueError(f'`compact` parameter should be bool, int, '
+                                 f'str, dictnot {type(compact)}.')
+
+        elif compact:
+            wrn.warn(f'Ignoring request to compact with {compact!r}, since '
+                     'table has no column headers, or insufficient data.')
+            compact = False
+
+        return compact, dont_remove
 
     def get_default_formatter(self, col_idx, precision, short, data):
         """
@@ -1425,7 +1462,7 @@ class Table(LoggingMixin):
         # return col_widths  # , width_max
 
     def compactable_columns(self, ignore=()):
-        if not self.compactable():
+        if not self.allow_compact():
             return ()
 
         idx_same, = np.where(np.all(self.data == self.data[0], 0))
@@ -1437,9 +1474,28 @@ class Table(LoggingMixin):
         idx_same = np.setdiff1d(idx_same, idx_ign)  # + self.n_head_col
         return idx_same
 
-    def compactable(self):
+    def allow_compact(self):
         """Check if table allows compact representation"""
         return (len(self.data) > 1) and self.has_col_head
+
+    def has_compact(self):
+        return bool((self.compact != 'drop') and self.compact_items)
+
+    def _get_ctable_widths(self):
+        if not self.has_compact():
+            return
+
+        return (
+            # Widths for key-val pairs:                            + 3 for ' = '
+            np.char.str_len(list(self.compact_items.items())).sum(1) + 3,
+            # this is the width of the compacted columns
+            self.lcb[self.idx_compact] + self.cell_white
+        )
+
+    def _min_ctable_width(self):
+        if self.has_compact():
+            return sum(self._get_ctable_widths()).max()
+        return 0
 
     def compactify(self, ignore=()):
         """
@@ -1462,18 +1518,14 @@ class Table(LoggingMixin):
         data = self.data
         if (len(data) <= 1) or not self.has_col_head:
             self.logger.warning(
-                    'Requested `compact` representation, but no column headers '
-                    'provided. Ignoring.'
-                )
+                'Requested `compact` representation, but no column headers '
+                'provided. Ignoring.'
+            )
             return ...
 
         # if a total is asked for on a column, make sure we don't suppress it
-        totals = None
-        if self.has_totals:
-            totals = self.pre_table[-1]
-
-        idx_same = self.compactable_columns(ignore)
-        idx_squash = np.setdiff1d(idx_same, np.atleast_1d(totals).nonzero()[0])
+        idx_squash = np.setdiff1d(self.compactable_columns(ignore),
+                                  np.nonzero(self.totals)[0])
         val_squash = self.data[0, idx_squash]
         idx_show = np.setdiff1d(range(self.data.shape[1]), idx_squash)
         idx_show = np.r_[np.arange(self.n_head_col), idx_show + self.n_head_col]
@@ -1530,8 +1582,12 @@ class Table(LoggingMixin):
         """get table width"""
         if indices is None:
             indices = self._idx_shown
-        # this excludes the lhs starting border
-        return (self.col_widths[indices] + self.lcb[indices]).sum()
+
+        # NOTE this excludes the lhs starting border
+        width = (self.col_widths[indices] + self.lcb[indices]).sum()
+        if self._compact_table:
+            return max(width, self._compact_table.get_width() + 1)
+        return max(width, self._min_ctable_width())
 
     def get_alignment(self, align, data, default_factory):
         """get alignment array for columns"""
@@ -1742,16 +1798,14 @@ class Table(LoggingMixin):
     def format(self):
         """Construct the table and return it as as one long str"""
 
-        table_width = sum(self.col_widths[self._idx_shown] +
-                          self.lcb[self._idx_shown])
-
-        # table_width = sum(self.col_widths) + self.lcb.sum()
-
         # TODO: truncation
         # here data should be an array of str objects.  To do the
         # truncation, we first need to strip
         #  the control characters, truncate, then re-apply control....
         #  ??? OR is there a better way??
+
+        table_width = sum(self.col_widths[self._idx_shown] +
+                          self.lcb[self._idx_shown])
 
         if table_width > self.max_width:
             # if self.handle_too_wide == 'split':
@@ -1781,10 +1835,7 @@ class Table(LoggingMixin):
 
         # location of current split
         splix = self.n_head_col
-        while True:
-            if splix == self._idx_shown[-1]:
-                break
-
+        while splix != self._idx_shown[-1]:
             # cumulative total column width
             ctcw = np.cumsum(widths[splix:])
             # indices of columns beyond max allowed width
@@ -1810,6 +1861,7 @@ class Table(LoggingMixin):
             if endix is None:
                 break
             splix = endix
+
         return split_tables
 
     def _build(self, column_indices=None, continued=False):
@@ -1828,24 +1880,18 @@ class Table(LoggingMixin):
         list of str (table rows)
         """
         table = []
-        # make a list of column indices from which table will be built
-        # seg = slice(c0, c1)
-        # n_head_col = self.has_row_head + self.has_row_nrs
-        # idx_head = np.arange(n_head_col)  # always print header columns
-        # idx_cols = np.arange(self.data.shape[1])[seg] + n_head_col
-        # idx_cols = np.hstack([idx_head, idx_cols])
         if column_indices is None:
             column_indices = self._idx_shown
 
         idx = column_indices
         part_table = self.pre_table[:, idx]
         table_width = self.get_width(idx)
-        lcb = len(self._default_border)
 
         if self.frame:
             # top line
             # NOTE: ANSI overline not supported (linux terminal) use underlined
             #  whitespace
+            lcb = len(self._default_border)
             top_line = _underline(' ' * (table_width + lcb))
             table.append(top_line)
 
@@ -1857,14 +1903,20 @@ class Table(LoggingMixin):
         # FIXME: problems with too-wide column
 
         # compacted columns
-        if self.compact_items and self.compact not in {'drop', 'footnotes'}:
-            if isinstance(self.compact, (numbers.Integral)):
-                # display compacted columns in single row
-                compact_rows = self.build_long_line(str(self._compact_table),
-                                                    table_width,
-                                                    props=['underline'])
+        if self.compact and self.compact_items:
+            # if isinstance(self.compact, (numbers.Integral)):
+            # display compacted columns in single row
+            compact_rows = self.build_long_line(str(self._compact_table),
+                                                table_width,
+                                                props=['underline'])
 
-                table.append(compact_rows)
+            table.append(compact_rows)
+
+        if table_width > (cw := (self.col_widths[idx] + self.lcb[idx]).sum()):
+            # This means the compact table is wider than the main table and we
+            # need to add some space to the columns
+            self.col_widths[self._idx_shown] += apportion(table_width - cw,
+                                                          len(self._idx_shown))
 
         # column groups
         for groups in self.col_groups:
@@ -1875,7 +1927,7 @@ class Table(LoggingMixin):
             # FIXME: this code below in `format cell??`
             for i, j in enumerate(idx):
                 name = groups[j]
-                w = self.col_widths[j] + (j-i)  # + self.lcb[j]
+                w = self.col_widths[j] + self.lcb[j]  # + (j-i)  #
                 if name == lbl:  # still within the same group
                     gw += w
                 else:  # reached a new group. write previous group
@@ -1923,15 +1975,17 @@ class Table(LoggingMixin):
         for i in unused:
             table.extend(self.insert_lines(self.insert[i], table_width))
 
-        # add compact columns as footnotes if requested
-        if self.compact_items and (self.compact == 'footnotes'):
-            self.footnotes.extend(
-                map(self._foot_fmt.format, *zip(*self.compact_items.items()))
-            )
-
         # finally add any footnotes present
         if len(self.footnotes):
             table.extend(self.footnotes)
+
+        # add compact columns as footnotes if requested
+        if self._compact_footer and self.compact_items:
+            # format footnote table
+            compact_rows = self.build_long_line(str(self._compact_table),
+                                                table_width,
+                                                props=['underline'])
+            table.append(compact_rows)
 
         return table
 
@@ -1941,7 +1995,7 @@ class Table(LoggingMixin):
 
         compact_items = list(self.compact_items.items())
         n_comp = len(self.compact_items)  # number of compacted columns
-        table_width = self.get_width()  # excludes lhs border
+        # table_width = self.get_width()  # excludes lhs border
 
         if (n_cols is None) and (self.compact is not True):
             n_cols = self.compact
@@ -1953,26 +2007,9 @@ class Table(LoggingMixin):
             ((n_cols is not None) and (n_cols > n_comp))
         )
         if auto_ncols:
-            # decide how many columns the inset table will have
-            # n_cols chosen to be as large as possible given table width
-            # this leads to most compact repr       # + 3 for ' = '
-            _2widths = lengths(compact_items).sum(1) + 3
-            # this is the width of the compacted columns
-            extra = len(self._default_border) + self.cell_white
-            trials = range(table_width // _2widths.max(), round(n_comp / 2) + 1)
-            trials = [*trials, n_comp]
-            for i, n_cols in enumerate(trials):
-                nc, lo = divmod(n_comp, n_cols)
-                pad = (nc + bool(lo)) * n_cols - n_comp
-                ccw = np.hstack([_2widths, [0] * pad]
-                                ).reshape(n_cols, -1).max(1)
-
-                # + extra for column border + cell_white
-                if sum(ccw + extra) > table_width:
-                    if np.any(ccw == 0):
-                        continue
-                    n_cols = trials[i - 1]
-                    break
+            # decide how many columns for compact key-value table
+            n_cols = self._auto_ncols()
+            self.logger.debug('Auto ncols: {}', n_cols)
 
         # n items per column
         self.compact = n_cols = int(n_cols)
@@ -1994,7 +2031,7 @@ class Table(LoggingMixin):
         # justified spacing
         if justify:
             deltas = justified_delta(widths.reshape(-1, 2).sum(1) + 3,
-                                     table_width)
+                                     self.get_width())
             if np.any(widths[1::2] <= -deltas):
                 wrn.warn('Column justification lead to zero/negative column '
                          'widths. Ignoring!')
@@ -2003,6 +2040,39 @@ class Table(LoggingMixin):
 
         return Table(data, col_borders=col_borders, frame=False, width=widths,
                      too_wide=False)
+
+    def _auto_ncols(self):
+        # decide how many columns the inset table will have
+        # n_cols chosen to be as large as possible given table width
+        # this leads to most compact repr
+        self.logger.debug('Computing optimal number of columns for compact table.')
+        # number of compacted columns
+        n_comp = len(self.compact_items)
+        table_width = self.get_width()  # excludes lhs border
+
+        # Widths for key-val pairs:                                + 3 for ' = '
+        _2widths, extra = self._get_ctable_widths()
+
+        if max(_2widths + extra) >= table_width:
+            return 1
+
+        extra = 3  # len(self._default_border) + self.cell_white
+        trials = range(table_width // _2widths.max(), round(n_comp / 2) + 1)
+        trials = [*trials, n_comp]
+        for i, n_cols in enumerate(trials):
+            nc, lo = divmod(n_comp, n_cols)
+            pad = (nc + bool(lo)) * n_cols - n_comp
+            ccw = np.hstack([_2widths, [0] * pad]
+                            ).reshape(n_cols, -1).max(1)
+
+            # + extra for column border + cell_white
+            if sum(ccw + extra) > table_width:
+                if np.any(ccw == 0):
+                    continue
+                n_cols = trials[i - 1]
+                break
+
+        return n_cols
 
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes
