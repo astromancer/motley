@@ -9,33 +9,31 @@ import numbers
 import warnings as wrn
 import functools as ftl
 import itertools as itt
+from collections import abc
 from dataclasses import dataclass
-from _string import formatter_parser
 from shutil import get_terminal_size
-from collections import abc, defaultdict
-from typing import Callable, Collection, OrderedDict, Union
+from typing import Callable, Collection, Union
 
 # third-party
 import numpy as np
-from loguru import logger
 
 # local
-from pyxides.grouping import Groups
-from pyxides.vectorize import AttrTabulate
+from recipes.dicts import merge
 from recipes.lists import where
-from recipes.iter import cofilter
 from recipes.sets import OrderedSet
 from recipes.functionals import echo0
 from recipes import api, pprint as ppr
 from recipes.logging import LoggingMixin
-from recipes.dicts import AttrDict, merge
 from recipes.decorators import raises as bork
-from recipes.string.brackets import BracketParser
 
 # relative
-from .. import ansi, codes, formatters
-from ..utils import get_width, make_group_title, resolve_alignment
+from .. import ansi, codes
 from .xlsx import XlsxWriter
+from .column import resolve_columns, get_default_align
+from ..utils import resolve_alignment
+from .utils import *
+from .utils import _underline
+from ..formatter import stylize
 
 
 # if __name__ == '__main__':
@@ -81,339 +79,14 @@ KNOWN_COMPACT_KEYS = {'header', 'ignore', 'footnote'}
 #     def _underline(s):
 #         return codes.apply(s, 'underline')
 
+# TODO maybe
+# class ConsoleWriter:
+#     """Write to terminal"""
+
 
 # defines vectorized length
 lengths = np.vectorize(len, [int])
 
-
-def is_astropy_table(obj):
-    parents = [f'{kls.__module__}.{kls.__name__}' for kls in type(obj).mro()]
-    return 'astropy.table.table.Table' in parents
-
-
-def _convert_astropy_table(tbl):
-    data, heads, units = [], [], []
-    for name, col in tbl.columns.items():
-        data.append(col.data)
-        units.append(col.unit)
-        heads.append(name)
-
-    if set(units) == {None}:
-        units = None
-
-    return data, heads, units
-
-
-def str2tup(keys):
-    if isinstance(keys, str):
-        keys = (keys, )  # a tuple
-    return keys
-
-
-def apportion(width, n):
-    # divide space as equally as possible between `n` columns
-    space = np.array([width // n] * n)
-    space[:(width % n)] += 1
-    return space
-
-
-def justified_delta(widths, total):
-    extra = apportion(total, len(widths)) - widths
-    wide = (extra < 0)
-    if all(wide):
-        return np.zeros_like(widths)
-
-    if any(wide):
-        # some columns are wider than average
-        narrow = ~wide
-        delta = -sum(extra[wide])
-        extra[narrow] -= apportion(delta, narrow.sum())
-        extra[wide] = 0
-    return extra
-
-# def justify_widths(widths, table_width):
-#     widths[1::2] += justified_delta(widths.reshape(-1, 2).sum(1) + 3,
-#                                         table_width)
-
-
-def get_column_widths(data, col_headers=None, count_hidden=False):
-    """data should be array-like of str types"""
-
-    # data widths
-    w = np.vectorize(get_width, [int])(data, count_hidden).max(axis=0)
-
-    if col_headers is not None:
-        assert len(col_headers) == data.shape[1]
-        hw = np.vectorize(get_width, [int])(col_headers, count_hidden)
-        w = np.max([w, hw], 0)
-
-    return w
-
-
-def resolve_width(width, data, headers=None):
-    """
-
-    Parameters
-    ----------
-    width
-    data
-    headers
-
-    Returns
-    -------
-
-    """
-    if width is None:
-        # each column will be as wide as the widest data element it contains
-        return get_column_widths(data, headers)
-
-    width = np.array(width, int)
-    if width.size == 1:
-        # The table will be made exactly this wide
-        w = get_column_widths(data, headers)
-        if w.sum() > width:
-            # TODO
-            raise NotImplementedError('will need to drop columns')
-        else:
-            # TODO
-            raise NotImplementedError('Add more space to each column until '
-                                      'width is reached')
-
-    if width.size == data.shape[1]:
-        # each column width specified
-        return width
-
-    raise ValueError(f'Cannot interpret width {width!r} for data of shape '
-                     f'{data.shape}')
-
-
-def _ensure_list(obj):
-    return [] if obj is None else list(obj)
-
-
-def _ensure_dict(obj, n_cols, what='\r'):
-    if not obj:  # in (None, False, ()):
-        return {}
-
-    if isinstance(obj, abc.Mapping):
-        return obj
-
-    # convert obj to dict
-    if not isinstance(obj, abc.Collection):
-        raise TypeError(f'Cannot resolve {type(obj)} to columns of table.')
-
-    n_obj = len(obj)
-    if n_obj == 1:
-        # duplicate for all columns
-        return dict(enumerate(itt.repeat(obj, n_cols)))
-
-    if n_obj == n_cols:
-        return dict(enumerate(obj))
-
-    raise ValueError(
-        f'Incorrect number of {what} specifiers ({n_obj}) for table with '
-        f'{n_cols} columns.'
-    )
-
-
-def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
-                  default_factory=None, args=(), **kws):
-    """
-    Resolve user input for parameters that need to have either
-        - the same number of elements as there are columns in the table or
-        - need `aliases` to be provided.
-
-    Parameters
-    ----------
-    obj
-    data
-    aliases
-    what
-    converter: callable
-    raises
-    default_factory
-    args
-    kws
-
-    Returns
-    -------
-
-    """
-    out = OrderedDict(_ensure_dict(obj, n_cols, what))
-
-    # set action raise / warn
-    emit = bork(ValueError) if raises else logger.warning
-
-    aliases = list(aliases or ())
-    if not aliases and (str in set(map(type, out.keys()))):
-        emit(f'Could not assign {what} due to missing `column_headers`')
-
-    # convert all keys in input dict to int
-    if aliases:
-        # copy dict to prevent RuntimeError on pop
-        if ... in out:
-            out.move_to_end(..., last=False)
-
-        for key in list(out.keys()):
-            item = out.pop(key)
-            for i in resolve_column(key, aliases, n_cols, what, emit):
-                out[i] = item
-
-    # convert values
-    if converter:
-        for i, item in out.items():
-            out[i] = converter(item)
-
-    # get default obj
-    if default_factory:
-        # idx_no_fmt =
-        for i in set(range(n_cols)) - set(out.keys()):
-            out[i] = default_factory(i, *args, **kws)
-
-    return out
-
-
-@ftl.singledispatch
-def resolve_column(key, aliases, ncols, what, emit):
-    emit(f'Key {key!r} for {what} has invalid type {type(key)} for '
-         f'mapping to a column of the table.')
-    return key
-    # emit(f'Could not interpret {what}. Key {key!r} not in any '
-    #      f'`column_headers` or `column_groups`.')
-
-
-@resolve_column.register(numbers.Integral)
-def _(key, aliases, ncols, what, emit):
-    # wrap negative indices
-    if key < 0:
-        return [key + ncols]
-
-    if key > ncols:
-        emit(f'Key {key!r} for {what} greater than number of columns '
-             f'in table ({ncols}).')
-    return [key]
-
-
-@resolve_column.register(str)
-def _(key, aliases, ncols, what, emit):
-    for _aliases in aliases:
-        if key in _aliases:
-            # at this point key should be int
-            return where(_aliases, key)
-
-    emit(f'Could not interpret {what}. Key {key!r} not in any '
-         f'`column_headers` or `column_groups`: {aliases}.')
-
-
-@resolve_column.register(type(...))
-def _(key, aliases, ncols, what, emit):
-    return list(range(ncols))
-
-
-def get_default_align(data, default='<'):
-    #
-    types = set(map(type, data))
-    if len(types) != 1:
-        return default
-
-    # all data in this column is of the same type
-    type_ = types.pop()
-    if issubclass(type_, numbers.Integral):
-        return '>'
-
-    if issubclass(type_, numbers.Real):
-        return '.'
-
-
-def resolve_borders(col_borders, where, ncols, frame):
-    """
-    Get the list of characters that will make up the column borders
-
-    Parameters
-    ----------
-    col_borders
-    where
-    ncols
-    frame
-
-    Returns
-    -------
-
-    """
-    borders = np.empty(ncols, dtype='<U10')
-    # NOTE: these include the upcoming
-
-    if where in (None, ...):
-        # default is col borders everywhere
-        where = np.arange(ncols)  #
-
-    wcb = np.asarray(where)
-    # number / header borders can be explicitly indexed by -1j / -2j
-    l = (wcb == -1j) | (wcb == -2j)
-    if l.any():
-        cx = l.sum()
-        wcb[~l] += cx
-        wcb[l] = range(cx)
-        with wrn.catch_warnings():
-            wrn.filterwarnings('ignore', category=np.ComplexWarning)
-            wcb = wcb.astype(int)
-
-    if col_borders is not None:
-        borders[wcb] = col_borders
-
-    # final column border
-    borders[-1] = BORDER if frame else ''
-
-    return borders
-
-# ---------------------------------------------------------------------------- #
-
-# fallback0 = fallback(0, ValueError)
-
-
-def rindex0(s, char):
-    try:
-        return s.rindex(char)
-    except ValueError as e:
-        return 0
-
-
-def _underline(s):
-    """
-    Underline last line of multi-line string, or entire string if single line
-    """
-    idx = rindex0(s, '\n')
-    return s[:idx] + codes.apply(s[idx:], 'underline')
-
-
-def highlight(array, condition, props, formatter=ppr.numeric, **kws):
-    out = np.vectorize(formatter, (str, ))(array, **kws)
-    if condition in (all, ...):
-        condition = np.ones_like(array, bool)
-
-    if condition.any():
-        tmp = np.vectorize(codes.apply, (str, ))(out[condition], props)
-        dtype = f'U{max(tmp.itemsize, out.itemsize) / 4}'
-        out = out.astype(dtype)
-        out[condition] = tmp
-    return out
-
-
-def truncate(item, width):
-    # TODO: if DOTS more than 1 chr long
-    cw = 0  # cumulative width
-    s = ''
-    for parts in ansi.parse(str(item), named=True):
-        *pre, text, end = parts
-        cw += len(text)
-        if cw > width:
-            s += ''.join((*pre, text[:width - 1], DOTS, end))
-            break
-
-        s += ''.join(parts)
-    return s
-
-# ---------------------------------------------------------------------------- #
 
 # from pydantic.dataclasses import dataclass # for validation!
 
@@ -435,44 +108,6 @@ class Title:
 
     def __str__(self):
         return self.fmt(self.text, align=self.align)
-
-
-def resolve_converters(converters):
-    type_convert = ftl.singledispatch(echo0)
-    type_convert.register(np.ma.core.MaskedConstant, formatters.Masked())
-
-    if callable(converters):
-        return type_convert, defaultdict(lambda: converters)
-
-    assert isinstance(converters, abc.Mapping)
-    col_converters = {}  # defaultdict(lambda: echo0)
-
-    for type_or_col, fun in converters.items():
-        if isinstance(type_or_col, type):
-            type_convert.register(type_or_col)(fun)
-        elif isinstance(type_or_col, str):
-            col_converters[type_or_col] = fun
-        else:
-            raise ValueError(
-                f'Converter key {type_or_col!r} (for function {fun}) is '
-                f'invalid. Converters should be specified as type-callable '
-                f'pairs for type specific conversion, or str-callable pairs '
-                f'for column conversion.'
-            )
-
-    return type_convert, col_converters
-
-
-# def convert_column(data, type_convert, func):
-#     return map(func or type_convert, data)
-#     if func:
-#         return map(func, data)
-#     return data
-
-
-def wrap_strings(column):
-    for cell in column:
-        yield [cell] if isinstance(cell, str) else cell
 
 
 def split_columns(column, split_nested_types):
@@ -589,11 +224,11 @@ class Table(LoggingMixin):
         return resolve_input(obj, n_cols, aliases, what, converter, raises,
                              default_factory, args, **kws)
 
-    def resolve_column(self, key, n_cols, what, raises=True):
+    def resolve_columns(self, key, n_cols, what, raises=True):
         aliases = (self._col_headers, *self.col_groups[::-1])
         # set action raise / warn
-        return resolve_column(key, aliases, n_cols, what,
-                              bork(ValueError) if raises else wrn.warn)
+        return resolve_columns(key, aliases, n_cols, what,
+                               bork(ValueError) if raises else wrn.warn)
 
     @classmethod
     def from_columns(cls, *columns, **kws):
@@ -644,6 +279,37 @@ class Table(LoggingMixin):
                       'col_groups': zip(*col_groups),
                       **kws}
 
+    # def _resolve_data_and_headers(self, data, **kws):
+    #     # special case: dict
+    #     if isinstance(data, dict):
+    #         data, kws = self._data_from_dict(data, **kws)
+
+    #     if isinstance(data, set):
+    #         data = list(data)
+
+    #     # special case: astropy.table.Table
+    #     if is_astropy_table(data):
+    #         data, col_headers_, units_ = _convert_astropy_table(data)
+
+    #         # replace defaults with those from the astropy table
+    #         if col_headers is None:
+    #             col_headers = col_headers_
+    #         if units is None:
+    #             units = units_
+
+    #     # convert to object array
+    #     data = np.asanyarray(data, 'O')
+
+    #     # check data shape / dimensions
+    #     dim = data.ndim
+    #     if dim == 1:
+    #         data = data[None]
+
+    #     if dim > 2:
+    #         raise ValueError(f'Only 2D data can be tabled! Data is {dim}D')
+
+    #     return data,
+
     # TODO: test mappings!!
 
     # mappings for terse kws
@@ -660,7 +326,8 @@ class Table(LoggingMixin):
             # 'n(um(be)?)?r?_?rows':                  'row_nrs',
             'n((um(ber)?)|r?)_?rows':               'row_nrs',
             'totals?':                              'totals',
-            'c(ol(umn)?)?_?borders?':               'col_borders'
+            'c(ol(umn)?)?_?borders?':               'col_borders',
+            'vlines':                               'col_borders'
         },
             *({f'{p}head(er)?s?':                   f'{rc}_headers',
                f'{p}head(er)?_prop(erties)?':       f'{rc}_head_props'}
@@ -672,6 +339,7 @@ class Table(LoggingMixin):
     )
     def __init__(self,
                  data,
+                 *args,
                  # TODO: THIS API:
                  # Table(data,  # first argument is usually data. Can be array, list, dict
                  # # to init from  map of columns use `from_columns` constructor
@@ -687,6 +355,7 @@ class Table(LoggingMixin):
                  # TODO: '{"DATA TABLE":^s|Bg_/c}'
                  # Force colours to be specified this way to reduce the number of
                  # parameters here!
+
                  title=None,
                  title_align='center',
                  title_props=('underline', ),
@@ -698,8 +367,8 @@ class Table(LoggingMixin):
                  units=None,
                  col_borders=_default_border,
 
-                 vlines=None,
                  col_groups=None,
+                 core_columns=(),
 
                  # RowTitles(names, fmt='{:< |bB}', nrs=True)
                  #
@@ -763,23 +432,23 @@ class Table(LoggingMixin):
             Column header properties.  If `row_nrs` is True,
             the row_head_props will be applied to the number column as well
             TODO: OR a sequence of these, one for each column
-
-        col_borders : str,
-            TODO: dict: {0j: '|', 3: '!', 6: '…'}
-            character(s) used as column separator. ie column rhs borders
-            The table border can be toggled using the `frame' parameter
         col_groups: array-like
             sequence of strings giving column group names. If given, a group
             header will be added above the columns sharing a common group name.
 
-        hlines, vlines: array-like, Ellipsis, optional
-            Sequence with row line numbers below which a solid border will be
+
+        col_borders : str, dict
+            Character(s) used as column separator. ie column rhs borders
+            The table border can be toggled using the `frame' parameter
+
+
+
+        hlines: array-like, Ellipsis, optional
+            Sequence with row line numbers / below which a solid border will be
             drawn.
             Default is after column headers, and after last data line and after
             totals line if any.
             If an `Ellipsis` ... is given, draw a line after every row.
-            TODO: dict: {0j: '|', 3: '!', 6: '…'}
-            Similarly for `vlines`.
 
         row_nrs : bool, int
            Number the rows. Start from this number if int
@@ -789,7 +458,7 @@ class Table(LoggingMixin):
         minimalist : bool
             Represent floating point numbers with least possible number of
             significant digits
-        compact : bool or int or str #TODO or list of str ??
+        compact : bool or int or str #TODO or list of str ?? or dict
             Suppress columns for which data values are all identical and print
             them in a compact fashion as key-value pairs. There are various
             styles of doing this, depending on the type and value of this
@@ -810,7 +479,7 @@ class Table(LoggingMixin):
             If True, the default:
                 The number of columns will be decided automatically to optimize
                 space.
-        core_columns: tuple or list
+        #TODO: core_columns: tuple or list
             Names of the column's that cannot be removed by compacting.
 
         ignore_keys : sequence of str
@@ -920,7 +589,7 @@ class Table(LoggingMixin):
 
         # special case: astropy.table.Table
         if is_astropy_table(data):
-            data, col_headers_, units_ = _convert_astropy_table(data)
+            data, col_headers_, units_ = convert_astropy_table(data)
 
             # replace defaults with those from the astropy table
             if col_headers is None:
@@ -960,8 +629,8 @@ class Table(LoggingMixin):
             self.col_data_types.append(set(map(type, col[use])))
 
         # headers
-        self.col_headers = _ensure_list(col_headers)
-        self.row_headers = _ensure_list(row_headers)
+        self.col_headers = ensure_list(col_headers)
+        self.row_headers = ensure_list(row_headers)
         self.frame = bool(frame)
         self.has_row_nrs = hrn = (row_nrs is not False)
         self.has_row_head = hrh = (row_headers is not None)
@@ -1017,8 +686,9 @@ class Table(LoggingMixin):
             data = np.vstack((data, totals))
 
         # col borders (rhs)
-        self.borders = resolve_borders(col_borders, vlines,
-                                       n_cols + self.n_head_col, frame)
+        borders = self.resolve_input(col_borders, n_cols + 1, 'border', str,
+                                     default_factory=lambda: self._default_border)
+        self.borders = np.array(list(borders.values()))
         self.lcb = lengths(self.borders)
 
         # TODO: row / col sort here
@@ -1202,7 +872,7 @@ class Table(LoggingMixin):
 
     @col_headers.setter
     def col_headers(self, headers):
-        headers = _ensure_list(headers)
+        headers = ensure_list(headers)
         if headers:
             assert len(headers) == self.data.shape[1]
         self._col_headers = headers
@@ -1213,7 +883,7 @@ class Table(LoggingMixin):
 
     @row_headers.setter
     def row_headers(self, headers):
-        headers = _ensure_list(headers)
+        headers = ensure_list(headers)
         if headers:
             assert len(headers) == self.data.shape[0]
         self._row_headers = headers
@@ -1622,7 +1292,7 @@ class Table(LoggingMixin):
 
         totals = np.ma.masked_all(n_cols, 'O')
         for i in col_indices:
-            for i in self.resolve_column(i, n_cols, 'totals'):
+            for i in self.resolve_columns(i, n_cols, 'totals'):
                 if totals[i]:
                     continue
 
@@ -1989,7 +1659,7 @@ class Table(LoggingMixin):
 
         return table
 
-    def _get_compact_table(self, n_cols=None, justify=True):
+    def _get_compact_table(self, n_cols=None, justify=True, equals='= '):
 
         # TODO: should print units here also!
 
@@ -2021,7 +1691,7 @@ class Table(LoggingMixin):
 
         # todo row_head_props=self.col_head_props,
         # self._default_border #  u"\u22EE" VERTICAL ELLIPSIS
-        col_borders = ['= ', self._default_border] * n_cols
+        col_borders = [equals, self._default_border] * n_cols
         col_borders[-1] = ''
 
         # widths of actual columns
@@ -2200,626 +1870,3 @@ class Table(LoggingMixin):
     def to_xlsx(self, path=None, widths=(), **kws):
         # may need to set widths manually eg. for cells that contain formulae
         return XlsxWriter(self, widths, **kws).write(path)
-
-
-class ConsoleWriter:
-    """Write to terminal"""
-
-
-CONVERTERS = {  # TODO: MOVE TO formatter
-    's': str,
-    'r': repr,
-    'a': ascii,
-    'o': ord,
-    'c': chr,
-    't': str.title,
-    'q': lambda _: repr(str(_))
-}
-
-SENTINEL = object()
-
-
-class Column(LoggingMixin):
-    # count = itt.count()
-
-    def __init__(self, data, title=None, unit=None, fmt=None, align='.',
-                 width=None, total=False, group=None):
-        # TODO: fmt = '{:. 14.5?f|gBi_/teal}'
-        self.title = title
-        self.data = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
-        assert self.data.ndim == 1
-
-        self.unit = unit
-        self.width = width
-        self.align = resolve_alignment(align)
-        self.total = self.data.sum() if total else None
-        self.dtypes = set(map(type, np.ma.compressed(self.data)))
-
-        if fmt is None:
-            fmt = self.get_default_formatter()
-
-        assert callable(fmt)
-        self.fmt = fmt
-
-    # def resolve_formatter(self, fmt):
-    #     ''
-
-    def get_default_formatter(self, precision, short):
-        """
-        Selects an appropriate formatter based on the types (classes) of objects 
-        in the column
-
-
-        Parameters
-        ----------
-        precision
-        short
-
-        Returns
-        -------
-
-        """
-
-        # dispatching formatters on the cell object type  not a good option here
-        # due to formatting subtleties
-        if len(self.dtypes) != 1:
-            return ppr.PrettyPrinter(
-                precision=precision, minimalist=short).pformat
-
-        # If we are here, all data in this column is of the same type
-        # NB since it's a set, don't try types_[0]
-        type_, = self.dtypes
-
-        if issubclass(type_, str):  # NOTE -  this includes np.str_!
-            return echo0  # this function just passes back the original object
-
-        # If dtype not a number, convert to str (this uses g formatting)
-        if not issubclass(type_, numbers.Real):
-            return str
-
-        # If we are here, the dtype is numeric
-        sign = ''
-        if issubclass(type_, numbers.Integral):
-            # If dtype int, use 0 precision by default
-            precision = 0
-        else:
-            # if short and (self.align[col_idx] in '<>'):
-            #     right_pad = precision + 1
-            sign = (' ' * int(np.any(self.data < 0)))
-
-        return ftl.partial(ppr.decimal,
-                           precision=precision,
-                           short=short,
-                           sign=sign,
-                           thousands=' ')
-
-    def formatted(self, fmt, masked_str='--', flags=None):
-        # Todo: formatting for row_headers...
-        if fmt is None:
-            # null format means convert to str, need everything in array
-            # to be str to prevent errors downstream
-            # (data is dtype='O')
-            fmt = str
-
-        use = (np.logical_not(self.data.mask)
-               if np.ma.is_masked(self.data) else ...)
-        values = self.data[use]
-        # wrap the formatting in try, except since it's usually not
-        # critical that it works and getting some info is better than none
-        try:
-            result = np.vectorize(fmt, (str, ))(values)
-        except Exception as err:
-            title = self.title or '\b'
-            wrn.warn(f'Could not format column {title} with {fmt!r} '
-                     f'due to the following exception:\n{err}')
-            # try convert to str
-            result = np.vectorize(str, (str, ))(values)
-
-        # special alignment on '.' for float columns
-        if self.align == '.':
-            result = ppr.align_dot(result)
-
-        # concatenate data with flags
-        # flags = flags.get(i)
-        if flags:
-            try:
-                result = np.char.add(result, list(map(str, flags)))
-            except Exception as err:
-                wrn.warn(f'Could not append flags to formatted data for '
-                         f'column due to the following '
-                         f'exception:\n{err}')
-
-        return result
-
-
-class AttrColumn(Column):
-    def __init__(self, title=None, unit=None, convert=None, fmt=None, align='<',
-                 total=False):
-
-        # TODO: fmt = '. 14.5?f|gBi_/teal'
-        self.title = title
-        # self.data = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
-        # assert self.data.ndim == 1
-        # self.dtypes = set(map(type, np.ma.compressed(self.data)))
-        self.unit = unit
-        self.align = resolve_alignment(align)
-        # self.width = width
-        self.total = bool(total)  # self.data.sum() if total else None
-
-        # if fmt is None:
-        #     fmt = self.get_default_formatter()
-        # assert callable(fmt)
-        self.convert = convert
-        self.fmt = fmt
-
-
-class AttrTable:
-    """
-    Helper class for tabulating attributes (or properties) of lists of objects.
-    Attributes of the objects in the container are mapped to the columns of the
-    table.
-    """
-
-    _unit_parser = BracketParser('[]')
-
-    # @classmethod
-    # def from_dict(cls, mapping=(), **kws):
-
-    @classmethod
-    def from_columns(cls, mapping=(), **kws):
-        mapping = dict(mapping)
-        option_names = ('headers', 'units', 'converters', 'formatters', 'alignment')
-        options = [{}, {}, {}, {}]
-        col_keys = 'title', 'unit', 'convert', 'fmt', 'align'
-        totals = []
-        for attr, col in mapping.items():
-            if col in (..., ''):
-                continue
-
-            # assert isinstance(col, AttrColumn)
-
-            # populate the headers, units, converters, formatters
-            col_opts = cofilter(None, map(vars(col).get, col_keys), options)
-            for val, opt in zip(*col_opts):
-                opt[attr] = val
-
-            if col.total:
-                totals.append(attr)
-
-        kws.update(zip(option_names, options))
-        return cls(mapping.keys(), totals=totals, **kws)
-
-    @classmethod
-    def from_spec(cls, mapping=(), **kws):
-        attrs, *opts = cls._resolve_opts(mapping)
-        parsed_option_names = ('headers', 'units', 'converters', 'formatters')
-        for key, opt in zip(parsed_option_names, opts):
-            if key in kws:
-                kws[key].update(opt)
-            else:
-                kws[key] = opt
-        return cls(attrs, **kws)
-
-    @classmethod
-    def _resolve_opts(cls, mapping):
-        # headers, units, converters, formatters
-        info = {}, {}, {}, {}
-        attrs = []
-        for attr, *options in cls._iter_from_spec(dict(mapping)):
-            # header, unit, converter, formatter
-            for i, opt in enumerate(options):
-                if opt:
-                    info[i][attr] = opt
-
-            attrs.append(attr)
-        # attrs, headers, units, converters, formatters
-        return attrs, *info
-
-    @classmethod
-    def _iter_from_spec(cls, mapping):
-        for header, spec in mapping.items():
-            # parse units
-            if spec in (..., ''):
-                #     attr, header, unit, converter, formatter
-                yield header, None, None, None, None
-                continue
-
-            unit = cls._unit_parser.match(header)
-            if unit:
-                unit = unit.full
-                header = header.replace(unit, '').strip()
-
-            attr, converter, spec = cls._parse_spec(spec)
-            yield (attr or header), header, unit, converter, spec
-
-    @staticmethod
-    def _parse_spec(spec):
-        # literal_text, field_name, format_spec, conversion
-        items = next(formatter_parser(f'{{{spec}}}'))
-        _, attr, format_spec, conversion = items
-        # if items is None:
-        #     raise NotImplementedError()
-        # formatter._parse_spec()
-        converter = CONVERTERS.get(conversion.lower()) if conversion else None
-        return attr, converter, format_spec
-
-    # @classmethod
-    # def from_spec(cls, name_spec_list):
-    #     value, spec, effects = formatter._parse_spec('', name_spec_list)
-    #     for key, col in columns.items():
-
-    def __get__(self, instance, kls):
-        if instance:  # lookup from instance
-            self.parent = instance
-        return self  # lookup from class
-
-    def _ensure_dict(self, obj):
-        if obj is None:
-            return dict()
-
-        if isinstance(obj, dict):
-            return obj
-
-        return dict(zip(self.attrs, obj))
-
-    def __new__(cls, attrs, *args, **kws):
-        if isinstance(attrs, dict):
-            return cls.from_dict(attrs)
-        return super().__new__(cls)
-
-    def __init__(self,
-                 attrs,
-                 headers=None,
-                 converters=None,
-                 formatters=None,
-                 alignment=(),
-                 units=None,
-                 header_levels=None,
-                 #  header_formatter=str, # NOPE. breaks column alias resolution
-                 show_groups=True,
-                 totals=(),
-                 **kws):
-
-        # set default options for table
-        self.kws = {**dict(row_nrs=0,
-                           precision=5,
-                           minimalist=True,
-                           compact=True),
-                    **kws}
-
-        self.title = self.kws.get('title')
-        self.attrs = list(attrs)
-        self.converters = self._ensure_dict(converters)
-        self.formatters = self._ensure_dict(formatters)
-        self.header_levels = self._ensure_dict(header_levels)
-        # self.header_formatter = header_formatter
-        self.headers = self._ensure_dict(headers)
-        self.units = self._ensure_dict(units)
-        totals = [totals] if isinstance(totals, str) else list(totals)
-        self.totals = [self.get_header(attr) for attr in totals]
-        self.align = alignment
-        self.show_groups = bool(show_groups)
-
-        # self.headers = dict(zip(attrs, self.get_headers(attrs)))
-        # self._heads = {a: self.get_header_parts(a) for a in self.attrs}
-        self.parent = None
-
-    def __call__(self, attrs=None, container=None, **kws):
-        """
-        Print the table of attributes for this container as a table.
-
-        Parameters
-        ----------
-        attrs: array_like, optional
-            Attributes of the instance that will be printed in the table.
-            defaults to the list given upon initialization of the class.
-        **kws:
-            Keyword arguments passed directly to the `motley.table.Table`
-            constructor.
-
-        Returns
-        -------
-
-        """
-
-        container = container or self.parent
-        if isinstance(self.parent, AttrTabulate):
-            return self.get_table(self.parent, attrs, **kws)
-
-        if isinstance(self.parent, Groups):
-            return self.get_tables(self.parent, attrs, **kws)
-
-        raise TypeError(f'Cannot tabulate object of type {type(self.parent)}.')
-
-    def get_defaults(self, attrs, which):
-        defaults = getattr(self, which)
-        out = {}
-        for attr in attrs:
-            header = self.get_header(attr)
-            use = defaults.get(attr, defaults.get(header, SENTINEL))
-            if use is not SENTINEL:
-                out[header] = use
-        return out
-
-    @ftl.lru_cache()
-    def _get_header_parts(self, attr):
-        base, *rest = attr.split('.')
-        group = base if rest else ''
-        if attr in self.headers:
-            header = self.headers[attr]
-        else:
-            header = rest[-1] if group else base
-
-        #
-        unit = self.units.get(attr, '')
-
-        # shift levels if needed
-        level = self.header_levels.get(base, 0)
-        if level:
-            group, header, unit = [''] * level + [group, header, unit][:-level]
-            return group, header, f'[{unit}]'
-
-        return group, header, unit
-
-    def get_group(self, attr):
-        return self._get_header_parts(attr)[0]
-
-    def get_header(self, attr):
-        return self._get_header_parts(attr)[1]
-
-    def get_unit(self, attr):
-        return self._get_header_parts(attr)[-1]
-
-    def get_groups(self, attrs=None):
-        if self.show_groups:
-            return [self.get_group(_) for _ in (attrs or self.attrs)]
-        return []
-
-    def get_headers(self, obj=None):
-        # ok = set(map(self.headers.get, kws)) - {None}
-        if obj is None:
-            obj = self.attrs
-
-        if isinstance(obj, dict):
-            return {self.get_header(k): v for k, v in obj.items()}
-
-        elif isinstance(obj, abc.Collection):
-            return list(map(self.get_header, obj))
-
-        raise TypeError(f'Cannot get headers from object type: {type(obj)}.'
-                        ' Expected a Collection.')
-
-    def get_units(self, attrs=None):
-        return [self.get_unit(_) for _ in (attrs or self.attrs)]
-
-    def add_attr(self, attr, column_header=None, formatter=None):
-
-        if not isinstance(attr, str):
-            raise ValueError('Attribute must be a str')
-
-        # block below will bork with empty containers
-        # obj = self.parent[0]
-        # if not hasattr(obj, attr):
-        #     raise ValueError('%r is not a valid attribute of object of '
-        #                      'type %r' % (attr, obj.__class__.__name__))
-
-        # avoid duplication
-        if attr not in self.attrs:
-            self.attrs.append(attr)
-
-        if column_header is not None:
-            self.headers[attr] = column_header
-
-        if formatter is not None:
-            self.formatters[column_header] = formatter
-
-    def get_data(self, container=None, attrs=None, converters=None):
-        if container is None:
-            container = self.parent
-
-        if len(container) == 0:
-            return []
-
-        if attrs is None:
-            attrs = self.attrs
-
-        values = container.attrs(*attrs)
-        converters = converters or self.converters
-        if not converters:
-            return values
-
-        tmp = dict(zip(attrs, zip(*values)))
-        for key, convert in converters.items():
-            if key in tmp:
-                tmp[key] = list(map(convert, tmp[key]))
-
-        return list(zip(*tmp.values()))
-
-    def to_xlsx(self, path, widths={}, **kws):
-
-        data = np.array(self.get_data(self.parent.sort_by('t.t0')))
-
-        # FIXME: better to use get_table here, but then we need to keep
-        # table.data as objects not convert to str prematurely!
-        # PLEASE FIX THIS UNGODLY HACK
-
-        col_headers = self.get_headers()
-        tmp = AttrDict(
-            data=data,
-            col_groups=self.get_groups(),
-            col_headers=col_headers,
-            _col_headers=col_headers,
-            units=self.get_units(),
-            formatters={self.attrs.index(k): v for k, v in self.formatters.items()},
-            totals=[col_headers.index(t) for t in self.totals],
-            title=self.title,
-            shape=(len(data), len(self.attrs))
-        )
-
-        # may need to set widths manually eg. for cells that contain formulae
-        # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
-        # table = tmp()
-        tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
-        #  self.align,
-        return XlsxWriter(tmp, widths, **kws).write(path)
-
-    def get_table(self, container, attrs=None, **kws):
-        """
-        Keyword arguments passed directly to the `motley.table.Table`
-        constructor.
-
-        Returns
-        -------
-        motley.table.Table
-        """
-
-        if not isinstance(container, AttrTabulate):
-            raise TypeError(f'Object of type {type(container)} does not '
-                            f'support vectorized attribute lookup on items.')
-
-        if len(container) == 0:
-            return Table(['Empty'])
-
-        if attrs is None:
-            attrs = self.attrs
-
-        return Table(container.attrs(*attrs),
-                     **{**self.kws,  # defaults
-                        **{**dict(title=container.__class__.__name__,
-                                  col_headers=self.get_headers(attrs),
-                                  col_groups=self.get_groups(attrs),
-                                  totals=self.totals),
-                           **{key: self.get_defaults(attrs, key)
-                              for key in ('units', 'formatters')},
-                           **kws},  # keywords from user input
-                        })
-
-    def prepare(self, groups, **kws):
-        # class GroupedTables:
-
-        attrs = OrderedSet(self.attrs)
-        attrs_grouped_by = ()
-        compactable = set()
-        # multiple = (len(self) > 1)
-        if len(groups) > 1:
-            if groups.group_id != ((), {}):
-                keys, _ = groups.group_id
-                key_types = {gid: list(grp)
-                             for gid, grp in itt.groupby(keys, type)}
-                attrs_grouped_by = key_types.get(str, ())
-                attrs -= set(attrs_grouped_by)
-
-            # check which columns are compactable
-            attrs_varies = {key for key in attrs if groups.varies_by(key)}
-            compactable = attrs - attrs_varies
-            attrs -= compactable
-
-        # column headers
-        headers = self.get_headers(attrs)
-
-        # handle column totals
-        totals = self.totals  # kws.pop('totals', self.kws['totals'])
-        if totals:
-            # don't print totals for columns used for grouping since they will
-            # not be displayed
-            totals = list(set(totals) - set(attrs_grouped_by) - compactable)
-            # convert totals to numeric since we remove column headers for
-            # lower tables
-            totals = list(map(headers.index, self.get_headers(totals)))
-
-        units = self.units  # kws.pop('units', self.units)
-        if units:
-            want_units = set(units.keys())
-            nope = set(units.keys()) - set(headers)
-            units = {k: units[k] for k in (want_units - nope - compactable)}
-
-        return attrs, compactable, headers, units, totals
-
-    def get_tables(self, groups, attrs=None, titled=True, filler_text='EMPTY',
-                   grand_total=None, **kws):
-        """
-        Get a dictionary of tables for the containers in `groups`. This method
-        assists working with groups of tables.
-        """
-
-        title = kws.pop('title', self.__class__.__name__)
-        ncc = kws.pop('compact', False)  # number of columns in compact part
-        kws['compact'] = False
-
-        if titled is True:
-            titled = make_group_title
-
-        attrs, compactable, headers, units, totals = self.prepare(groups)
-        grand_total = grand_total or totals
-
-        tables = {}
-        empty = []
-        footnotes = OrderedSet()
-        for i, (gid, group) in enumerate(groups.items()):
-            if group is None:
-                empty.append(gid)
-                continue
-
-            # get table
-            if titled:
-                # FIXME: problem with dynamically formatted group title.
-                # Table wants to know width at runtime....
-                title = titled(gid)
-                # title = titled(i, gid, kws.get('title_props'))
-
-            tables[gid] = tbl = self.get_table(group, attrs,
-                                               title=title,
-                                               totals=totals,
-                                               units=units,
-                                               # compact=False,
-                                               **kws)
-
-            # only first table gets title / headers
-            if not titled:
-                kws['title'] = None
-            if not headers:
-                kws['col_headers'] = kws['col_groups'] = None
-
-            # only last table gets footnote
-            footnotes |= set(tbl.footnotes)
-            tbl.footnotes = []
-
-        # grand total
-        if grand_total:
-            # gt = np.ma.sum(op.AttrVector('totals').filter(tables.values()), 0)
-            grand = np.ma.sum([_.totals for _ in tables.values()
-                               if _.totals is not None], 0)
-
-            tables['totals'] = tbl = Table(grand,
-                                           title='Totals:',
-                                           title_align='<',
-                                           formatters=tbl.formatters,
-                                           row_headers='',
-                                           masked='')
-
-        #
-        tbl.footnotes = list(footnotes)
-
-        # deal with null matches
-        first = next(iter(tables.values()))
-        if len(empty):
-            filler = [''] * first.shape[1]
-            filler[1] = filler_text
-            filler = Table([filler])
-            for gid in empty:
-                tables[gid] = filler
-
-        # HACK compact repr
-        if ncc and first.compactable():
-            first.compact = ncc
-            first.compact_items = dict(zip(
-                list(compactable),
-                self.get_table(first[:1], compactable,
-                               chead=None, cgroups=None,
-                               row_nrs=False, **kws).pre_table[0]
-            ))
-            first._compact_table = first._get_compact_table()
-
-        # put empty tables at the end
-        # tables.update(empty)
-        return tables

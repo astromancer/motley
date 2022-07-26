@@ -20,7 +20,6 @@ from .string import Str
 from .codes import bg, fg
 from .formatter import format, format_partial, formatter, stylize
 
-
 #
 logger.disable('motley')
 
