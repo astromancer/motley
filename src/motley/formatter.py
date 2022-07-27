@@ -1,15 +1,34 @@
 """
 Stylizing strings with extended format directives.
+
+Examples
+--------
+Drop in replacement for built in formatter
+>>> motley.format('{}', 'Hello world')
+
+With additional colour specs: "|" marks the start of foreground colours or 
+effects, "/" for the background.
+>>> motley.format('{hello:s|rBI_/k}', hello='Hello world')
+'\x1b[;31;1;3;4;40mHello world\x1b[0m'
+
+>>> motley.stylize('{hello!r:s|red,B,I,_/k}')
+'\x1b[;31;1;3;4;40m{hello!r:s}\x1b[0m'
+
+>>> motley.format('{:|aquamarine,I/lightgrey}', 'Hello world')
+'\x1b[;38;2;127;255;212;3;48;2;211;211;211mHello world\x1b[0m'
+
+>>> motley.stylize('{:s|(122,0,0),B,I,_/k}', 'Hello world')
+'\x1b[;38;2;122;0;0;1;3;4;40m{Hello world:s}\x1b[0m'
+
 """
 
 
 # std
-import traceback as tb
 import re
 import functools as ftl
+from textwrap import dedent
 from collections import UserString
 from string import Formatter as BuiltinFormatter
-from textwrap import dedent
 
 # third-party
 from loguru import logger
@@ -17,21 +36,14 @@ from loguru import logger
 # local
 from recipes.regex import unflag
 from recipes.string.brackets import BracketParser, csplit, level
-from recipes.oo.temp import temporary
 
 # relative
 from . import ansi, codes
 from .codes.resolve import InvalidEffect
 
 
-# f"{String('Hello world'):rBI_/k}"
-# f"{String('Hello world'):red,B,I,_/k}"
-# String.format("{'Hello world':aquamarine,I/lightgrey}")
-# String("{'Hello world':[122,0,0],B,I,_/k}")
-
-
-DEFAULT_FG_SWITCH = '|'
-DEFAULT_BG_SWITCH = '/'
+DEFAULT_FG_MARK = '|'
+DEFAULT_BG_MARK = '/'
 
 
 # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
@@ -48,11 +60,13 @@ DEFAULT_BG_SWITCH = '/'
 
 
 @ftl.lru_cache()
-def get_spec_regex(fg_switch=DEFAULT_FG_SWITCH, bg_switch=DEFAULT_BG_SWITCH):
-    # NOTE: THIS REGEX DOESN'T capture the fact that you cannot have fill without align
+def get_spec_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
+    # WARNING: THIS REGEX DOESN'T capture the fact that you cannot have fill
+    # without align, so is not a perfect reimplementation of the builtin
     return re.compile(rf'''(?x)
         (?P<spec>
-            (?P<fill>[^{fg_switch}]?)  # FIXME
+            (?P<fill>[^{fg_mark}]?)  
+                # FIXME: this means you can't fill with fg_mark character
             (?P<align>[<>=^]?)
             (?P<sign>[+\- ]?)
             (?P<width>\d*)
@@ -61,14 +75,14 @@ def get_spec_regex(fg_switch=DEFAULT_FG_SWITCH, bg_switch=DEFAULT_BG_SWITCH):
             (?P<type>[bcdeEfFgGnosxX%]?)
         )
         (?P<effects>
-            ({re.escape(fg_switch)}(?P<fg>[ \w,_\-\[\]\(\) ]*))?
-            ({re.escape(bg_switch)}(?P<bg>[ \w,\[\]\(\) ]*))?
+            ({re.escape(fg_mark)}(?P<fg>[ \w,_\-\[\]\(\) ]*))?
+            ({re.escape(bg_mark)}(?P<bg>[ \w,\[\]\(\) ]*))?
         )
     ''')
 
 
-def get_fmt_regex(fg_switch=DEFAULT_FG_SWITCH, bg_switch=DEFAULT_BG_SWITCH):
-    spec_rgx = unflag(get_spec_regex(fg_switch, bg_switch).pattern).lstrip('\n')
+def get_fmt_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
+    spec_rgx = unflag(get_spec_regex(fg_mark, bg_mark).pattern).lstrip('\n')
     return re.compile(rf'''(?x) # RGX_FORMAT_DIRECTIVE =
         (?P<text>)
         \{{
@@ -82,17 +96,24 @@ def get_fmt_regex(fg_switch=DEFAULT_FG_SWITCH, bg_switch=DEFAULT_BG_SWITCH):
 
 def _apply_style(string, **effects):
     # apply effects
+    logger.opt(lazy=True).debug('{}', lambda: f'Applying {effects} to {string!r}')
+
     try:
         return codes.apply(string, **effects)
     except InvalidEffect:  # as err:
-        fg, *rest = effects.pop('fg')
-        if not rest:
-            raise
-
         # The block above will fail for the short format spec style
         # eg: 'Bk_' to mean 'bold,black,underline' etc
+
+        # Try again with characters
+        maybe_short_spec = _, *rest = effects.pop('fg')
+        if not rest:
+            # error was legit
+            raise
+
+        logger.debug('Retrying apply with args: {}, kws: {} to\n{!r}',
+                     maybe_short_spec, effects, string)
         try:
-            return codes.apply(string, fg, *rest, **effects)
+            return codes.apply(string, *maybe_short_spec, **effects)
         except InvalidEffect as err2:
             raise err2  # from err
 
@@ -162,70 +183,65 @@ class Formatter(BuiltinFormatter):
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
-    def __init__(self, fg=DEFAULT_FG_SWITCH, bg=DEFAULT_BG_SWITCH):
+    def __init__(self, fg=DEFAULT_FG_MARK, bg=DEFAULT_BG_MARK):
         self.spec_regex = get_spec_regex(fg, bg)
         self.fmt_regex = get_fmt_regex(fg, bg)
         self.parser = BracketParser('{}')
 
     def parse(self, string):
-        # try:
-        #     # parsed = list(super().parse(string))
-        #     # logger.debug('PARSED: {}', parsed)
-        #     yield from super().parse(string)
-        #     logger.debug('BuiltinFormatter.parse succeeded.')
-        #     return
+        # yields # literal_text, field_name, format_spec, conversion
 
-        # except ValueError as err:
-        #     msg = str(err)
-        #     if not msg.endswith(("Single '}' encountered in format string",
-        #                          "unexpected '{' in field name",
-        #                          "expected '}' before end of string")):
-        #         logger.debug('Builtin format parser failed with: {}', err)
-        #         raise err
-
-        # logger.debug('BuiltinFormatter.parse failed. Parsing with motley.')
-        # logger.debug('Parsing string: {!r}', string)
+        # NOTE: all these need to be supported
+        # >>> format('hello {}', 'world')
+        # >>> format('hello {world}', world='world')
+        # >>> format('hello {world!r:s}', world='world')
+        # >>> format('hello {world[0]:-<5s}', world='world')
+        # >>> format('{::^11s}', 'x')
 
         pos = 0
         match = None
         itr = self.parser.iterate(string, must_close=True, condition=(level == 0))
-        # buffer = ''
         for match in itr:
-            *field, spec = match.enclosed.rsplit(':', 1)
-            if field:
-                # handle edge case: filling with colon: "{::<10s}"
-                if '::' in match.enclosed:
+            enclosed = match.enclosed
+            convert = None
+            if '!' in enclosed:
+                field, spec = enclosed.split('!', 1)
+                convert, spec = spec[0], spec[2:]
+            else:
+                # note, might be empty string for auto index:
+                # >>> format('hello {}', 'world')
+                field, *spec = enclosed.rsplit(':', 1)
+                spec = ''.join(spec)
+                if field.endswith(':'):
+                    # handle edge case: filling with colon: "{::<10s}"
+                    # if '::' in match.enclosed:
                     field = field[:-1]
                     spec = f':{spec}'
 
-                field = ':'.join(field)
-            else:
-                field = spec
-                spec = ''
-
-            #  (literal_text, field_name, format_spec, conversion)
+            # (literal_text, field_name, format_spec, conversion)
             logger.opt(lazy=True).debug(
                 '{}', lambda: dedent(f'''
-                    match = {match!r}
-                    pos = {pos!r} 
-                    literal_text={string[pos:match.start]!r}
-                    field_name={field!r}
-                    format_spec={spec!r}
-                    '''),
+                    match        = {match!r}
+                    pos          = {pos!r} 
+                    literal_text = {string[pos:match.start]!r}
+                    field_name   = {field!r}
+                    format_spec  = {spec!r}
+                    conversion   = {convert!r}
+                '''),
             )
 
-            # if match.level > 0:
-            #     buffer +=
-
-            yield string[pos:match.start], field, spec, None
+            # literal_text, field_name, format_spec, conversion
+            yield string[pos:match.start], field, spec, convert
 
             pos = match.end + 1
 
         if match:
             if match.end + 1 != len(string):
+                # literal_text, field_name, format_spec, conversion
                 yield string[match.end + 1:], None, None, None
         else:
-            logger.debug('NO MATCH: {}', string)
+            # logger.debug('No braced expressions in: {!r}', string)
+            # literal_text, field_name, format_spec, conversion
             yield from super().parse(string)
 
     def _parse_spec(self, value, spec):
@@ -239,7 +255,7 @@ class Formatter(BuiltinFormatter):
 
         # get the spec that builtins.format understands
         spec = mo['spec']
-        logger.opt(lazy=True).trace('{}', mo.groupdict)
+        logger.opt(lazy=True).debug('{}', mo.groupdict)
 
         # if the value is a string which has effects applied, adjust the
         # width field to compensate for non-display characters
@@ -266,24 +282,31 @@ class Formatter(BuiltinFormatter):
         return value, spec, effects
 
     def _should_adjust_width(self, spec, value, mo):
-        if isinstance(value, (str, UserString)) and mo['width']:
-            return mo['width'] and ansi.has_ansi(value)
+        # logger.debug('Checking {!r}', value)
+        if isinstance(value, (str, UserString)) and (width := mo['width']):
+            # logger.opt(lazy=True).debug(
+            #     '{}', lambda: f'{width = }; {ansi.has_ansi(value) = }')
+            return (width and ansi.has_ansi(value))
         return False
 
     def _adjust_width_for_hidden_characters(self, spec, value, mo):
         """
-        if the value is a string which has effects applied, adjust the
+        If the value is a string which has effects applied, adjust the
         width field to compensate for non-display characters
         """
         if not self._should_adjust_width(spec, value, mo):
             return spec
+
+        logger.info('Adjusting format width since string has colour formatting '
+                    'code points with zero display width.')
 
         spec_info = mo.groupdict()
         # remove the base level groups in the regex
         for _ in ('spec', 'effects', 'fg', 'bg'):
             spec_info.pop(_)
 
-        spec_info['width'] = str(int(mo['width']) + ansi.length_codes(value))
+        spec_info['width'] = str(new := int(mo['width']) + ansi.length_codes(value))
+        logger.debug(f'Adjusted spec width from {spec_info["width"]} to {new}')
         return ''.join(spec_info.values())
 
     def get_field(self, field_name, args, kws):
@@ -354,6 +377,7 @@ class Formatter(BuiltinFormatter):
             return repr(str(value))
 
     def stylize(self, format_string, *args, **kws):
+        logger.debug(f'Received: {format_string = !r}')
         return PartialFormatter().format(format_string, *args, **kws)
         # stylized = Stylizer().format(format_string)
         # return self.format(stylized, *args, **kws)
@@ -402,7 +426,6 @@ class Stylizer(Formatter):
             value = value.join(('{}'))
         # else:
 
-        logger.debug('applying {} to {!r}', effects, value)
         return _apply_style(value, **effects)
         # logger.debug('Formatted field:\n{}', ff)
         # return ff
@@ -428,27 +451,25 @@ class PartialFormatter(Stylizer):
         try:
             result = Formatter.get_field(self, field_name, args, kws)
 
-        except KeyError as err:
+        except LookupError as err:
+            # KeyError
             # If the builtin `get_field` failed, this field name is unavailable
             # and needs to be kept unaltered. We do that by replacing
             # `field_name` with `{field_name}` wrapped in braces. This leaves
             # the string unaltered after substitution.
-            result = (field_name, None)
-            logger.debug('BuiltinFormatter.get_field failed with {!r}\nReturning:\n{}',
-                         err, result)
+            # result = (field_name, None)
 
-        except IndexError as err:
+            # IndexError
             # by this time the `auto_arg_index` will have been substituted for
             # empty field names. We have to undo that to obtain the original
             # field specifier which may have been empty.
-            if self._empty_field_name:
-                result = ('', None)
-            logger.debug('BuiltinFormatter.get_field failed with {!r}\nReturning:\n{}',
-                         err, result)
+            result = ('' if self._empty_field_name else field_name, None)
+            logger.debug('BuiltinFormatter.get_field failed with '
+                         '{!r}\nReturning:\n{}', err, result)
         else:
             self._wrap_field = False
-            logger.debug('BuiltinFormatter.get_field succeeded. Recursion ends. '
-                         'field: {}, spec: {}', *result)
+            logger.debug('BuiltinFormatter.get_field succeeded. Recursion ends.'
+                         ' field: {}, spec: {}', *result)
 
         return result
 
@@ -465,8 +486,12 @@ class PartialFormatter(Stylizer):
         # handled upon the second formatting where the width of the format spec
         # will then be adjusted. We therefore leave it unaltered here to avoid
         # adjusting the spec width twice.
+
+        # logger.debug('Checking {!s}', value)
+        # logger.debug(f'{self.parser.match(value) = } '
+        #              f'{super()._should_adjust_width(spec, value, mo) = }')
         return (
-            self.parser.match(value) is None
+            self.parser.match(value) is not None
             and
             super()._should_adjust_width(spec, value, mo)
         )
