@@ -215,12 +215,14 @@ class Table(LoggingMixin):
     _default_border = BORDER  # TODO move to module scope
 
     # The column format specification:
-    #  0 - item; 1 - fill width; 2 - align; 3 - border (rhs); 4 - border (lhs)
-    cell_fmt = '{4}{0:{2}{1}}{3}'
+    cell_fmt = '{3}{0:{1}{2}}{4}'
+    #  0 - item
+    #  1 - alignment
+    #  2 - cell width
+    #  3 - lhs border
+    #  4 - rhs border
 
-    # title_fmt = cell_fmt.join(_default_border * 2)
-
-    _foot_fmt = '{}: {}'
+    _foot_fmt = None  # '{flag} : {info}'
 
     _nrs_header = '#'
 
@@ -716,9 +718,13 @@ class Table(LoggingMixin):
             data = np.vstack((data, totals))
 
         # col borders (rhs)
-        borders = self.resolve_input(col_borders, n_cols + 1, 'border', str,
+        if isinstance(col_borders, str):
+            col_borders = [col_borders]
+
+        borders = self.resolve_input(col_borders, n_cols, 'border', str,
                                      default_factory=lambda: self._default_border)
-        self.borders = np.array(list(borders.values()))
+
+        self.borders = np.array([*borders.values(), self._default_border])
         self.lcb = lengths(self.borders)
 
         # TODO: row / col sort here
@@ -880,9 +886,7 @@ class Table(LoggingMixin):
         return str(self)
 
     def __str__(self):
-        if self.data.size:
-            return self.format()
-        return '<Empty Table>'
+        return self.format() if self.data.size else '<Empty Table>'
 
     def __format__(self, spec):
         return str(self)
@@ -1506,44 +1510,34 @@ class Table(LoggingMixin):
         self.rows.append(row)
         return row
 
-    def format_cell(self, text, width, align, border=_default_border, lhs=''):
+    def format_cell(self, text, width, align, rhs=_default_border, lhs=''):
         # this is needed because the alignment formatting gets screwed up by the
         # ANSI characters (which have length, but are not displayed)
         pad_width = ansi.length_codes(text) + width
-        return self.cell_fmt.format(text, pad_width, align, border, lhs)
+        return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
 
-    def build_long_line(self, text, width, align='<', props=None):
+    def build_long_line(self, text, width, align='<', style=None):
         # table row line that spans `width` of table.  use to build title
         # line and compact inset etc..
 
-        if self.frame:
-            b = self._default_border
-            width -= len(b)
-        else:
-            b = ''
+        b = self._default_border if self.frame else ''
+        width -= len(b)
         borders = b, b
 
-        if props is None:
-            props = []
-        props = str2tup(props)
+        style = coerce(style or [], to=list, wrap=str, ignore=dict)  # list / dict
+        lines = text.split(os.linesep)
 
-        # only underline last line for multi-line element
-        _under = ('underline' in props)
-        if _under:
-            props = list(props)
-            props.remove('underline')
+        if ('underline' in style):
+            # only underline last line for multi-line element
+            style.remove('underline')
+            styles = itt.chain(itt.repeat(style, len(lines) - 1), [(*style, 'underline')])
+        else:
+            styles = itt.repeat(style, len(lines))
 
-        lines = []
-        for line in text.split(os.linesep):
-            line = self.format_cell(line, width, align, *borders)
-            line = codes.apply(line, props)
-            # self.apply_props(line, properties)
-            lines.append(line)
-
-        if _under:
-            lines[-1] = _underline(lines[-1])
-            # codes.apply(lines[-1], 'underline')
-        return '\n'.join(lines)
+        return '\n'.join((
+            codes.apply(self.format_cell(line, width, align, *borders), next(styles))
+            for line in lines
+        ))
 
     def insert_lines(self, insert, width):
         if isinstance(insert, str):
@@ -1571,22 +1565,19 @@ class Table(LoggingMixin):
         table_width = sum(self.col_widths[self._idx_shown] +
                           self.lcb[self._idx_shown])
 
-        if table_width > self.max_width:
-            # if self.handle_too_wide == 'split':
-            if self.has_title:
-                self.title += '\n'  # to indicate continuation under title line
-
-            #
-            split_tables = self.split()
-
-            if self.show_colourbar:
-                split_tables[-1] = self.add_colourbar(split_tables[-1])
-            table = '\n\n'.join(split_tables)
-            return table
-        # else:
-        #     raise NotImplementedError
-        else:
+        if table_width <= self.max_width:
             return '\n'.join(self._build())
+
+        # if self.handle_too_wide == 'split':
+        if self.has_title:
+            self.title += '\n'  # to indicate continuation under title line
+
+        #
+        split_tables = self.split()
+
+        if self.show_colourbar:
+            split_tables[-1] = self.add_colourbar(split_tables[-1])
+        return '\n\n'.join(split_tables)
 
     def split(self, max_width=None):
         # TODO: return Table objects??
