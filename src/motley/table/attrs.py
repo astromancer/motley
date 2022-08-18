@@ -93,6 +93,8 @@ class AttrColumn(Column):
         self.flag_info = flag_info
 
 
+# TODO:? from pyxides.vectorize import AttrTableDescriptor
+
 class AttrTable:
     """
     Helper class for tabulating attributes (or properties) of lists of objects.
@@ -141,64 +143,6 @@ class AttrTable:
 
         return cls(mapping.keys(), totals=totals, **options, **kws)
 
-    @classmethod
-    def from_spec(cls, mapping=(), **kws):
-        attrs, *opts = cls._resolve_opts(mapping)
-        parsed_option_names = ('headers', 'units', 'converters', 'formatters')
-        for key, opt in zip(parsed_option_names, opts):
-            if key in kws:
-                kws[key].update(opt)
-            else:
-                kws[key] = opt
-        return cls(attrs, **kws)
-
-    @classmethod
-    def _resolve_opts(cls, mapping):
-        # headers, units, converters, formatters
-        info = {}, {}, {}, {}
-        attrs = []
-        for attr, *options in cls._iter_from_spec(dict(mapping)):
-            # header, unit, converter, formatter
-            for i, opt in enumerate(options):
-                if opt:
-                    info[i][attr] = opt
-
-            attrs.append(attr)
-        # attrs, headers, units, converters, formatters
-        return attrs, *info
-
-    @classmethod
-    def _iter_from_spec(cls, mapping):
-        for header, spec in mapping.items():
-            # parse units
-            if spec in (..., ''):
-                #     attr, header, unit, converter, formatter
-                yield header, None, None, None, None
-                continue
-
-            unit = cls._unit_parser.match(header)
-            if unit:
-                unit = unit.full
-                header = header.replace(unit, '').strip()
-
-            attr, converter, spec = cls._parse_spec(spec)
-            yield (attr or header), header, unit, converter, spec
-
-    @staticmethod
-    def _parse_spec(spec):
-        # literal_text, field_name, format_spec, conversion
-        items = next(formatter_parser(f'{{{spec}}}'))
-        _, attr, format_spec, conversion = items
-        # if items is None:
-        #     raise NotImplementedError()
-        # formatter._parse_spec()
-        converter = CONVERTERS.get(conversion.lower()) if conversion else None
-        return attr, converter, format_spec
-
-    # @classmethod
-    # def from_spec(cls, name_spec_list):
-    #     value, spec, effects = formatter._parse_spec('', name_spec_list)
-    #     for key, col in columns.items():
 
     def __get__(self, instance, kls):
         if instance:  # lookup from instance
@@ -396,34 +340,6 @@ class AttrTable:
 
         return list(zip(*tmp.values()))
 
-    def to_xlsx(self, path, widths={}, **kws):
-
-        data = np.array(self.get_data(self.parent.sort_by('t.t0')))
-
-        # FIXME: better to use get_table here, but then we need to keep
-        # table.data as objects not convert to str prematurely!
-        # PLEASE FIX THIS UNGODLY HACK
-
-        col_headers = self.get_headers()
-        tmp = AttrDict(
-            data=data,
-            col_groups=self.get_groups(),
-            col_headers=col_headers,
-            _col_headers=col_headers,
-            units=self.get_units(),
-            formatters={self.attrs.index(k): v for k, v in self.formatters.items()},
-            totals=[col_headers.index(t) for t in self.totals],
-            title=self.title,
-            shape=(len(data), len(self.attrs))
-        )
-
-        # may need to set widths manually eg. for cells that contain formulae
-        # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
-        # table = tmp()
-        tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
-        #  self.align,
-        return XlsxWriter(tmp, widths, **kws).write(path)
-
     def get_table(self, container, attrs=None, **kws):
         """
         Keyword arguments passed directly to the `motley.table.Table`
@@ -444,16 +360,24 @@ class AttrTable:
         if attrs is None:
             attrs = self.attrs
 
-        return Table(container.attrs(*attrs),
-                     **{**self.kws,  # defaults
-                        **{**dict(title=container.__class__.__name__,
-                                  col_headers=self.get_headers(attrs),
-                                  col_groups=self.get_groups(attrs),
-                                  totals=self.totals),
-                           **{key: self.get_defaults(attrs, key)
-                              for key in ('units', 'formatters')},
-                           **kws},  # keywords from user input
-                        })
+        data = container.attrs(*attrs)
+        col_headers = self.get_headers(attrs)
+        flags = {colname: list(map(flag, container))
+                 for colname, flag in self.flags.items() if callable(flag)}
+
+        Table._foot_fmt = self._foot_fmt  # HACK
+        return Table(data, **{**self.kws,  # defaults
+                              **{**dict(title=container.__class__.__name__,
+                                        align=self.align,
+                                        col_headers=col_headers,
+                                        col_groups=self.get_groups(attrs),
+                                        totals=self.totals,
+                                        flags=flags,
+                                        footnotes=self.footnotes),
+                                 **{key: self.get_defaults(attrs, key)
+                                    for key in ('units', 'formatters')},
+                                  **kws},  # keywords from user input
+                              })
 
     def prepare(self, groups, **kws):
         # class GroupedTables:
@@ -571,7 +495,7 @@ class AttrTable:
                 tables[gid] = filler
 
         # HACK compact repr
-        if ncc and first.is_compactable():
+        if ncc and first.allow_compact():
             first.compact = ncc
             first.compact_items = dict(zip(
                 list(compactable),
@@ -584,3 +508,31 @@ class AttrTable:
         # put empty tables at the end
         # tables.update(empty)
         return tables
+
+    def to_xlsx(self, path, widths={}, **kws):
+
+        data = np.array(self.get_data(self.parent.sort_by('t.t0')))
+
+        # FIXME: better to use get_table here, but then we need to keep
+        # table.data as objects not convert to str prematurely!
+        # PLEASE FIX THIS UNGODLY HACK
+
+        col_headers = self.get_headers()
+        tmp = AttrDict(
+            data=data,
+            col_groups=self.get_groups(),
+            col_headers=col_headers,
+            _col_headers=col_headers,
+            units=self.get_units(),
+            formatters={self.attrs.index(k): v for k, v in self.formatters.items()},
+            totals=[col_headers.index(t) for t in self.totals],
+            title=self.title,
+            shape=(len(data), len(self.attrs))
+        )
+
+        # may need to set widths manually eg. for cells that contain formulae
+        # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
+        # table = tmp()
+        tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
+        #  self.align,
+        return XlsxWriter(tmp, widths, **kws).write(path)
