@@ -2,8 +2,7 @@
 # std
 import functools as ftl
 import itertools as itt
-from collections import abc
-from _string import formatter_parser
+from collections import abc, defaultdict
 
 # third-party
 import numpy as np
@@ -11,7 +10,6 @@ import numpy as np
 # local
 from pyxides.grouping import Groups
 from pyxides.vectorize import AttrTabulate
-from recipes.iter import cofilter
 from recipes.dicts import AttrDict
 from recipes.sets import OrderedSet
 from recipes.string.brackets import BracketParser
@@ -40,8 +38,41 @@ SENTINEL = object()
 
 
 class AttrColumn(Column):
-    def __init__(self, title=None, unit=None, convert=None, fmt=None, align='<',
-                 total=False):
+    def __init__(self, title=None, unit=None, convert=None, fmt=None, align=None,
+                 total=False, group=None, formatter=None, flags=None, flag_info=None):
+        """
+        _summary_
+
+        Parameters
+        ----------
+        title : _type_, optional
+            _description_, by default None
+        unit : _type_, optional
+            _description_, by default None
+        convert : _type_, optional
+            _description_, by default None
+        fmt : _type_, optional
+            _description_, by default None
+        align : str, optional
+            _description_, by default '<'
+        total : bool, optional
+            _description_, by default False
+        group : _type_, optional
+            _description_, by default None
+        formatter : _type_, optional
+            _description_, by default None
+        flags : list or callable, optional
+            A function that recives the target object for attribute lookup and
+            returns a symbol (str) to append to the formatted value (returned by
+            formatter).
+        flag_info: dict
+            Info describing any possible flags. This is used to automatically
+            construct footnotes for the table.
+
+        Examples
+        --------
+        >>> 
+        """
 
         # TODO: fmt = '. 14.5?f|gBi_/teal'
         self.title = title
@@ -49,7 +80,7 @@ class AttrColumn(Column):
         # assert self.data.ndim == 1
         # self.dtypes = set(map(type, np.ma.compressed(self.data)))
         self.unit = unit
-        self.align = resolve_alignment(align)
+        self.align = resolve_alignment(align) if align else None
         # self.width = width
         self.total = bool(total)  # self.data.sum() if total else None
 
@@ -58,6 +89,8 @@ class AttrColumn(Column):
         # assert callable(fmt)
         self.convert = convert
         self.fmt = fmt
+        self.flags = flags
+        self.flag_info = flag_info
 
 
 class AttrTable:
@@ -68,6 +101,7 @@ class AttrTable:
     """
 
     _unit_parser = BracketParser('[]')
+    _foot_fmt = None
 
     # @classmethod
     # def from_dict(cls, mapping=(), **kws):
@@ -75,9 +109,17 @@ class AttrTable:
     @classmethod
     def from_columns(cls, mapping=(), **kws):
         mapping = dict(mapping)
-        option_names = ('headers', 'units', 'converters', 'formatters', 'alignment')
-        options = [{}, {}, {}, {}]
-        col_keys = 'title', 'unit', 'convert', 'fmt', 'align'
+
+        column_to_table = {
+            'title':     'headers',
+            'unit':      'units',
+            'convert':   'converters',
+            'fmt':       'formatters',
+            'align':     'alignment',
+            'flags':     'flags',
+            'flag_info': 'footnotes'
+        }
+        options = defaultdict(dict)
         totals = []
         for attr, col in mapping.items():
             if col in (..., ''):
@@ -86,15 +128,18 @@ class AttrTable:
             # assert isinstance(col, AttrColumn)
 
             # populate the headers, units, converters, formatters
-            col_opts = cofilter(None, map(vars(col).get, col_keys), options)
-            for val, opt in zip(*col_opts):
-                opt[attr] = val
+            for key, opt in column_to_table.items():
+                if (val := getattr(col, key)):
+                    options[opt][attr] = val
+
+            # col_opts = map(vars(col).get, column_to_table.keys())
+            # for val, key in zip(*cofilter(col_opts, column_to_table.values())):
+            #     options[key][attr] = val
 
             if col.total:
                 totals.append(attr)
 
-        kws.update(zip(option_names, options))
-        return cls(mapping.keys(), totals=totals, **kws)
+        return cls(mapping.keys(), totals=totals, **options, **kws)
 
     @classmethod
     def from_spec(cls, mapping=(), **kws):
@@ -162,7 +207,7 @@ class AttrTable:
 
     def _ensure_dict(self, obj):
         if obj is None:
-            return dict()
+            return {}
 
         if isinstance(obj, dict):
             return obj
@@ -185,27 +230,37 @@ class AttrTable:
                  #  header_formatter=str, # NOPE. breaks column alias resolution
                  show_groups=True,
                  totals=(),
+                 flags=(),
+                 footnotes=(),
                  **kws):
 
         # set default options for table
-        self.kws = {**dict(row_nrs=0,
-                           precision=5,
+        self.kws = {**dict(precision=5,
                            minimalist=True,
                            compact=True),
                     **kws}
 
         self.title = self.kws.get('title')
         self.attrs = list(attrs)
+        # FIXME: better to have a list of columns here.
         self.converters = self._ensure_dict(converters)
         self.formatters = self._ensure_dict(formatters)
         self.header_levels = self._ensure_dict(header_levels)
+        # TODO: remove `header_levels` in favour of ..timing.t0 / timing.t0..  ?
         # self.header_formatter = header_formatter
         self.headers = self._ensure_dict(headers)
         self.units = self._ensure_dict(units)
         totals = [totals] if isinstance(totals, str) else list(totals)
         self.totals = [self.get_header(attr) for attr in totals]
-        self.align = alignment
+        self.align = {self.get_header(attr): val
+                      for attr, val in self._ensure_dict(alignment).items()}
         self.show_groups = bool(show_groups)
+        self.flags = {self.get_header(attr): flag
+                      for attr, flag in self._ensure_dict(flags).items()}
+        if isinstance(footnotes, dict):
+            footnotes = {self.get_header(attr): val
+                         for attr, val in footnotes.items()}
+        self.footnotes = footnotes
 
         # self.headers = dict(zip(attrs, self.get_headers(attrs)))
         # self._heads = {a: self.get_header_parts(a) for a in self.attrs}

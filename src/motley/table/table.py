@@ -12,14 +12,17 @@ import itertools as itt
 from collections import abc
 from dataclasses import dataclass
 from shutil import get_terminal_size
+from collections import UserString, abc
 from typing import Callable, Collection, Union
 
 # third-party
 import numpy as np
 
 # local
+from recipes.oo import coerce
 from recipes.dicts import merge
-from recipes.lists import where
+from recipes.lists import where, cosort
+from recipes.iter import coerced
 from recipes.sets import OrderedSet
 from recipes.functionals import echo0
 from recipes import api, pprint as ppr
@@ -117,7 +120,7 @@ def split_columns(column, split_nested_types):
 
     # wrap strings
     if str not in split_nested_types:
-        column = wrap_strings(column)
+        column = coerced(column, list, wrap=str)
 
     yield from itt.zip_longest(*column, fillvalue='')
 
@@ -193,6 +196,13 @@ def dict_to_list(data, ignore_keys={}, converters={}, header_levels={},
         return headers, None, data
 
     raise ValueError(f'Invalid value for parameter: {order=!r}')
+
+
+def check_flag(obj):
+    if isinstance(obj, (str, UserString, callable)):
+        return obj
+
+    raise TypeError(f'Invalid flag type: {type(obj)}.')
 
 
 class Table(LoggingMixin):
@@ -544,9 +554,11 @@ class Table(LoggingMixin):
              on any str contained in this list. The default formatter will be
              used for the remaining columns.
 
-        flags: dict
-            string type flags that will be appended to the entries of the
-            corresponding column
+        flags: dict[list[str]|callable]
+            For each column in the mapping, a list of str flags (one per row) to
+            append to the cell values of the corresponding column. If the value
+            is a callable, it should take the cell value as the first argument
+            and return the flag value str.
 
         insert: dict
             Insert arbitrary lines into the table before these rows. This
@@ -563,9 +575,15 @@ class Table(LoggingMixin):
             Highlight these rows by applying the given effects to the entire
             row.  The dict should be keyed on integer which is the line number
 
-        footnotes: str
+        footnotes: str, list, dict
             Any footnote that will be added to the bottom of the table.
-            Useful to explain the meaning of `flags`
+            Useful to explain the meaning of `flags`. If str, will be wrapped 
+            in a paragraph as wide as the table and used directly.
+            If list[str], each will be added as a line below the table.
+            If dict, it specifies the meaning of the `flag` symbols. If you passed  
+            the `flags` as dict functions keyed on symbols, the symbols that 
+            appear in the table will be appended, each with the description 
+            provided by the same key in the `footnotes` dict.
 
         # TODO: list attributes here
         """
@@ -578,6 +596,7 @@ class Table(LoggingMixin):
 
         # from recipes import pprint
         # pprint.mapping(locals(), ignore=['self'])
+        logger.debug('COMPACT: {!r}', compact)
 
         # special case: dict
         if isinstance(data, dict):
@@ -668,16 +687,28 @@ class Table(LoggingMixin):
             args=(precision, minimalist, data)
         )
 
-        # get flags
-        flags = self.resolve_input(flags, n_cols, 'flags')
-
         # calculate column totals if required
         self.totals = self.get_totals(data, totals)
         self.has_totals = (self.totals is not None)
 
+        # get flags
+        flags = self.resolve_input(flags, n_cols, 'flags')  # , check_flag
+
+        # Footnotes
+
+        flag_info = None
+        self.footnotes = []
+        if isinstance(footnotes, str):
+            self.footnotes = footnotes.splitlines()
+        elif isinstance(footnotes, dict):
+            flag_info = footnotes
+        elif footnotes:
+            self.footnotes = list(footnotes)
+
         # FIXME: ALL STUFF BELOW HERE SHOULD BE DYNAMIC!!
+
         # do formatting
-        data = self.formatted(data, self.formatters, str(masked), flags)
+        data = self.formatted(data, self.formatters, str(masked), flags, flag_info)
 
         # add totals row
         if self.has_totals:
@@ -841,12 +872,6 @@ class Table(LoggingMixin):
         # self.max_column_width = self.handle_too_wide.get('columns')
 
         self.show_colourbar = False
-        if footnotes is None:
-            footnotes = []
-        if isinstance(footnotes, str):
-            footnotes = footnotes.splitlines()
-
-        self.footnotes = list(footnotes)
 
         # if self.compact == 'footnote':
 
@@ -932,7 +957,7 @@ class Table(LoggingMixin):
         assert len(col_groups) == n_cols
 
         col_groups = itt.chain(itt.repeat('', self.n_head_col), col_groups)
-        col_groups = wrap_strings(col_groups)
+        col_groups = coerced(col_groups, list, wrap=str)
         col_groups = itt.zip_longest(*col_groups, fillvalue='')
         # FIXME: too wide col_groups should truncate
         return list(col_groups)
@@ -1017,16 +1042,31 @@ class Table(LoggingMixin):
 
         return ppr.PrettyPrinter(precision=precision, minimalist=short).pformat
 
-    def format_column(self, data, fmt, dot_align, flags):
+    # def _format_cell_value(datum, fmt, flag):
+
+    def format_column(self, data, fmt, dot_align, name, flags=None):
         # wrap the formatting in try, except since it's usually not
         # critical that it works and getting some info is better than none
+        used_flags = set()
+        if flags:
+            # with catch(action='warn', message=):
+            try:
+                flags = list(map(flags, data) if callable(flags) else map(str, flags))
+                used_flags |= set(flags) - {''}
+            except Exception as err:
+                wrn.warn(f'Could not resolve flags for column {name!r} due to the following'
+                         f' exception:\n{err}')
+
         result = []
         for j, cell in enumerate(data):
             try:
                 formatted = fmt(cell)
+
             except Exception as err:
-                wrn.warn(f'Could not format cell {j} with {fmt!r} due to:\n'
-                         f'{err}')
+                wrn.warn(
+                    f'Could not format cell {j} in column {name!r} with formatter {fmt!r} due to:\n'
+                    f'the following '
+                    f'exception {err}')
                 formatted = str(cell)
 
             result.append(formatted)
@@ -1044,15 +1084,16 @@ class Table(LoggingMixin):
                                      list(map(str, flags)))
             except Exception as err:
                 wrn.warn(f'Could not append flags to formatted data for '
-                         f'column due to the following '
+                         f'column {name!r} due to the following '
                          f'exception:\n{err}')
-        return result
 
-    def formatted(self, data, formatters, masked_str='--', flags=None):
+        return result, used_flags
+
+    def formatted(self, data, formatters, masked_str='--', flags=None, flag_info=None):
         """convert to array of str"""
 
-        # if self.
         flags = flags or {}
+        flag_info = flag_info or {}
         data = np.atleast_2d(data)
 
         # format custom columns
@@ -1073,9 +1114,18 @@ class Table(LoggingMixin):
             else:
                 use = ...
 
-            data[use, i] = self.format_column(col[use], fmt,
-                                              i in self.dot_aligned,
-                                              flags.get(i, ()))
+            colname = self.col_headers[i] if self.col_headers else i
+            data[use, i], used_flags = self.format_column(
+                col[use], fmt, (i in self.dot_aligned), colname, flags.get(i, ()),
+            )
+
+            # Create footnotes from flags and info
+            for flag in used_flags:
+                self._format_footer(i, flag, flag_info)
+
+            if used_flags:
+                logger.debug('Columns {} used flags: {}', self.col_headers[i],
+                             used_flags)
 
         # finally set masked str for entire table
         if np.ma.is_masked(data):
@@ -1083,6 +1133,33 @@ class Table(LoggingMixin):
             data = data.data  # return plain old array
 
         return data
+
+    def _format_footer(self, i, flag, flag_info):
+        _foot_fmt = None
+        hdr = ''
+        if (info := flag_info.get(flag)):
+            # footnotes for all columns
+            _foot_fmt = self._foot_fmt or ' {flag} : {info}'
+
+        elif (info := flag_info.get((hdr := self.col_headers[i]), {}).get(flag)):
+            # per column footnotes
+            _foot_fmt = self._foot_fmt or ' {grp}.{hdr}{flag} : {info}'
+
+        if _foot_fmt:
+            grp = ''
+            if self.col_groups:
+                grp = self.col_groups[-1][i + self.n_head_col]
+
+            self.footnotes.append(
+                _foot_fmt.format(
+                    flag=flag, info=info, grp=grp, hdr=hdr, tbl=self
+                )
+            )
+
+        else:
+            wrn.warn(
+                f'Could not resolve description for flag {flag!r} in column {hdr!r}.'
+                'You may provide a `dict` to the `footnotes` parameter to describe the flags.')
 
     def get_default_align(self, col_idx):
         #
