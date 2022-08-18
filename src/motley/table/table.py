@@ -226,7 +226,7 @@ class Table(LoggingMixin):
 
     _nrs_header = '#'
 
-    def resolve_input(self, obj, n_cols=None, what='\r', converter=None,
+    def resolve_input(self, obj, n_cols=None, what='\b', converter=None,
                       raises=True, default_factory=None, args=(), **kws):
         # resolve aliases from bottommost header line upwards
         aliases = (self._col_headers, *self.col_groups[::-1])
@@ -1365,7 +1365,7 @@ class Table(LoggingMixin):
         # make align an array with same size as nr of columns in table
 
         # row headers are left aligned
-        return '<' * self.n_head_col + ''.join(alignment.values())
+        return '<' * self.n_head_col + ''.join(cosort(*zip(*alignment.items()))[1])
         # dot_aligned = np.array(where(align, '.')) - self.n_head_col
         # align = align.replace('.', '<')
         # return align
