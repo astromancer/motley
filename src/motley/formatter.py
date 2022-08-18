@@ -71,84 +71,80 @@ from .codes.resolve import InvalidEffect
 DEFAULT_FG_MARK = '|'
 DEFAULT_BG_MARK = '/'
 
-
+STRING_CLASSES = (str, UserString)
 # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
 
-# re.compile(r'''(?x)
-#     # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+# re.compile(rf'''(?x)
 #     (?P<colon>:)?
-#     (?(colon)((?P<spec>
-#         (?:
-#             (?P<fill>[^{}])
-#             (?=(?P<_align>[<>=^]))
-#         )?
-#         (?P<align>[<>=^])?
-#         (?P<sign>[+\- ]?)
-#         (?P<alt>\#?)
-#         (?P<width>\d*)
-#         (?P<grouping>[_,]?)
-#         (?P<precision>(?:\.\d+)?)
-#         (?P<type>[bcdeEfFgGnosxX%]?)
-#     ))|)
+#     (?(colon)({spec_pattern})|)
 #     \}
 # ''')
 
+
 @ftl.lru_cache()
 def get_spec_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
-    # WARNING: THIS REGEX DOESN'T capture the fact that you cannot have fill
-    # without align, so is not a perfect reimplementation of the b̶u̶i̶l̶t̶i̶n̶
-    return re.compile(rf'''(?x)
+    return re.compile(r'''(?x)
         # :?
         (?P<spec>
-            (?P<fill>[^{fg_mark}]?)  
-                # FIXME: this means you can't fill with fg_mark character
-            (?P<align>[<>=^]?)
+        # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+            (?: # non-capture
+                (?P<fill>[^{}])      # fill only valid if followed by align
+                (?=[<>=^])           # lookahead (doesn't consume)
+            )?
+            (?P<align>[<>=^]?)       # can have align without fill
             (?P<sign>[+\- ]?)
+            (?P<alt>\#?)
             (?P<width>\d*)
             (?P<grouping>[_,]?)
             (?P<precision>(?:\.\d+)?)
             (?P<type>[bcdeEfFgGnosxX%]?)
         )
-        (?P<effects>
-            ({re.escape(fg_mark)}(?P<fg>[ \w,_\-\[\]\(\) ]*))?
-            ({re.escape(bg_mark)}(?P<bg>[ \w,\[\]\(\) ]*))?
+        ''' rf'''
+        # Colour / style format directives
+        (?P<style>
+            ({re.escape(fg_mark)}(?P<fg>[ \w,\[\]\(\)_\- ]*))?  # foreground 
+            ({re.escape(bg_mark)}(?P<bg>[ \w,\[\]\(\) ]*))?     # background 
         )
     ''')
 
 
-def get_fmt_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
-    spec_rgx = unflag(get_spec_regex(fg_mark, bg_mark).pattern).lstrip('\n')
-    return re.compile(rf'''(?x) # RGX_FORMAT_DIRECTIVE =
-        (?P<text>)
-        \{{
-            (?P<name>[\d\w.\[\]]*)
-            (?P<conversion>(![rsa])?)
-            :?
-            {spec_rgx}
-        \}}
-    ''')
+# def get_fmt_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
+#     spec_rgx = unflag(get_spec_regex(fg_mark, bg_mark).pattern).lstrip('\n')
+#     return re.compile(rf'''(?x) # RGX_FORMAT_DIRECTIVE =
+#         (?P<text>)
+#         \{{
+#             (?P<name>[\d\w.\[\]]*)
+#             (?P<conversion>(![rsa])?)
+#             :?
+#             {spec_rgx}
+#         \}}
+#     ''')
 
 
-def _apply_style(string, **effects):
-    # apply effects
-    logger.opt(lazy=True).debug('{}', lambda: f'Applying {effects} to {string!r}')
+def _apply_style(string, **style):
+
+    if not any(style.values()):
+        return string
+
+    # apply style
+    logger.opt(lazy=True).debug('{}', lambda: f'Applying {style} to {string!r}')
 
     try:
-        return codes.apply(string, **effects)
+        return codes.apply(string, **style)
     except InvalidEffect:  # as err:
         # The block above will fail for the short format spec style
         # eg: 'Bk_' to mean 'bold,black,underline' etc
 
         # Try again with characters
-        maybe_short_spec = _, *rest = effects.pop('fg')
+        maybe_short_spec = _, *rest = style.pop('fg')
         if not rest:
             # error was legit
             raise
 
         logger.debug('Retrying apply with args: {}, kws: {} to\n{!r}',
-                     maybe_short_spec, effects, string)
+                     maybe_short_spec, style, string)
         try:
-            return codes.apply(string, *maybe_short_spec, **effects)
+            return codes.apply(string, *maybe_short_spec, **style)
         except InvalidEffect as err2:
             raise err2  # from err
 
@@ -218,7 +214,9 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
-    def __init__(self, fg=DEFAULT_FG_MARK, bg=DEFAULT_BG_MARK):
+    def __init__(self, fg=DEFAULT_FG_MARK, bg=DEFAULT_BG_MARK,
+                 adjust_widths=True):
+        self.adjust_widths = bool(adjust_widths)
         self.spec_regex = get_spec_regex(fg, bg)
         # self.fmt_regex = get_fmt_regex(fg, bg)
         self.parser = BracketParser('{}')
@@ -301,29 +299,42 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
     def _parse_spec(self, value, spec):
 
-        self.logger.debug('received value={!r}, spec={!r}', value, spec)
+        self.logger.debug('Received value={!r}, spec={!r}', value, spec)
 
-        # print(f'{spec=}')
-        mo = self.spec_regex.fullmatch(spec)
-        if mo is None:
-            raise ValueError(f'Invalid format specifier: {spec!r}')
-
-        # get the spec that builtins.format understands
-        spec = mo['spec']
-        if spec:
-            self.logger.opt(lazy=True).debug('Parsed the following fields:\n{}',
-                                             lambda: pformat(mo.groupdict()))
+        # get the part that `builtins.format` understands
+        if spec_match := self.spec_regex.fullmatch(spec):
+            # FIXME: is this regex even necessary??? Check performance etc
+            spec = spec_match['spec']
+            fg = spec_match['fg']
+            bg = spec_match['bg']
+            # if spec:
+            #     self.logger.opt(lazy=True).debug('Parsed the following fields:\n{}',
+            #                                      lambda: pformat(spec_match.groupdict()))
         else:
-            self.logger.debug('spec = {!r}', spec)
+            if not self.parser.match(spec):
+                raise ValueError(f'Invalid format specifier: {spec!r}')
 
-        # if the value is a string which has effects applied, adjust the
+            self.logger.debug('Nested braces in spec: {!r}. Parsing manually.',
+                              spec)
+            # Parse spec the hard way
+            style = ''
+            if '|' in spec:
+                spec, *style = self.parser.rcsplit(spec, '|', 1)
+
+            fg, *bg = ''.join(style).split('/')
+
+        #
+        style = dict(fg=fg, bg=bg)
+        #
+        # else:
+        # self.logger.opt(lazy=True).debug('Parsed spec = {!r}', spec)
+
+        # if the value is a string which has style applied, adjust the
         # width field to compensate for non-display characters
-        spec = self._adjust_width_for_hidden_characters(spec, value, mo)
+        spec = self._adjust_width_for_hidden_characters(spec, value, spec_match)
 
         # get color directives
-        effects = dict(fg=mo['fg'] or '',
-                       bg=mo['bg'] or '')
-        for fg_or_bg, val in list(effects.items()):
+        for fg_or_bg, val in list(style.items()):
             # split comma separated names like "aquamarine,I"
             # but ignore rgb color directives eg: [1,33,124], (0, 0, 0)
             if not val:
@@ -331,40 +342,41 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
             if ',' in val:
                 rgb = self._rgb_parser.match(val, must_close=True)
-                effects[fg_or_bg] = csplit(effects[fg_or_bg],
-                                           getattr(rgb, 'brackets', None))
+                style[fg_or_bg] = csplit(style[fg_or_bg],
+                                         getattr(rgb, 'brackets', None))
 
         #
-        self.logger.debug('parsed value={!r}, spec={!r}, effects={!r}',
-                          value, spec, effects)
+        self.logger.debug('parsed value={!r}, spec={!r}, style={!r}',
+                          value, spec, style)
 
-        return value, spec, effects
+        return value, spec, style
 
-    def _should_adjust_width(self, spec, value, mo):
+    def _should_adjust_width(self, spec, value, spec_match):
         # self.logger.debug('Checking {!r}', value)
-        if isinstance(value, (str, UserString)) and (width := mo['width']):
-            # self.logger.opt(lazy=True).debug(
-            #     '{}', lambda: f'{width = }; {ansi.has_ansi(value) = }')
-            return (width and ansi.has_ansi(value))
-        return False
+        return (self.adjust_widths and spec_match and (width := spec_match['width'])
+                and isinstance(value, STRING_CLASSES) and ansi.has_ansi(value))
+        # self.logger.opt(lazy=True).debug(
+        #     '{}', lambda: f'{width = }; {ansi.has_ansi(value) = }')
+        #     return (width and ansi.has_ansi(value))
+        # return False
 
-    def _adjust_width_for_hidden_characters(self, spec, value, mo):
+    def _adjust_width_for_hidden_characters(self, spec, value, spec_match):
         """
-        If the value is a string which has effects applied, adjust the
+        If the value is a string which has style applied, adjust the
         width field to compensate for non-display characters
         """
-        if not self._should_adjust_width(spec, value, mo):
+        if not self._should_adjust_width(spec, value, spec_match):
             return spec
 
-        spec_info = mo.groupdict()
+        spec_info = spec_match.groupdict()
         # remove the base level groups in the regex
-        for _ in ('spec', 'effects', 'fg', 'bg'):
+        for _ in ('spec', 'style', 'fg', 'bg'):
             spec_info.pop(_)
 
-        spec_info['width'] = str(int(mo['width']) + ansi.length_codes(value))
+        spec_info['width'] = str(int(spec_match['width']) + ansi.length_codes(value))
         self.logger.info('Adjusting field width from {[width]} to {[width]} '
                          'since string has colour formatting code points with '
-                         'zero display width.', mo, spec_info)
+                         'zero display width.', spec_match, spec_info)
         return ''.join(spec_info.values())
 
     def get_field(self, field_name, args, kws):
@@ -418,13 +430,13 @@ class Formatter(BuiltinFormatter, LoggingMixin):
             If the colour / style directives could not be resolved.
         """
         self.logger.debug('Formatting {!r} with {!r} at parent', value, spec)
-        value, spec, effects = self._parse_spec(value, spec)
+        value, spec, style = self._parse_spec(value, spec)
 
         # delegate formatting
         # self.logger.debug('Formatting {!r} with {!r} at parent', value, spec)
         return _apply_style(
             super().format_field(value, spec),      # calls  builtins.format
-            **effects
+            **style
         )
 
     def convert_field(self, value, conversion):
@@ -439,7 +451,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         self.logger.debug('Recieved format string:{}> {!r}',
                           '\n' * (len(format_string) > 40), format_string)
         return PartialFormatter().format(format_string, *args, **kws)
-    
+
     # alias
     stylize = partial_format = format_partial
 
@@ -531,10 +543,10 @@ class PartialFormatter(Formatter):
         self.logger.debug('value = {!r}, spec = {!r}', value, spec)
 
         # convert str necessary to measure field width in _parse_spec
-        value, spec, effects = self._parse_spec(str(value), spec)
+        value, spec, style = self._parse_spec(str(value), spec)
 
         # Should we wrap the field in braces again?
-        really_wrap = not any(effects.values()) or spec
+        really_wrap = not any(style.values()) or spec
         if self._wrap_field and really_wrap:
             self.logger.debug('Wrapping: value = {!r}, spec = {!r}', value, spec)
             value = '{'f'{value}{f":{spec}" if spec else ""}''}'
@@ -542,17 +554,19 @@ class PartialFormatter(Formatter):
         else:
             self.logger.debug('Not wrapping; {}', value)
 
-        return _apply_style(value, **effects)
+        return _apply_style(value, **style)
 
         # else:
-        #     from IPython import embed
-        #     embed(header="Embedded interpreter at 'src/motley/formatter.py':471")
         #     self.logger.debug('Passing up for formatting: value = {!r}, spec = {!r}',
         #                 value, spec)
         #     return super().format_field(value, spec)
 
         # self.logger.debug('Formatted field:\n{}', ff)
         # return ff
+
+    # def _parse_spec(self, value, spec):
+
+    #     value, spec, style = super()._parse_spec(value, spec)
 
     def convert_field(self, value, conversion):
         if self._wrap_field and conversion:
@@ -563,9 +577,9 @@ class PartialFormatter(Formatter):
             self.logger.debug('Passing to Formatter for {} convert: {}', conversion, value)
         return super().convert_field(value, conversion)
 
-    def _should_adjust_width(self, spec, value, mo):
+    def _should_adjust_width(self, spec, value, spec_match):
         # Subtlety: We only need to adjust the field width if the field name
-        # doesn't contain braces. This is because the result returned by this
+        # does not contain braces. This is because the result returned by this
         # partial formatter will have the colors substituted, and will most
         # likely be formatted again to get the fully formatted result. If there
         # are (colourized) braces to substitute in the field name, these will be
@@ -575,11 +589,11 @@ class PartialFormatter(Formatter):
 
         # self.logger.debug('Checking {!s}', value)
         # self.logger.debug(f'{self.parser.match(value) = } '
-        #              f'{super()._should_adjust_width(spec, value, mo) = }')
+        #              f'{super()._should_adjust_width(spec, value, spec_match) = }')
         return (
-            self.parser.match(value) is not None
+            self.parser.match(value) is None
             and
-            super()._should_adjust_width(spec, value, mo)
+            super()._should_adjust_width(spec, value, spec_match)
         )
 
     # def get_value(self, key, args, kwargs):

@@ -1,15 +1,20 @@
 
+# std
+import itertools as itt
+
 # third-party
+import pytest
 from loguru import logger
 
 # local
+from motley.formatter import formatter, Formatter
 from recipes.testing import Expected, mock
-from motley.formatter import Formatter, formatter
+
 
 # ---------------------------------------------------------------------------- #
 logger.enable('motley')
 
-# formatter = Formatter()
+formatter = Formatter()
 exp = Expected(formatter.format)
 exp.is_method = False
 
@@ -250,31 +255,86 @@ test_extended_format = exp({
         mock.format('{::^11s}', 'x'):
             ':::::x:::::',
 
-            mock.format('{:s|(122,0,0),B,I,_/k}', 'Hello world'):
-        '\x1b[;38;2;122;0;0;1;3;4;40mHello world\x1b[0m',
+        mock.format('{::^11|k}', 'x'):
+            '\x1b[;30m:::::x:::::\x1b[0m',
 
+        mock.format('{:|^11}', 'x'):
+            '|||||x|||||',
 
+        mock.format('{:|^11|navy/lime}', 'x'):
+            '\x1b[;38;2;0;0;128;48;2;0;255;0m|||||x|||||\x1b[0m',
+
+        mock.format('{:s|(122,0,0),B,I,_/k}', 'Hello world'):
+            '\x1b[;38;2;122;0;0;1;3;4;40mHello world\x1b[0m',
 
        }
-
-
 })
-
-# Partial resolution
-exp = Expected(Formatter().stylize)
-exp.is_method = False
 
 # TODO: stylize should reproduce the results from above!!
 
+# Partial resolution
+_kws = dict(lhs='',
+            fill='*',
+            align='<',
+            width=12,
+            rhs='!')
+
+
+@pytest.mark.parametrize(
+    'format_string, kws, expected',
+    zip(itt.repeat('{lhs}{:{fill}{align}{width}}{rhs}'),
+        itt.chain.from_iterable(itt.combinations(_kws.items(), n)
+                                for n in range(len(_kws) + 1)),
+        ['{lhs}{:{fill}{align}{width}}{rhs}',
+         '{:{fill}{align}{width}}{rhs}',
+         '{lhs}{:*{align}{width}}{rhs}',
+         '{lhs}{:{fill}<{width}}{rhs}',
+         '{lhs}{:{fill}{align}12}{rhs}',
+         '{lhs}{:{fill}{align}{width}}!',
+         '{:*{align}{width}}{rhs}',
+         '{:{fill}<{width}}{rhs}',
+         '{:{fill}{align}12}{rhs}',
+         '{:{fill}{align}{width}}!',
+         '{lhs}{:*<{width}}{rhs}',
+         '{lhs}{:*{align}12}{rhs}',
+         '{lhs}{:*{align}{width}}!',
+         '{lhs}{:{fill}<12}{rhs}',
+         '{lhs}{:{fill}<{width}}!',
+         '{lhs}{:{fill}{align}12}!',
+         '{:*<{width}}{rhs}',
+         '{:*{align}12}{rhs}',
+         '{:*{align}{width}}!',
+         '{:{fill}<12}{rhs}',
+         '{:{fill}<{width}}!',
+         '{:{fill}{align}12}!',
+         '{lhs}{:*<12}{rhs}',
+         '{lhs}{:*<{width}}!',
+         '{lhs}{:*{align}12}!',
+         '{lhs}{:{fill}<12}!',
+         '{:*<12}{rhs}',
+         '{:*<{width}}!',
+         '{:*{align}12}!',
+         '{:{fill}<12}!',
+         '{lhs}{:*<12}!',
+         '{:*<12}!']
+        )
+)
+def test_partial_format(format_string, kws, expected):
+    assert formatter.stylize(format_string, **dict(kws)) == expected
+
+
+exp = Expected(formatter.stylize)
+exp.is_method = False
+
 test_stylize = exp({
-    #
+    # test that it works with partial kws
+
     mock.stylize('{}', 'Hello world'):
         'Hello world',
 
     mock.stylize('{: ^12s|g}'):
         '\x1b[;32m{: ^12s}\x1b[0m',
 
-    # FIXME: This works with format, but not with stylize...
     # the result is
     mock.stylize('{hello:s|rBI_/k}', hello='Hello world'):
         '\x1b[;31;1;3;4;40mHello world\x1b[0m',
@@ -294,6 +354,9 @@ test_stylize = exp({
                  '{{level}: {message}:|{style}}',
                  style='crimson'
                  ): '\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}\x1b[0m:'
-                    '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <84}|'
-                    '\x1b[;38;2;220;20;60m{level}: {message}\x1b[0m',
+                    '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <52}|'
+                    '\x1b[;38;2;220;20;60m{level}: {message}\x1b[0m'
+    # NOTE The field width above is not adjusted for the specs where the field
+    # name contains braced groups eg: {name} since they will be adjusted on
+    # second round format
 })
