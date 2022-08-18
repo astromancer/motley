@@ -9,7 +9,6 @@ import numbers
 import warnings as wrn
 import functools as ftl
 import itertools as itt
-from collections import abc
 from dataclasses import dataclass
 from shutil import get_terminal_size
 from collections import UserString, abc
@@ -31,12 +30,12 @@ from recipes.decorators import raises as bork
 
 # relative
 from .. import ansi, codes
-from .xlsx import XlsxWriter
-from .column import resolve_columns, get_default_align
+from ..formatter import stylize
 from ..utils import resolve_alignment
 from .utils import *
 from .utils import _underline
-from ..formatter import stylize
+from .xlsx import XlsxWriter
+from .column import resolve_columns
 
 
 # if __name__ == '__main__':
@@ -48,14 +47,14 @@ from ..formatter import stylize
 
 
 # defaults as module constants
-DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
+
 BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
 OVERLINE = '‾'  # U+203E
 # EMDASH = '—' U+2014
 HEADER_ALIGN = '^'
 # MAX_WIDTH = None  # TODO
 # MAX_LINES = None  # TODO
-KNOWN_COMPACT_KEYS = {'header', 'ignore', 'footnote'}
+KNOWN_COMPACT_KEYS = {'header', 'footer', 'except', 'drop'}
 
 # TODO: dynamical set attributes like title/headers/nrs/data/totals
 # TODO: unit tests!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -751,8 +750,9 @@ class Table(LoggingMixin):
         self.compact_items = {}
         self._idx_shown = np.arange(n_cols + hrh + hrn)
 
-        self._compact_footer = False
+        self._compact_header = self._compact_footer = False
         self.compact, dont_remove = self._resolve_compact(compact)
+        # logger.debug(f'{self._compact_header = } {self._compact_footer = }')
 
         if self.compact:
             self.compactify(dont_remove)
@@ -969,23 +969,42 @@ class Table(LoggingMixin):
                 if (nope := set(compact.keys()) - KNOWN_COMPACT_KEYS):
                     raise ValueError(f'Invalid keys: {nope} in `compact` dict.')
 
-                dont_remove = compact.pop('ignore', ())
+                dont_remove = compact.pop('except', ())
 
-                for key in ('header', 'headnotes', 'footnotes'):
+                for key in ('header', 'footer'):
                     if key in compact:
                         compact = compact[key]
                         self._compact_footer = key.startswith('foot')
+                        self._compact_header = ~self._compact_footer
                         break
 
-            elif not isinstance(compact, (numbers.Integral, str)):
-                raise ValueError(f'`compact` parameter should be bool, int, '
-                                 f'str, dictnot {type(compact)}.')
+                if 'drop' in compact:
+                    compact = 'drop'
+
+            if isinstance(compact, str):
+                if compact in KNOWN_COMPACT_KEYS - {'except'}:
+                    self._compact_footer = compact.startswith('foot')
+                    if compact == 'drop':
+                        self._compact_header = self._compact_footer = False
+                        compact = 1
+                    else:
+                        compact = True
+                else:
+                    raise ValueError('Invalid string value for compact '
+                                     f'parameter: {compact!r}')
+
+            elif isinstance(compact, numbers.Integral):
+                self._compact_header = True
+            else:
+                raise ValueError(f'Expected `compact` parameter to be one of types bool, int, '
+                                 f'str or dict. Got {compact!r}, which is {type(compact)}.')
 
         elif compact:
             wrn.warn(f'Ignoring request to compact with {compact!r}, since '
                      'table has no column headers, or insufficient data.')
             compact = False
 
+        logger.debug('Compact resolved as {}. Not removing: {}', compact, dont_remove)
         return compact, dont_remove
 
     def get_default_formatter(self, col_idx, precision, short, data):
@@ -1240,9 +1259,7 @@ class Table(LoggingMixin):
         )
 
     def _min_ctable_width(self):
-        if self.has_compact():
-            return sum(self._get_ctable_widths()).max()
-        return 0
+        return sum(self._get_ctable_widths()).max() if self.has_compact() else 0
 
     def compactify(self, ignore=()):
         """
@@ -1650,12 +1667,12 @@ class Table(LoggingMixin):
         # FIXME: problems with too-wide column
 
         # compacted columns
-        if self.compact and self.compact_items:
+        if self._compact_header and self.compact_items:
             # if isinstance(self.compact, (numbers.Integral)):
             # display compacted columns in single row
             compact_rows = self.build_long_line(str(self._compact_table),
                                                 table_width,
-                                                props=['underline'])
+                                                style=['underline'])
 
             table.append(compact_rows)
 
