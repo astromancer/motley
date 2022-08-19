@@ -47,8 +47,9 @@ from .column import resolve_columns
 
 
 # defaults as module constants
-
 BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
+LEFT_BORDER = '\N{LEFT SQUARE BRACKET EXTENSION}'
+RIGHT_BORDER = '\N{RIGHT SQUARE BRACKET EXTENSION}'
 OVERLINE = '‾'  # U+203E
 # EMDASH = '—' U+2014
 HEADER_ALIGN = '^'
@@ -724,7 +725,7 @@ class Table(LoggingMixin):
         borders = self.resolve_input(col_borders, n_cols, 'border', str,
                                      default_factory=lambda: self._default_border)
 
-        self.borders = np.array([*borders.values(), self._default_border])
+        self.borders = np.array([*borders.values(), RIGHT_BORDER])
         self.lcb = lengths(self.borders)
 
         # TODO: row / col sort here
@@ -1503,7 +1504,7 @@ class Table(LoggingMixin):
             first = codes.apply(first, self.row_head_props)
 
         if self.frame:
-            first = self._default_border + first
+            first = LEFT_BORDER + first
 
         # stick cells together
         row = ''.join((first, *cells))
@@ -1513,6 +1514,7 @@ class Table(LoggingMixin):
     def format_cell(self, text, width, align, rhs=_default_border, lhs=''):
         # this is needed because the alignment formatting gets screwed up by the
         # ANSI characters (which have length, but are not displayed)
+        # if align == '>':
         pad_width = ansi.length_codes(text) + width
         return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
 
@@ -1520,9 +1522,8 @@ class Table(LoggingMixin):
         # table row line that spans `width` of table.  use to build title
         # line and compact inset etc..
 
-        b = self._default_border if self.frame else ''
-        width -= len(b)
-        borders = b, b
+        width -= int(self.frame)
+        borders = (RIGHT_BORDER, LEFT_BORDER) if self.frame else ''
 
         style = coerce(style or [], to=list, wrap=str, ignore=dict)  # list / dict
         lines = text.split(os.linesep)
@@ -1675,7 +1676,7 @@ class Table(LoggingMixin):
 
         # column groups
         for groups in self.col_groups:
-            line = self._default_border if self.frame else ''
+            line = LEFT_BORDER if self.frame else ''
             lbl = groups[idx[0]]  # name of current group
             gw = 0  # width of current column group header
 
@@ -1695,7 +1696,7 @@ class Table(LoggingMixin):
 
             # last bit
             if gw:
-                line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
+                line += f'{lbl: ^{gw - 1}}{RIGHT_BORDER}'
             #
             if self.hlines:
                 # only underline if headers are underlined
