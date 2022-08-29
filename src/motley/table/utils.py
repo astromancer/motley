@@ -1,4 +1,5 @@
 
+
 # std
 import functools as ftl
 import itertools as itt
@@ -16,16 +17,14 @@ from recipes.decorators import raises as bork
 
 # relative
 from .. import ansi, codes, formatters
-from . import get_width
+from ..utils import get_width
 from .column import resolve_columns
 
 
 # ---------------------------------------------------------------------------- #
+DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
 
-
-def wrap_strings(column):
-    for cell in column:
-        yield [cell] if isinstance(cell, str) else cell
+# ---------------------------------------------------------------------------- #
 
 
 def str2tup(keys):
@@ -42,7 +41,11 @@ def apportion(width, n):
     return space
 
 
-def justified_delta(widths, total):
+def justify_widths(widths, total):
+    return widths + _justified_delta(widths, total)
+
+
+def _justified_delta(widths, total):
     extra = apportion(total, len(widths)) - widths
     wide = (extra < 0)
     if all(wide):
@@ -61,7 +64,7 @@ def justified_delta(widths, total):
 #                                         table_width)
 
 
-def get_column_widths(data, col_headers=None, count_hidden=False):
+def measure_column_widths(data, col_headers=None, count_hidden=False):
     """data should be array-like of str types"""
 
     # data widths
@@ -90,12 +93,12 @@ def resolve_width(width, data, headers=None):
     """
     if width is None:
         # each column will be as wide as the widest data element it contains
-        return get_column_widths(data, headers)
+        return measure_column_widths(data, headers)
 
     width = np.array(width, int)
     if width.size == 1:
         # The table will be made exactly this wide
-        w = get_column_widths(data, headers)
+        w = measure_column_widths(data, headers)
         if w.sum() > width:
             # TODO
             raise NotImplementedError('will need to drop columns')
@@ -135,7 +138,7 @@ def ensure_dict(obj, n_cols, what='\b'):
     n_obj = len(obj)
     if n_obj == 1:
         # duplicate for all columns
-        return dict(enumerate(itt.repeat(obj, n_cols)))
+        return dict(enumerate(itt.repeat(obj[0], n_cols)))
 
     if n_obj == n_cols:
         return dict(enumerate(obj))
@@ -151,7 +154,8 @@ def ensure_dict(obj, n_cols, what='\b'):
 def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
                   default_factory=None, args=(), **kws):
     """
-    Resolve user input for parameters that need to have either
+    Map input to column index or indices.
+    This function resolves user input for parameters that need to have either
         - the same number of elements as there are columns in the table or
         - need `aliases` to be provided.
 
@@ -303,7 +307,7 @@ def highlight(array, condition, props, formatter=ppr.numeric, **kws):
     return out
 
 
-def truncate(item, width):
+def truncate(item, width, dots=DOTS):
     # TODO: if DOTS more than 1 chr long
     cw = 0  # cumulative width
     s = ''

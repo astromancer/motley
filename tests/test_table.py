@@ -59,7 +59,7 @@ tables = [
                        precision=3, minimalist=True, ),
 
     # test auto alignment
-    # test compactify
+    # test summerize
     # test auto format
     # test highlight
     # test multiline cells

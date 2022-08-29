@@ -5,6 +5,7 @@ Pretty printed tables for small data sets
 
 # std
 import os
+import operator as op
 import numbers
 import warnings as wrn
 import functools as ftl
@@ -24,20 +25,20 @@ from recipes.lists import where, cosort
 from recipes.iter import coerced
 from recipes.sets import OrderedSet
 from recipes.functionals import echo0
+from recipes.decorators import catch
 from recipes import api, pprint as ppr
 from recipes.logging import LoggingMixin
 from recipes.decorators import raises as bork
 
 # relative
 from .. import ansi, codes
-from ..formatter import stylize
+from ..formatter import stylize, format
 from ..utils import resolve_alignment
 from .utils import *
 from .utils import _underline
 from .xlsx import XlsxWriter
 from .column import resolve_columns
-
-
+from motley.table import summary as sm
 # if __name__ == '__main__':
 # do Tests
 # TODO: print pretty things:
@@ -50,12 +51,13 @@ from .column import resolve_columns
 BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
 LEFT_BORDER = '\N{LEFT SQUARE BRACKET EXTENSION}'
 RIGHT_BORDER = '\N{RIGHT SQUARE BRACKET EXTENSION}'
+#  '⋮'      #'\N{LVERTICAL ELLIPSIS}'
 OVERLINE = '‾'  # U+203E
 # EMDASH = '—' U+2014
 HEADER_ALIGN = '^'
 # MAX_WIDTH = None  # TODO
 # MAX_LINES = None  # TODO
-KNOWN_COMPACT_KEYS = {'header', 'footer', 'except', 'drop'}
+
 
 # TODO: dynamical set attributes like title/headers/nrs/data/totals
 # TODO: unit tests!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
@@ -85,6 +87,10 @@ KNOWN_COMPACT_KEYS = {'header', 'footer', 'except', 'drop'}
 # TODO maybe
 # class ConsoleWriter:
 #     """Write to terminal"""
+
+
+class FormatWarning(UserWarning):
+    pass
 
 
 # defines vectorized length
@@ -199,8 +205,11 @@ def dict_to_list(data, ignore_keys={}, converters={}, header_levels={},
 
 
 def check_flag(obj):
-    if isinstance(obj, (str, UserString, callable)):
+    if isinstance(obj, list) or callable(obj):
         return obj
+
+    if isinstance(obj, (str, UserString)):
+        return obj.format
 
     raise TypeError(f'Invalid flag type: {type(obj)}.')
 
@@ -223,8 +232,8 @@ class Table(LoggingMixin):
     #  3 - lhs border
     #  4 - rhs border
 
-    _foot_fmt = None  # '{flag} : {info}'
-
+    # foot_fmt = None  # '{flag} : {info}'
+    _merge_repeat_groups = True
     _nrs_header = '#'
 
     def resolve_input(self, obj, n_cols=None, what='\b', converter=None,
@@ -262,6 +271,10 @@ class Table(LoggingMixin):
 
     @classmethod
     def from_dict(cls, data, ignore_keys=(), order='r', **kws):
+
+        # keys will be used as row or column headers and values as
+        #     data rows or columns, depending on `order` parameter.
+
         # note that the terse kws will not be replaced here, so you may end up
         # with things like dict(chead=['user given'],
         #                       col_headers=['key in `data` dict'])
@@ -353,15 +366,24 @@ class Table(LoggingMixin):
                  data,
                  *args,
                  # TODO: THIS API:
-                 # Table(data,  # first argument is usually data. Can be array, list, dict
-                 # # to init from  map of columns use `from_columns` constructor
+                 # Table(data,
+                 #      # first argument is usually data. Can be array, list, dict
+                 #      # to init from  map of columns use `from_columns` constructor.
+                 #      # You can also place the data anywhere in the argument sequence
+                 #      # if you use the `Data` identifier
+                 #      #    eg: `Table(Title('foo'), Data([1,2]))`
+                 #       DataFormat(precision, minimalist, align, masked),
                  #       Title('{"MY DATA TABLE":^s|Bg_/c}'),
-                 #       ColumnHeaders(headers, fmt='{:^ |bB_}', units),
                  #       ColumnGroups(group_names, fmt='{:^ |B_}'),
-                 #       # starting number for enumeration
-                 #       RowHeaders(nrs=0, names=row_names, fmt='<q|B'),
-                 #                  nrs_fmt=lambda: '',)
+                 #       ColumnTitles(headers, fmt='{:^ |bB_}', units),
+                 #       RowTitles(nrs=0,  # starting number for enumeration
+                 #                   nrs_fmt=lambda: ''
+                 #                  names=row_names,
+                 #                  fmt='<q|B'),
+                 #
+                 #       # aesthetics
                  #       frame=True, # this is the default, False or None turns it off
+                 #        hlines, borders
                  # )
                  #
                  # TODO: '{"DATA TABLE":^s|Bg_/c}'
@@ -380,9 +402,9 @@ class Table(LoggingMixin):
                  col_borders=_default_border,
 
                  col_groups=None,
-                 core_columns=(),
+                 #  core_columns=(),
 
-                 # RowTitles(names, fmt='{:< |bB}', nrs=True)
+                 # RowHeaders(names, fmt='{:< |bB}', nrs=True)
                  #
                  row_headers=None,
                  row_head_props='bold',
@@ -393,7 +415,7 @@ class Table(LoggingMixin):
 
                  # styling
                  frame=True,
-                 compact=False,
+                 summary=False,
 
                  # Data format
                  # DataFormat(precision, minimalist, align, masked)
@@ -410,9 +432,11 @@ class Table(LoggingMixin):
                  totals=None,
 
                  flags=None,
+                 flag_fmt='{}',
                  insert=None,
-                 highlight=None,
+                 highlight=None,  # FIXME: deprecate in favour of formatters
                  footnotes='',
+                 foot_fmt=None,
                  **kws):
 
         # TODO: style='matrix', 'bare', 'spreadsheet'
@@ -423,7 +447,8 @@ class Table(LoggingMixin):
         ----------
         data : array_like or dict
             input data - must be 1D, 2D
-            if dict, keys will be used as row_headers, and values as data
+            if dict, keys will be used as row_headers, and values as data. To
+            initialize from a dict of columns use `Table.from_dict(data, order='c')`
         units : array_like or dict
             str units that will be appended [in brackets] below the column
             headers in `col_headers`.  If given and no column headers are
@@ -454,7 +479,6 @@ class Table(LoggingMixin):
             The table border can be toggled using the `frame' parameter
 
 
-
         hlines: array-like, Ellipsis, optional
             Sequence with row line numbers / below which a solid border will be
             drawn.
@@ -470,29 +494,29 @@ class Table(LoggingMixin):
         minimalist : bool
             Represent floating point numbers with least possible number of
             significant digits
-        compact : bool or int or str #TODO or list of str ?? or dict
-            Suppress columns for which data values are all identical and print
-            them in a compact fashion as key-value pairs. There are various
-            styles of doing this, depending on the type and value of this
-            parameter. Compact representation will only be applied if the table
-            contains more than one row of data.
-            If str: {'drop', 'footnote', 'header'}
-                'drop': Compactable columns are simply ignored.
-                'footnote': Compactable columns are printed as key value pairs 
-                            in the table footnote.
-                'header': Key-value pairs printed in the table header below the
-                          table title and above the column headers. An integer
-                          value can be used to control the number of columns to
-                          use for this compact inset table. By default the
-                          maximum allowable number of columns given the
-                          available space is used (see below).
-            If int: 
-                This specifies the number of columns to use in the inset table.
+        summary : bool or int or str or dict
+            Columns for which data values are all identical will be removed from
+            the main table, and instead summarized as as key-value pairs and
+            typeset in a compact inset (sub)table. There are various styles of
+            doing this, depending on the type and value given with this
+            parameter. Summary representations will only be used for Tables that
+            contain more than one row of data.
+
+            An integer value can be used to control the number of columns to use
+            for the summary table.
             If True, the default:
-                The number of columns will be decided automatically to optimize
-                space.
-        #TODO: core_columns: tuple or list
-            Names of the column's that cannot be removed by compacting.
+                The maximum allowable number of columns given the available
+                space is used. Using `summary=True`, is the same as
+                using`summary={'ncols': any}`.
+            If int:
+                This specific number of columns will ne use in the inset table.
+                Using `summary=2`, is the same as using`summary={'ncols': 2}`.
+            If str: {'drop', 'header', 'footer'}
+                'drop':   Summarized columns are simply ignored.
+                'header': Summary key-value pairs are inset in the table header 
+                          below the table title and above the column headers.
+                'footer': Summarized columns are printed as key-value pairs
+                          in the table footer.
 
         ignore_keys : sequence of str
             if dictionary is passed as data, optionally specify the keys that
@@ -598,7 +622,7 @@ class Table(LoggingMixin):
 
         # from recipes import pprint
         # pprint.mapping(locals(), ignore=['self'])
-        logger.debug('COMPACT: {!r}', compact)
+        logger.debug('SUMMARY {!r}', summary)
 
         # special case: dict
         if isinstance(data, dict):
@@ -694,9 +718,18 @@ class Table(LoggingMixin):
         self.has_totals = (self.totals is not None)
 
         # get flags
-        flags = self.resolve_input(flags, n_cols, 'flags')  # , check_flag
+        flags = self.resolve_input(flags, n_cols, 'flags', check_flag)
+        if isinstance(flag_fmt, str):
+            flag_fmt = flag_fmt.format
+        assert callable(flag_fmt)
+        self.flag_fmt = flag_fmt
 
         # Footnotes
+        if foot_fmt:
+            if isinstance(foot_fmt, str):
+                foot_fmt = foot_fmt.format
+            assert callable(foot_fmt)
+        self.foot_fmt = foot_fmt
 
         flag_info = None
         self.footnotes = []
@@ -753,37 +786,36 @@ class Table(LoggingMixin):
 
         self.cell_white = int(cell_whitespace)
 
-        # compactify
-        self.compact_items = {}
-        self._idx_shown = np.arange(n_cols + hrh + hrn)
-
-        self._compact_header = self._compact_footer = False
-        self.compact, dont_remove = self._resolve_compact(compact)
-        # logger.debug(f'{self._compact_header = } {self._compact_footer = }')
-
-        if self.compact:
-            self.compactify(dont_remove)
-            # requested_width = requested_width[shown]
+        # summarize / compactify
+        self.summary = sm.SummaryTable.from_table_api(self, summary)
+        self._idx_shown = self.summary.index_shown
 
         # Next get column widths (without borders)
         # These are either those input by the user, or determined from the
         # content of the columns
-        self.col_widths = get_column_widths(self.pre_table) + self.cell_white
+
+        if width is None:
+            self.col_widths = measure_column_widths(self.pre_table) + self.cell_white
+        else:
+            self.col_widths = self.resolve_widths(width)
+            # if requested widths are smaller than that required to fully
+            # display widest item in the column, truncate all too-wide items
+            # in that column
+            self.truncate_cells(self.col_widths)
 
         # NOTE: next block needs to happen after `self.col_widths` assigned
-        self._compact_table = None
-        has_compact = self.has_compact()
-        if has_compact:
+        self.inset = None
+        if (has_inset := bool(self.summary)):
             # this is an instance of `Table`!!
-            self._compact_table = self._get_compact_table()
+            self.inset = self.summary()
 
-        # check for too-wide title or compacted lines, and amend column widths
+        # check for too-wide title or inset lines, and amend column widths
         # to match
         # todo method here
         tw = 0
-        if self.has_title or has_compact:
-            if has_compact:
-                tw = self._compact_table.get_width()
+        if self.has_title or has_inset:
+            if has_inset:
+                tw = self.inset.get_width()
 
             # use explicit split('\n') below instead of splitlines since the
             # former yields a non-empty sequence for title=''
@@ -800,16 +832,17 @@ class Table(LoggingMixin):
                     self.col_widths[next(idx)] += 1
                     d -= 1
 
-        if width is not None:
-            requested_widths = self.resolve_widths(width)
-            if np.any(requested_widths <= 0):
-                raise ValueError('Column widths must be positive.')
+        # add summarized columns as footnotes if requested
+        if (self.summary.loc == 1) and self.summary.items:
+            # add footnote table
+            self.footnotes.extend(str(self.inset).splitlines())
 
-            # if requested widths are smaller than that required to fully
-            # display widest item in the column, truncate all too-wide items
-            # in that column
-            self.truncate_cells(requested_widths)
-            self.col_widths = requested_widths
+            # if self.foot_fmt:
+            #     self.footnotes.extend(
+            #         (self.foot_fmt(flag=col, info=val)
+            #          for col, val in self.summary.items.items())
+            #     )
+            # else:
 
         # column borders
         # self.borders = borders
@@ -847,7 +880,7 @@ class Table(LoggingMixin):
         # Column specs
         # add whitespace for better legibility
         # self.cell_white = cell_whitespace
-        # self.col_widths = self.get_column_widths()
+        # self.col_widths = self.measure_column_widths()
 
         # decide column widths
         # self.col_widths, width_max = self.resolve_width(width)
@@ -880,7 +913,7 @@ class Table(LoggingMixin):
 
         self.show_colourbar = False
 
-        # if self.compact == 'footnote':
+        # if self.summarize == 'footnote':
 
     def __repr__(self):
         # useful in interactive sessions to immediately print the table
@@ -934,13 +967,8 @@ class Table(LoggingMixin):
     def n_head_lines(self):
         """number of newlines in the table header"""
         n = (self.title.count('\n') + 1) if self.has_title else 0
-        m = len(self.compact_items) // int(self.compact) if self.compact else 0
+        m = len(self.summary.items) // int(bool(self.summarize))
         return n + m + self.n_head_rows + self.frame
-
-    @property
-    def idx_compact(self):
-        n = self.data.shape[1] + self.n_head_col
-        return np.setdiff1d(np.arange(n), self._idx_shown)
 
     def empty_like(self, n_rows, **kws):
         """
@@ -950,8 +978,12 @@ class Table(LoggingMixin):
 
         filler = [''] * len(self._idx_shown)
         return Table([filler] * n_rows,
-                     width=self.get_column_widths()[self._idx_shown],
+                     width=self.measure_column_widths()[self._idx_shown],
                      **kws)
+
+    def allow_summary(self):
+        """Check if table allows summarizarion."""
+        return (len(self.data) > 1) and self.has_col_head
 
     def resolve_groups(self, col_groups, n_cols):
         # handle column group headers
@@ -966,51 +998,6 @@ class Table(LoggingMixin):
         col_groups = itt.zip_longest(*col_groups, fillvalue='')
         # FIXME: too wide col_groups should truncate
         return list(col_groups)
-
-    def _resolve_compact(self, compact):
-        dont_remove = ()
-        if self.allow_compact():
-            if isinstance(compact, abc.MutableMapping):
-                if (nope := set(compact.keys()) - KNOWN_COMPACT_KEYS):
-                    raise ValueError(f'Invalid keys: {nope} in `compact` dict.')
-
-                dont_remove = compact.pop('except', ())
-
-                for key in ('header', 'footer'):
-                    if key in compact:
-                        compact = compact[key]
-                        self._compact_footer = key.startswith('foot')
-                        self._compact_header = ~self._compact_footer
-                        break
-
-                if 'drop' in compact:
-                    compact = 'drop'
-
-            if isinstance(compact, str):
-                if compact in KNOWN_COMPACT_KEYS - {'except'}:
-                    self._compact_footer = compact.startswith('foot')
-                    if compact == 'drop':
-                        self._compact_header = self._compact_footer = False
-                        compact = 1
-                    else:
-                        compact = True
-                else:
-                    raise ValueError('Invalid string value for compact '
-                                     f'parameter: {compact!r}')
-
-            elif isinstance(compact, numbers.Integral):
-                self._compact_header = True
-            else:
-                raise ValueError(f'Expected `compact` parameter to be one of types bool, int, '
-                                 f'str or dict. Got {compact!r}, which is {type(compact)}.')
-
-        elif compact:
-            wrn.warn(f'Ignoring request to compact with {compact!r}, since '
-                     'table has no column headers, or insufficient data.')
-            compact = False
-
-        logger.debug('Compact resolved as {}. Not removing: {}', compact, dont_remove)
-        return compact, dont_remove
 
     def get_default_formatter(self, col_idx, precision, short, data):
         """
@@ -1066,50 +1053,52 @@ class Table(LoggingMixin):
 
         return ppr.PrettyPrinter(precision=precision, minimalist=short).pformat
 
-    # def _format_cell_value(datum, fmt, flag):
+    def _get_flags(self, name, data, flags):
+        # format flags for column data
+        with catch(warn='Could not resolve flags for column {name!r} due '
+                   'to the following exception:\n{err}', name=name):
+            # get flags
+            if callable(flags):
+                flags = [flags(val) if val else '' for val in data]
+
+        return flags
 
     def format_column(self, data, fmt, dot_align, name, flags=None):
         # wrap the formatting in try, except since it's usually not
         # critical that it works and getting some info is better than none
         used_flags = set()
         if flags:
-            # with catch(action='warn', message=):
-            try:
-                flags = list(map(flags, data) if callable(flags) else map(str, flags))
-                used_flags |= set(flags) - {''}
-            except Exception as err:
-                wrn.warn(f'Could not resolve flags for column {name!r} due to the following'
-                         f' exception:\n{err}')
+            flags = self._get_flags(name, data, flags)
+            used_flags |= set(flags) - {''}
+
+        # Todo: formatting for row_headers...
+        if fmt is None:
+            # null format means convert to str, need everything in array
+            # to be str to prevent errors downstream
+            # (data is dtype='O')
+            fmt = str
+
+        elif isinstance(fmt, str):
+            # assume format string
+            fmt = fmt.format
 
         result = []
-        for j, cell in enumerate(data):
-            try:
-                formatted = fmt(cell)
+        for j, (cell, flag) in enumerate(itt.zip_longest(data, flags, fillvalue='')):
+            with catch(warn='Could not format cell {j} in column {name!r} with'
+                       ' formatter {fmt!r} due to the following exception:\n{err}',
+                       j=j, name=name, fmt=fmt):
+                # format cell value and concatenate with flag
+                cell = fmt(cell)
+                # format flag
+                if flag:
+                    cell += self.flag_fmt(flag, flag=flag)
 
-            except Exception as err:
-                wrn.warn(
-                    f'Could not format cell {j} in column {name!r} with formatter {fmt!r} due to:\n'
-                    f'the following '
-                    f'exception {err}')
-                formatted = str(cell)
-
-            result.append(formatted)
-            # result = np.vectorize(str, (str, ))(data)
+            # coerce to str in case the block above failed
+            result.append(str(cell))
 
         # special alignment on '.' for float columns
         if dot_align:
             result = ppr.align_dot(result)
-
-        # concatenate data with flags
-        # flags = flags.get(i)
-        if flags:
-            try:
-                result = np.char.add(result,  # .astype(str)
-                                     list(map(str, flags)))
-            except Exception as err:
-                wrn.warn(f'Could not append flags to formatted data for '
-                         f'column {name!r} due to the following '
-                         f'exception:\n{err}')
 
         return result, used_flags
 
@@ -1122,13 +1111,6 @@ class Table(LoggingMixin):
 
         # format custom columns
         for i, fmt in formatters.items():
-
-            # Todo: formatting for row_headers...
-            if fmt is None:
-                # null format means convert to str, need everything in array
-                # to be str to prevent errors downstream
-                # (data is dtype='O')
-                fmt = str
 
             col = data[..., i]
             if np.ma.is_masked(col):
@@ -1145,7 +1127,7 @@ class Table(LoggingMixin):
 
             # Create footnotes from flags and info
             for flag in used_flags:
-                self._format_footer(i, flag, flag_info)
+                self._format_column_footnote(i, flag, flag_info)
 
             if used_flags:
                 logger.debug('Columns {} used flags: {}', self.col_headers[i],
@@ -1158,70 +1140,86 @@ class Table(LoggingMixin):
 
         return data
 
-    def _format_footer(self, i, flag, flag_info):
-        _foot_fmt = None
+    def _format_column_footnote(self, i, flag, flag_info):
+        foot_fmt = None
         hdr = ''
         if (info := flag_info.get(flag)):
             # footnotes for all columns
-            _foot_fmt = self._foot_fmt or ' {flag} : {info}'
+            foot_fmt = self.foot_fmt or ' {flag} : {info}'
 
         elif (info := flag_info.get((hdr := self.col_headers[i]), {}).get(flag)):
             # per column footnotes
-            _foot_fmt = self._foot_fmt or ' {grp}.{hdr}{flag} : {info}'
+            foot_fmt = self.foot_fmt or ' {grp}.{hdr}{flag} : {info}'
 
-        if _foot_fmt:
-            grp = ''
-            if self.col_groups:
-                grp = self.col_groups[-1][i + self.n_head_col]
+        if not foot_fmt:
+            wrn.warn(f'Could not resolve description for flag {flag!r} in column {hdr!r}.'
+                     + ('You may provide a `dict` to the `footnotes` parameter to'
+                        ' describe the flags.' * bool(self.footnotes)))
+            return
 
-            self.footnotes.append(
-                _foot_fmt.format(
-                    flag=flag, info=info, grp=grp, hdr=hdr, tbl=self
-                )
+        if isinstance(foot_fmt, str):
+            foot_fmt = foot_fmt.format
+
+        grp = ''
+        if self.col_groups:
+            grp = self.col_groups[-1][i + self.n_head_col]
+
+        self.footnotes.append(
+            foot_fmt(
+                flag=flag, info=info, grp=grp, hdr=hdr, tbl=self
             )
+        )
 
-        else:
-            wrn.warn(
-                f'Could not resolve description for flag {flag!r} in column {hdr!r}.'
-                'You may provide a `dict` to the `footnotes` parameter to describe the flags.')
+    def truncate_cells(self, widths):
+        # this will probably be quite slow ...
+        # note textwrap.shorten does this, but won't handle ANSI
 
-    def get_default_align(self, col_idx):
-        #
-        ts = self.col_data_types[col_idx]
-        if len(ts) == 1:
-            # all data in this column is of the same type
-            typ, = ts
-            if issubclass(typ, numbers.Integral):
-                return '>'
-            if issubclass(typ, numbers.Real):
-                return '.'
+        ict, = np.where(widths < self.col_widths)
+        # fixme: if cells contain coded strings???
+        ix = lengths(self.pre_table[:, ict]) > widths[ict]
 
-        return '<'
+        for l, j, in zip(ix.T, ict):
+            w = widths[j]
+            for i in np.where(l)[0]:
+                self.pre_table[i, j] = truncate(self.pre_table[i, j], w)
 
     def resolve_widths(self, width):
-        width_min = 0
-        width_max = None
-        # if width is None:
-        #     # each column will be as wide as the widest data element it contains
-        #     widths =
-        #     #
-        #     get_column_widths(self.pre_table)
-        width = np.array(width)
-        if width.size == self.data.shape[1] + self.has_row_head:
-            # each column width specified
-            return width
+        # width_min = 0
+        # width_max = np.inf
+        
+        if width is None:
+            # each column will be as wide as the widest data element it contains
+            return measure_column_widths(self.pre_table) + self.cell_white
 
-        if np.size(width) == 1:
+        width = np.array(width)
+        if width.size == 1:
             # The table will be made exactly this wide
             width = int(width)  # requested width
-            # TODO: DECIDE COL WIDTHS
-            raise NotImplementedError
 
-        if np.size(width) == self.data.shape[1]:
+            # Split table if columns too wide for requested width
+            col_widths = measure_column_widths(self.pre_table)  + self.cell_white 
+        
+            if col_widths.sum() + self.lcb.sum() > width:
+                self.max_width = width
+                return col_widths
+            
+            # Apportion column widths
+            width -= self.lcb.sum()
+            return justify_widths(col_widths, width)
+        
+        if np.any(width <= 0):
+            raise ValueError('Column widths must be positive.')
+        
+        if width.size == self.data.shape[1]:
             # each column width specified
             hcw = self.col_widths[:self.n_head_col]
             return np.r_[hcw, width]
-
+        
+        if width.size == self.data.shape[1] + self.has_row_head:
+            # each column width specified
+            return width
+        
+        
         if isinstance(width, range):
             # maximum table width given.
             raise NotImplementedError
@@ -1230,109 +1228,7 @@ class Table(LoggingMixin):
 
         raise ValueError(f'Cannot interpret width {str(width)!r}')
 
-        # return col_widths  # , width_max
-
-    def compactable_columns(self, ignore=()):
-        if not self.allow_compact():
-            return ()
-
-        idx_same, = np.where(np.all(self.data == self.data[0], 0))
-
-        idx_ign = []
-        if any(ignore):
-            *_, idx_ign = np.where(self.col_headers == np.atleast_2d(ignore).T)
-
-        idx_same = np.setdiff1d(idx_same, idx_ign)  # + self.n_head_col
-        return idx_same
-
-    def allow_compact(self):
-        """Check if table allows compact representation"""
-        return (len(self.data) > 1) and self.has_col_head
-
-    def has_compact(self):
-        return bool((self.compact != 'drop') and self.compact_items)
-
-    def _get_ctable_widths(self):
-        if not self.has_compact():
-            return
-
-        return (
-            # Widths for key-val pairs:                            + 3 for ' = '
-            np.char.str_len(list(self.compact_items.items())).sum(1) + 3,
-            # this is the width of the compacted columns
-            self.lcb[self.idx_compact] + self.cell_white
-        )
-
-    def _min_ctable_width(self):
-        return sum(self._get_ctable_widths()).max() if self.has_compact() else 0
-
-    def compactify(self, ignore=()):
-        """
-        check which columns contain single unique value duplicated. These data
-        are represented as a sub-header in the table.  This makes for a more
-        compact representation of the same data.
-
-        Parameters
-        ----------
-        data
-        col_headers
-
-        Returns
-        -------
-
-        """
-
-        # columns for which all data identical
-        # end = -1 if self.has_totals else None
-        data = self.data
-        if (len(data) <= 1) or not self.has_col_head:
-            self.logger.warning(
-                'Requested `compact` representation, but no column headers '
-                'provided. Ignoring.'
-            )
-            return ...
-
-        # if a total is asked for on a column, make sure we don't suppress it
-        idx_squash = np.setdiff1d(self.compactable_columns(ignore),
-                                  np.nonzero(self.totals)[0])
-        val_squash = self.data[0, idx_squash]
-        idx_show = np.setdiff1d(range(self.data.shape[1]), idx_squash)
-        idx_show = np.r_[np.arange(self.n_head_col), idx_show + self.n_head_col]
-        # check if any data left to display
-        if idx_show.size == 0:
-            self.logger.warning('No data left in table after compacting '
-                                'singular value columns.')
-
-        # remove columns
-        # self.col_data_types = np.take(self.col_data_types, idx_show[nhc:] - nhc)
-        self._idx_shown = idx_show
-        self.compact_items = dict(zip(np.take(self.col_headers, idx_squash),
-                                      val_squash))
-
-        # self.pre_table = self.pre_table[:, idx_show]
-        # self.col_widths = self.col_widths[idx_show]
-        # self.align = self.align[idx_show]
-        #
-        # if self.col_groups is not None:
-        #     self.col_groups = np.take(self.col_groups, idx_show)
-
-        return idx_show  # , col_headers
-
-    def truncate_cells(self, requested_width):
-        # this will probably be quite slow ...
-        # note textwrap.shorten does this, but won't handle ANSI
-
-        ict, = np.where(requested_width < self.col_widths)
-        # fixme: if cells contain coded strings???
-        ix = lengths(self.pre_table[:, ict]) > requested_width[ict]
-
-        for l, j, in zip(ix.T, ict):
-            w = requested_width[j]
-            for i in np.where(l)[0]:
-                self.pre_table[i, j] = truncate(self.pre_table[i, j], w)
-
-    def get_column_widths(self, data=None, count_hidden=False,
-                          with_borders=False):
+    def measure_column_widths(self, data=None, count_hidden=False, with_borders=False):
         """data should be string type array"""
         # note now pretty much redundant
 
@@ -1340,7 +1236,7 @@ class Table(LoggingMixin):
             data = self.pre_table
 
         # get width of columns - widest element in column
-        w = get_column_widths(data, count_hidden=count_hidden) + self.cell_white
+        w = measure_column_widths(data, count_hidden=count_hidden) + self.cell_white
 
         # add border size
         if with_borders:
@@ -1354,9 +1250,9 @@ class Table(LoggingMixin):
 
         # NOTE this excludes the lhs starting border
         width = (self.col_widths[indices] + self.lcb[indices]).sum()
-        if self._compact_table:
-            return max(width, self._compact_table.get_width() + 1)
-        return max(width, self._min_ctable_width())
+        if self.inset:
+            return max(width, self.inset.get_width() + 1)
+        return max(width, 0)  # self._min_ctable_width()
 
     def get_alignment(self, align, data, default_factory):
         """get alignment array for columns"""
@@ -1365,11 +1261,27 @@ class Table(LoggingMixin):
                                        default_factory=default_factory)
         # make align an array with same size as nr of columns in table
 
-        # row headers are left aligned
-        return '<' * self.n_head_col + ''.join(cosort(*zip(*alignment.items()))[1])
+        # row headers are left aligned, row nrs right aligned
+        return ''.join(('<' * self.has_row_head,
+                        '>' * self.has_row_nrs,
+                        *cosort(*zip(*alignment.items()))[1]))
+
         # dot_aligned = np.array(where(align, '.')) - self.n_head_col
         # align = align.replace('.', '<')
         # return align
+
+    def get_default_align(self, col_idx):
+        #
+        ts = self.col_data_types[col_idx]
+        if len(ts) == 1:
+            # all data in this column is of the same type
+            typ, = ts
+            if issubclass(typ, numbers.Integral):
+                return '>'
+            if issubclass(typ, numbers.Real):
+                return '.'
+
+        return '<'
 
     def get_totals(self, data, col_indices):
         """compute totals for columns at `col_indices`"""
@@ -1459,8 +1371,8 @@ class Table(LoggingMixin):
     def make_title(self, width, continued=False):
         """make title line"""
         text = self.title + (' (continued)' if continued else '')
-        return self.build_long_line(text, width, self.title_align,
-                                    self.title_props)
+        return self.build_line(text, width, self.title_align,
+                               self.title_props)
 
     def gen_multiline_rows(self, cells, widths, alignment, borders,
                            underline=False):
@@ -1518,12 +1430,12 @@ class Table(LoggingMixin):
         pad_width = ansi.length_codes(text) + width
         return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
 
-    def build_long_line(self, text, width, align='<', style=None):
+    def build_line(self, text, width, align='<', style=None):
         # table row line that spans `width` of table.  use to build title
-        # line and compact inset etc..
+        # line and summary inset etc..
 
         width -= int(self.frame)
-        borders = (RIGHT_BORDER, LEFT_BORDER) if self.frame else ''
+        borders = (RIGHT_BORDER, LEFT_BORDER) if self.frame else ('', '')
 
         style = coerce(style or [], to=list, wrap=str, ignore=dict)  # list / dict
         lines = text.split(os.linesep)
@@ -1552,7 +1464,7 @@ class Table(LoggingMixin):
             if not isinstance(line, str):
                 line = str(line)
             #
-            yield self.build_long_line(line, width, *args)
+            yield self.build_line(line, width, *args)
 
     def format(self):
         """Construct the table and return it as as one long str"""
@@ -1636,10 +1548,7 @@ class Table(LoggingMixin):
         list of str (table rows)
         """
         table = []
-        if column_indices is None:
-            column_indices = self._idx_shown
-
-        idx = column_indices
+        idx = self._idx_shown if column_indices is None else column_indices
         part_table = self.pre_table[:, idx]
         table_width = self.get_width(idx)
 
@@ -1658,23 +1567,24 @@ class Table(LoggingMixin):
 
         # FIXME: problems with too-wide column
 
-        # compacted columns
-        if self._compact_header and self.compact_items:
-            # if isinstance(self.compact, (numbers.Integral)):
-            # display compacted columns in single row
-            compact_rows = self.build_long_line(str(self._compact_table),
-                                                table_width,
-                                                style=['underline'])
+        # summarized columns
+        if (self.summary.loc == 0) and self.summary.items:
+            # if isinstance(self.summarize, (numbers.Integral)):
+            # display summarized columns in single row
+            inset_rows = self.build_line(str(self.inset),
+                                         table_width,
+                                         style=['underline' * self.frame])
 
-            table.append(compact_rows)
+            table.append(inset_rows)
 
         if table_width > (cw := (self.col_widths[idx] + self.lcb[idx]).sum()):
-            # This means the compact table is wider than the main table and we
+            # This means the inset table is wider than the main table and we
             # need to add some space to the columns
             self.col_widths[self._idx_shown] += apportion(table_width - cw,
                                                           len(self._idx_shown))
 
         # column groups
+        # see :  xslx.merge_duplicate_cells
         for groups in self.col_groups:
             line = LEFT_BORDER if self.frame else ''
             lbl = groups[idx[0]]  # name of current group
@@ -1684,13 +1594,16 @@ class Table(LoggingMixin):
             for i, j in enumerate(idx):
                 name = groups[j]
                 w = self.col_widths[j] + self.lcb[j]  # + (j-i)  #
-                if name == lbl:  # still within the same group
+                if (name == lbl):  # and (self._merge_repeat_groups or gw == 0)
+                    # still within the same group
                     gw += w
-                else:  # reached a new group. write previous group
+                else:
+                    # reached a new group. write previous group
                     if len(lbl) >= gw:
                         lbl = truncate(lbl, gw - 1)
 
                     line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
+
                     gw = w
                     lbl = name
 
@@ -1735,100 +1648,7 @@ class Table(LoggingMixin):
         if len(self.footnotes):
             table.extend(self.footnotes)
 
-        # add compact columns as footnotes if requested
-        if self._compact_footer and self.compact_items:
-            # format footnote table
-            compact_rows = self.build_long_line(str(self._compact_table),
-                                                table_width,
-                                                props=['underline'])
-            table.append(compact_rows)
-
         return table
-
-    def _get_compact_table(self, n_cols=None, justify=True, equals='= '):
-
-        # TODO: should print units here also!
-
-        compact_items = list(self.compact_items.items())
-        n_comp = len(self.compact_items)  # number of compacted columns
-        # table_width = self.get_width()  # excludes lhs border
-
-        if (n_cols is None) and (self.compact is not True):
-            n_cols = self.compact
-
-        auto_ncols = (
-            # number of compact columns unspecified
-            ((n_cols is None) and (self.compact is True)) or
-            # user specified too many compact columns
-            ((n_cols is not None) and (n_cols > n_comp))
-        )
-        if auto_ncols:
-            # decide how many columns for compact key-value table
-            n_cols = self._auto_ncols()
-            self.logger.debug('Auto ncols: {}', n_cols)
-
-        # n items per column
-        self.compact = n_cols = int(n_cols)
-        n_pc = (n_comp // n_cols) + bool(n_comp % n_cols)
-        pad = n_pc * n_cols - n_comp
-        compact_items.extend([('', '')] * pad)
-        data = np.hstack(np.reshape(compact_items, (n_cols, n_pc, 2)))
-        data = np.atleast_2d(data.squeeze())
-
-        # todo row_head_props=self.col_head_props,
-        # self._default_border #  u"\u22EE" VERTICAL ELLIPSIS
-        col_borders = [equals, self._default_border] * n_cols
-        col_borders[-1] = ''
-
-        # widths of actual columns
-        widths = lengths(data).max(0)
-        widths[::2] += 1           # +1 for column borders
-
-        # justified spacing
-        if justify:
-            deltas = justified_delta(widths.reshape(-1, 2).sum(1) + 3,
-                                     self.get_width())
-            if np.any(widths[1::2] <= -deltas):
-                wrn.warn('Column justification lead to zero/negative column '
-                         'widths. Ignoring!')
-            else:
-                widths[1::2] += deltas
-
-        return Table(data, col_borders=col_borders, frame=False, width=widths,
-                     too_wide=False)
-
-    def _auto_ncols(self):
-        # decide how many columns the inset table will have
-        # n_cols chosen to be as large as possible given table width
-        # this leads to most compact repr
-        self.logger.debug('Computing optimal number of columns for compact table.')
-        # number of compacted columns
-        n_comp = len(self.compact_items)
-        table_width = self.get_width()  # excludes lhs border
-
-        # Widths for key-val pairs:                                + 3 for ' = '
-        _2widths, extra = self._get_ctable_widths()
-
-        if max(_2widths + extra) >= table_width:
-            return 1
-
-        extra = 3  # len(self._default_border) + self.cell_white
-        trials = range(table_width // _2widths.max(), round(n_comp / 2) + 1)
-        trials = [*trials, n_comp]
-        for i, n_cols in enumerate(trials):
-            nc, lo = divmod(n_comp, n_cols)
-            pad = (nc + bool(lo)) * n_cols - n_comp
-            ccw = np.hstack([_2widths, [0] * pad]
-                            ).reshape(n_cols, -1).max(1)
-
-            # + extra for column border + cell_white
-            if sum(ccw + extra) > table_width:
-                if np.any(ccw == 0):
-                    continue
-                n_cols = trials[i - 1]
-                break
-
-        return n_cols
 
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes

@@ -119,7 +119,7 @@ class AttrTable:
             'fmt':       'formatters',
             'align':     'alignment',
             'flags':     'flags',
-            'flag_info': 'footnotes'
+            # 'flag_info': 'footnotes'
         }
         options = defaultdict(dict)
         totals = []
@@ -141,8 +141,9 @@ class AttrTable:
             if col.total:
                 totals.append(attr)
 
-        return cls(mapping.keys(), totals=totals, **options, **kws)
-
+        obj = cls(mapping.keys(), totals=totals, **options, **kws)
+        obj._columns = list(mapping.values())
+        return obj
 
     def __get__(self, instance, kls):
         if instance:  # lookup from instance
@@ -181,7 +182,7 @@ class AttrTable:
         # set default options for table
         self.kws = {**dict(precision=5,
                            minimalist=True,
-                           compact=True),
+                           summary=True),
                     **kws}
 
         self.title = self.kws.get('title')
@@ -204,6 +205,7 @@ class AttrTable:
         if isinstance(footnotes, dict):
             footnotes = {self.get_header(attr): val
                          for attr, val in footnotes.items()}
+
         self.footnotes = footnotes
 
         # self.headers = dict(zip(attrs, self.get_headers(attrs)))
@@ -361,9 +363,10 @@ class AttrTable:
             attrs = self.attrs
 
         data = container.attrs(*attrs)
+        # cols = list(zip(*data))
         col_headers = self.get_headers(attrs)
-        flags = {colname: list(map(flag, container))
-                 for colname, flag in self.flags.items() if callable(flag)}
+        flags = {colname: list(map(flag, container) if callable(flag) else flag)
+                 for colname, flag in self.flags.items()}
 
         Table._foot_fmt = self._foot_fmt  # HACK
         return Table(data, **{**self.kws,  # defaults
@@ -428,8 +431,8 @@ class AttrTable:
         """
 
         title = kws.pop('title', self.__class__.__name__)
-        ncc = kws.pop('compact', False)  # number of columns in compact part
-        kws['compact'] = False
+        ncc = kws.pop('summary', False)  # number of columns in summary part
+        kws['summary'] = False
 
         if titled is True:
             titled = make_group_title
@@ -456,7 +459,7 @@ class AttrTable:
                                                title=title,
                                                totals=totals,
                                                units=units,
-                                               # compact=False,
+                                               # summary=False,
                                                **kws)
 
             # only first table gets title / headers
@@ -494,16 +497,16 @@ class AttrTable:
             for gid in empty:
                 tables[gid] = filler
 
-        # HACK compact repr
-        if ncc and first.allow_compact():
-            first.compact = ncc
-            first.compact_items = dict(zip(
+        # HACK summary repr
+        if ncc and first.summary.allow():
+            first.summarize = ncc
+            first.summary.items = dict(zip(
                 list(compactable),
                 self.get_table(first[:1], compactable,
                                chead=None, cgroups=None,
                                row_nrs=False, **kws).pre_table[0]
             ))
-            first._compact_table = first._get_compact_table()
+            first.inset = first.summary()
 
         # put empty tables at the end
         # tables.update(empty)

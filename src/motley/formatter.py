@@ -80,32 +80,34 @@ STRING_CLASSES = (str, UserString)
 #     \}
 # ''')
 
+RGX_FMT_SPEC_BASE = r'''(?x)
+    # :?
+    (?P<spec>
+    # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+        (?: # non-capture
+            (?P<fill>[^{}])      # fill only valid if followed by align
+            (?=[<>=^])           # lookahead (doesn't consume)
+        )?
+        (?P<align>[<>=^]?)       # can have align without fill
+        (?P<sign>[+\- ]?)
+        (?P<alt>\#?)
+        (?P<width>\d*)
+        (?P<grouping>[_,]?)
+        (?P<precision>(?:\.\d+)?)
+        (?P<type>[bcdeEfFgGnosxX%]?)
+    )
+'''
+
 
 @ftl.lru_cache()
 def get_spec_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
-    return re.compile(r'''(?x)
-        # :?
-        (?P<spec>
-        # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
-            (?: # non-capture
-                (?P<fill>[^{}])      # fill only valid if followed by align
-                (?=[<>=^])           # lookahead (doesn't consume)
-            )?
-            (?P<align>[<>=^]?)       # can have align without fill
-            (?P<sign>[+\- ]?)
-            (?P<alt>\#?)
-            (?P<width>\d*)
-            (?P<grouping>[_,]?)
-            (?P<precision>(?:\.\d+)?)
-            (?P<type>[bcdeEfFgGnosxX%]?)
-        )
-        ''' rf'''
-        # Colour / style format directives
-        (?P<style>
-            ({re.escape(fg_mark)}(?P<fg>[ \w,\[\]\(\)_\- ]*))?  # foreground 
-            ({re.escape(bg_mark)}(?P<bg>[ \w,\[\]\(\) ]*))?     # background 
-        )
-    ''')
+    return re.compile(rf'''{RGX_FMT_SPEC_BASE}
+    # Colour / style format directives
+    (?P<style>
+        ({re.escape(fg_mark)}(?P<fg>[ \w,\[\]\(\)_\- ]*))?  # foreground 
+        ({re.escape(bg_mark)}(?P<bg>[ \w,\[\]\(\) ]*))?     # background 
+    )
+''')
 
 
 # def get_fmt_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
