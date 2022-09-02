@@ -7,8 +7,9 @@ import pytest
 from loguru import logger
 
 # local
-from motley.formatter import formatter, Formatter
-from recipes.testing import Expected, mock
+from motley.formatter import Formatter, formatter
+from recipes.testing import Expected, Throws, mock
+from recipes.string.brackets import UnpairedBracketError
 
 
 # ---------------------------------------------------------------------------- #
@@ -113,6 +114,7 @@ test_std_fmt = exp({
 
 # class TestExt:
 
+
 # TODO: test_stylize with cases below!
 test_extended_format = exp({
     **{  # Basic
@@ -211,17 +213,17 @@ test_extended_format = exp({
         '********************************************'
         '\x1b[0m|',
 
-        mock.format('{:|rBI_/k}', 'Hello world!'):
-        '\x1b[;31;1;3;4;40mHello world!\x1b[0m',
+        mock.format('{:|rBI_/k}', ' ... '):
+        '\x1b[;31;1;3;4;40m ... \x1b[0m',
 
-        mock.format('{:|red,B,I,_/k}', 'Hello world!'):
-        '\x1b[;31;1;3;4;40mHello world!\x1b[0m',
+        mock.format('{:|red,B,I,_/k}', ' ... '):
+        '\x1b[;31;1;3;4;40m ... \x1b[0m',
 
-        mock.format('{:|aquamarine,I/lightgrey}', 'Hello world!'):
-        '\x1b[;38;2;127;255;212;3;48;2;211;211;211mHello world!\x1b[0m',
+        mock.format('{:|aquamarine,I/lightgrey}', ' ... '):
+        '\x1b[;38;2;127;255;212;3;48;2;211;211;211m ... \x1b[0m',
 
-        mock.format('{:|(122,0,0),B,I,_/k}', 'Hello world!'):
-        '\x1b[;38;2;122;0;0;1;3;4;40mHello world!\x1b[0m',
+        mock.format('{:|(122,0,0),B,I,_/k}', ' ... '):
+        '\x1b[;38;2;122;0;0;1;3;4;40m ... \x1b[0m',
 
         # Nested with alignment spec
         mock.format('{{name:s|g}:{line:d|orange}: <21}', name='xyz', line=666):
@@ -264,10 +266,74 @@ test_extended_format = exp({
         mock.format('{:|^11|navy/lime}', 'x'):
             '\x1b[;38;2;0;0;128;48;2;0;255;0m|||||x|||||\x1b[0m',
 
-        mock.format('{:s|(122,0,0),B,I,_/k}', 'Hello world'):
-            '\x1b[;38;2;122;0;0;1;3;4;40mHello world\x1b[0m',
+        mock.format('{:s|(122,0,0),B,I,_/k}', ' ... '):
+            '\x1b[;38;2;122;0;0;1;3;4;40m ... \x1b[0m',
 
-       }
+        # escaped braces
+        '':
+            '',
+
+        mock.format('{}', '...'):
+            '...',
+
+        mock.format(' {} ', '...'):
+            ' ... ',
+
+        mock.format(' {{ {}', '...'):
+            ' { ...',
+
+        mock.format(' {{ {} ', '...'):
+            ' { ... ',
+
+        mock.format(' {{ {} {}', '...', '!!!'):
+            ' { ... !!!',
+
+        mock.format('    {} }}', '...'):
+            '    ... }',
+
+        mock.format('    {} }} ', '...'):
+            '    ... } ',
+
+        mock.format('    {} }} {}', '...', '!!!'):
+            '    ... } !!!',
+
+        mock.format(' {{ {} }} ', '...'):
+            ' { ... } ',
+
+        mock.format(' {{ {} }} {}', '...', '!!!'):
+            ' { ... } !!!',
+
+        mock.format('{} {{', '...'):
+            '... {',
+
+        mock.format('{} }}', '...'):
+            '... }',
+
+        mock.format('{{ {} }}', '...'):
+            '{ ... }',
+
+        mock.format('{{{:s|BI_/k}', ' ... '):
+            '{\x1b[;1;3;4;40m ... \x1b[0m',
+
+        mock.format('{:s|BI_/k}}}', ' ... '):
+            '\x1b[;1;3;4;40m ... \x1b[0m}',
+
+        mock.format('{{{:s|BI_/k}}}', ' ... '):
+            '{\x1b[;1;3;4;40m ... \x1b[0m}',
+
+        mock.format('{{{{{:s|BI_/k}', ' ... '):
+            '{{\x1b[;1;3;4;40m ... \x1b[0m',
+
+        mock.format('{:s|BI_/k}}}}}', ' ... '):
+            '\x1b[;1;3;4;40m ... \x1b[0m}}',
+
+        mock.format('{{{{{:s|BI_/k}}}}}', ' ... '):
+            '{{\x1b[;1;3;4;40m ... \x1b[0m}}',
+       },
+
+    # unmatched braces
+    **{mock.format(b * i, ''): Throws(UnpairedBracketError)
+       for b in '{}' for i in range(1, 7, 2)}
 })
 
 # TODO: stylize should reproduce the results from above!!
@@ -342,8 +408,8 @@ test_stylize = exp({
     mock.stylize('{hello!r:s|red,B,I,_/k}'):
         '\x1b[;31;1;3;4;40m{hello!r:s}\x1b[0m',
 
-    mock.stylize('{:|aquamarine,I/lightgrey}', 'Hello world'):
-        '\x1b[;38;2;127;255;212;3;48;2;211;211;211mHello world\x1b[0m',
+    mock.stylize('{:|aquamarine,I/lightgrey}', ' ... '):
+        '\x1b[;38;2;127;255;212;3;48;2;211;211;211m ... \x1b[0m',
 
 
     mock.stylize(' {0:<{width}|b}={1:<{width}}', width=10):

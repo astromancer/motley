@@ -23,12 +23,12 @@ formatter can understand, use the `stylize` function:
 
 
 Field widths inside nested contexts are adjusted to compensate for hidden (non
-display) colour code points:
+display) colour code-points:
 >>> motley.stylize('{{{filename}:|green}@{line:d|orange}: <52}| {msg}')
 '{\x1b[;32m{filename}\x1b[0m@\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <84}| {msg}'
 
 
-You can use the well known x11 colour names
+You can also use the well known x11 colour names
 >>> motley.format('{:|aquamarine,I/lightgrey}', 'Hello world')
 '\x1b[;38;2;127;255;212;3;48;2;211;211;211mHello world\x1b[0m'
 
@@ -57,15 +57,17 @@ from string import Formatter as BuiltinFormatter
 from loguru import logger
 
 # local
-from recipes.regex import unflag
-from recipes.dicts import pformat
-from recipes.string.brackets import BracketParser, csplit, level
-from recipes.logging import LoggingMixin
+from recipes.iter import cofilter
 from recipes.oo.temp import temporarily
+from recipes.functionals import not_none
+from recipes.logging import LoggingMixin
+from recipes.string.brackets import (BracketParser, UnpairedBracketError,
+                                     csplit, level)
 
 # relative
 from . import ansi, codes
 from .codes.resolve import InvalidEffect
+
 
 # ---------------------------------------------------------------------------- #
 DEFAULT_FG_MARK = '|'
@@ -143,8 +145,9 @@ def _apply_style(string, **style):
             # error was legit
             raise
 
-        logger.debug('Retrying apply with args: {}, kws: {} to\n{!r}',
-                     maybe_short_spec, style, string)
+        logger.debug('`motley.codes.apply` failed. Retrying with args = {},'
+                     ' kws = {} on string:\n{!r}',
+                     tuple(maybe_short_spec), style, string)
         try:
             return codes.apply(string, *maybe_short_spec, **style)
         except InvalidEffect as err2:
@@ -205,102 +208,179 @@ def _apply_style(string, **style):
 #                        sign=sign,
 #                        thousands=' ')
 
+def _is_adjacent(a, b):
+    indices = cofilter(not_none, a.indices, b.indices, (0, 1))
+    if a.is_open():
+        for i, j, k in zip(*indices):
+            return (i + 1 == j), i, k
+    return False, None, None
+
+    # escaped = True  # FIXME does this ever get run if level == 0 ?????
+    # for i, j, k in zip(*indices):
+    #     if k:
+    #         # swap order of indices since  outer closing preceeds inner
+    #         # closing for closed double pairs
+    #         i, j = j, i
+
+    #     escaped &= (i + 1 == j)
+    # return escaped, i, k
+
+
 class Formatter(BuiltinFormatter, LoggingMixin):
     """
-    Implements a formatting syntax for string colorization and styling.
+    Implements a formatting syntax for string colouring and styling.
     """
-
+    parser = BracketParser('{}')
     _rgb_parser = BracketParser('()')
     # supporting [] is more complicated because of ansi codes containing these:
     # Eg '\x1b[;1;34m'
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
-    def __init__(self, fg=DEFAULT_FG_MARK, bg=DEFAULT_BG_MARK,
-                 adjust_widths=True):
+    def __init__(self, fg=DEFAULT_FG_MARK, bg=DEFAULT_BG_MARK, adjust_widths=True):
         self.adjust_widths = bool(adjust_widths)
         self.spec_regex = get_spec_regex(fg, bg)
         # self.fmt_regex = get_fmt_regex(fg, bg)
-        self.parser = BracketParser('{}')
+        # self.parser = BracketParser('{}')
 
     def parse(self, string):
         # yields # literal_text, field_name, format_spec, conversion
 
         # NOTE: all these need to be supported
+        # >>> format('')
+        # >>> format('{{}}')
         # >>> format('hello {}', 'world')
         # >>> format('hello {world}', world='world')
         # >>> format('hello {world!r:s}', world='world')
         # >>> format('hello {world[0]:-<5s}', world='world')
         # >>> format('{::^11s}', 'x')
 
-        self.logger.debug('Recieved format string:{}> {!r}',
-                          '\n' * (len(string) > 40), string)
+        self.logger.opt(lazy=True).debug('Recieved format string:{0[0]}> {0[1]!r}',
+                                         lambda: ('\n' * (len(string) > 40), string))
 
+        i = 0
         pos = 0
         match = None
-        itr = self.parser.iterate(string, must_close=True, condition=(level == 0))
-        for match in itr:
-            self.logger.opt(lazy=True).debug(
-                '{}', lambda: dedent(f'''\
-                Found braced group at position {match.start}:
-                    literal_text = {string[pos:match.start]!r}
-                    {match.enclosed = !r}
-                    ''')
-            )
-            # spec_match = self.spec_regex.search(match.enclosed)
-            # spec_match['spec']
+        braces = self.parser.findall(string, condition=(level == 0))
+        while i < len(braces):
+            match = braces[i]
+            self.logger.debug('MATCH {}, pos = {}\n{!r}', i, pos, match)
+            if match.is_open():
+                # open brace
+                if i == len(braces) - 1:
+                    # final brace
+                    escaped = False
+                else:
+                    escaped, j, k = _is_adjacent(match, (match := braces[i + 1]))
+                
+                if escaped:
+                    # Open double
+                    self.logger.debug('Found escaped (double) brace {!r} at {}.',
+                                      '{}'[k] * 2, j)
+                    yield string[pos:j + 1], None, None, None
+                    pos = next(filter(None, match.indices)) + 1
+                    i += 2
+                    continue
+                else:
+                    # open single. throw
+                    j = match.indices.index(None)
+                    raise UnpairedBracketError(string,
+                                               ('opening', 'closing')[j],
+                                               {'}{'[j]: [match.indices[not bool(j)]]})
 
-            # defaults
-            spec = ''  # >>> format('hello {}', 'world')
-            convert = None
-            field = match.enclosed
+            # closed braces
+            # Check if this is a closed double brace
+            if (match.enclosed.startswith('{') and match.enclosed.endswith('}')
+                    and (inner := self.parser.match(match.enclosed))
+                    and inner.indices == (0, len(match.enclosed) - 1)):
+                # closed double
+                self.logger.debug('Found closed double brace pair at {}.', match.indices)
+                yield string[pos:match.start + 1], None, None, None
+                yield from self.parse(inner.enclosed)
+                yield '}', None, None, None
+            else:
+                # closed single
+                self.logger.debug('Found braced group at position {.start}', match)
+                yield string[pos:match.start], *self.parse_brace_group(match.enclosed)
 
-            if '!' in field:
-                field, *_spec = self.parser.rcsplit(field, '!', 1)
-                # spec might still be empty: ' {{0!r}:<{width}}'
-                if _spec:
-                    spec, = _spec
-                    convert, spec = spec[0], spec[2:]
-
-                self.logger.opt(lazy=True).debug(
-                    '{}', lambda: f'Parsed {field = }; {convert = }; {spec = }')
-
-            if ':' in field:
-                # split field name, spec
-                field, spec = self.parser.rcsplit(field, ':', 1)
-
-                self.logger.opt(lazy=True).debug(
-                    '{}', lambda: f'Parsed {field = }; {spec = }')
-
-                # handle edge case: filling with colon: "{::<11s}"
-                if field.endswith(':'):
-                    field = field[:-1]
-                    spec = f':{spec}'
-
-            # (literal_text, field_name, format_spec, conversion)
-            self.logger.opt(lazy=True).debug(
-                '{}', lambda: dedent(f'''
-                    field_name   = {field!r}
-                    format_spec  = {spec!r}
-                    conversion   = {convert!r}
-                ''').replace('\n', '\n    '),
-            )
-
-            # literal_text, field_name, format_spec, conversion
-            yield string[pos:match.start], field, spec, convert
             pos = match.end + 1
+            i += 1
 
-        if match:
-            if match.end + 1 != len(string):
-                # literal_text, field_name, format_spec, conversion
-                yield string[match.end + 1:], None, None, None
-        else:
+        # case no braces
+        if match is None:
             self.logger.debug('No braced expressions in: {!r}', string)
-            # literal_text, field_name, format_spec, conversion
-            yield from super().parse(string)
+            yield string, None, None, None
+
+        # Final part of string
+        elif (match.start or match.end) + 1 != len(string):
+            yield string[match.end + 1:], None, None, None
+
+            # continue
+            # # spec_match = self.spec_regex.search(match.enclosed)
+            # # spec_match['spec']
+            # for match in (match, next_match):
+            #     self.logger.opt(lazy=True).debug('{}', lambda: dedent(f'''\
+            #         Found braced group at position {match.start}:
+            #             literal_text = {string[pos:match.start]!r}
+            #             {match.enclosed = !r}''')
+            #                                      )
+            #     # literal_text, field_name, format_spec, conversion
+            #     yield string[pos:match.start], *self.parse_brace_group(match)
+            #     # yield string[pos:match.start], field, spec, convert
+            #     pos = match.end + 1
+
+    def parse_brace_group(self, string):
+
+        # parse braces
+        field, spec, convert = self._parse_brace_group(string)
+
+        self.logger.opt(lazy=True).debug(
+            '{}', lambda: dedent(f'''
+                field_name   = {field!r}
+                format_spec  = {spec!r}
+                conversion   = {convert!r}\
+            ''').replace('\n', '\n    '),
+        )
+
+        return field, spec, convert
+
+    def _parse_brace_group(self, field):
+        # defaults
+        spec = ''  # >>> format('hello {}', 'world')
+        convert = None
+        # field = match.enclosed
+
+        # if field is None:
+        #     return field, spec, convert
+
+        if '!' in field:
+            field, *_spec = self.parser.rcsplit(field, '!', 1)
+            # spec might still be empty: ' {{0!r}:<{width}}'
+            if _spec:
+                spec, = _spec
+                convert, spec = spec[0], spec[2:]
+
+            self.logger.opt(lazy=True).debug(
+                '{}', lambda: f'Parsed {field = }; {convert = }; {spec = }')
+
+        if ':' in field:
+            # split field name, spec
+            field_spec = self.parser.rcsplit(field, ':', 1)
+            if len(field_spec) == 2:
+                field, spec = field_spec
+
+            self.logger.opt(lazy=True).debug(
+                '{}', lambda: f'Parsed {field = }; {spec = }')
+
+            # handle edge case: filling with colon: "{::<11s}"
+            if field.endswith(':'):
+                field = field[:-1]
+                spec = f':{spec}'
+
+        # literal_text, field_name, format_spec, conversion
+        return field, spec, convert
 
     def _parse_spec(self, value, spec):
-
         self.logger.debug('Received value={!r}, spec={!r}', value, spec)
 
         # get the part that `builtins.format` understands
@@ -388,8 +468,9 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
         if self.parser.match(field_name):
             # brace expression in field name!
-            self.logger.debug('Found braced expression in field name, recursing on '
-                              '{!r}', field_name)
+            self.logger.debug('Found braced expression in field name. Recursing'
+                              ' on {!r}', field_name)
+
             # restore previous _wrap_field state after recursing
             sub = self.format(field_name, *args, **kws)
             return sub, None
