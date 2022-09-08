@@ -239,7 +239,7 @@ def thumbnails(images, masks=(),
     text = hstack(images, 2)
 
     if title:
-        width = length(text[:text.index('\n')], raw=False)
+        width = length(text[:text.index('\n')])
         return vstack((title, text), '^', width)
 
     return text

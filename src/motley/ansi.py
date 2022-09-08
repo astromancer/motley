@@ -163,16 +163,22 @@ def split(s):
 #     pattern2 = r'(\x1b\[[\d;]*[a-zA-Z])*(.*)(\x1b\[0m)'
 
 
-def length(s, raw=True):
-    """Length of the string, either raw, or as it would be displayed."""
-    if raw:
-        return len(s)
-    return length_seen(s)
+def length(s, raw=False):
+    """
+    Character length of the string, either raw, or as it would be displayed when
+    printed in console, ie. with ANSI styling code points resolved. Note that
+    with `raw=True` this function returns the same result as the builtin `len`.
+    """
+    return len(s) if raw else length_seen(s)
 
 
 def length_codes(s):
     """length of the ANSI codes in the str"""
     return sum((sum(map(len, part)) for part in pull(s)))
+
+
+# alias
+length_ansi = len_ansi = len_codes = length_codes
 
 
 def length_seen(s):
@@ -183,4 +189,4 @@ def length_seen(s):
     return len(strip(s))
 
 
-display_width = length_seen
+len_seen = len_raw = length_raw = display_width = length_seen

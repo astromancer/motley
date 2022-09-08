@@ -13,11 +13,10 @@ from collections import abc
 import numpy as np
 
 # local
-from recipes import op
+from recipes import op, string
+from recipes.dicts import invert
 from recipes.misc import get_terminal_size
 from recipes.oo.singleton import Singleton
-from recipes.string import hstack as string_hstack, justify as string_justify
-from recipes.dicts import invert
 
 # relative
 from . import ansi, codes, formatter
@@ -27,6 +26,7 @@ ALIGNMENT_MAP = {'r': '>',
                  'l': '<',
                  'c': '^'}
 ALIGNMENT_MAP_INV = invert(ALIGNMENT_MAP)
+
 
 def resolve_alignment(align):
     # resolve_align  # alignment.resolve() # alignment[align]
@@ -44,7 +44,8 @@ def resolve_width(width):
 # @ftl.lru_cache()
 def get_width(text, count_hidden=False):
     """
-    For string `text` get the maximal line width in number of characters.
+    For string `text` get the maximal line width (number of characters in
+    longest line).
 
     Parameters
     ----------
@@ -100,11 +101,11 @@ def hstack(tables, spacing=0, offsets=0):
     else:
         offsets = list(offsets)
 
-    return string_hstack(tables, spacing, offsets, _width_first)
+    return string.hstack(tables, spacing, offsets, _width_first)
 
 
 def _width_first(lines):
-    return ansi.length_seen(lines[0])
+    return ansi.length(lines[0])
 
 
 class _vstack(Singleton):  # NOTE this could just be a module...
@@ -215,7 +216,7 @@ class _vstack(Singleton):  # NOTE this could just be a module...
 
         # vertical offset
         offsets = stack[0].n_head_lines
-        return string_hstack([self.stack(stack, strip_titles, True, vspace),
+        return string.hstack([self.stack(stack, strip_titles, True, vspace),
                               braces],
                              spacing=1, offsets=offsets)
 
@@ -225,7 +226,7 @@ vstack = _vstack()
 
 
 def justify(text, align='<', width=None):
-    return string_justify(text, align, width, ansi.length_seen, formatter.format)
+    return string.justify(text, align, width, ansi.length, formatter.format)
 
 
 def make_group_title(keys):
@@ -234,7 +235,7 @@ def make_group_title(keys):
 
     try:
         return "; ".join(map(str, keys))
-    except:
+    except Exception:
         return str(keys)
 
 
@@ -267,7 +268,7 @@ def hbrace(size, name=''):
     """
     # TODO: recipes.strings.unicode.long_brace ???
     # Various other brace styles
-    
+
     if size == 1:
         return '} ' + str(name)
 
@@ -321,8 +322,8 @@ def overlay(text, background='', align='^', width=None):
         # nothing to align on
         return text
 
-    text_size = ansi.length_seen(text)
-    bg_size = ansi.length_seen(background)
+    text_size = ansi.length(text)
+    bg_size = ansi.length(background)
     if not background:
         # align on clear background
         background = ' ' * width
