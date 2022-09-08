@@ -8,7 +8,7 @@ Drop in replacement for built in formatter
 'Hello world!'
 
 
-With additional colour specs: "|" marks the start of foreground colours or 
+With additional colour specs: "|" marks the start of foreground colours or
 effects, "/" for the background. You'll want to print these in a console to see
 the colours. The common rgbcymwk colour names are supported (eg "r" for red), as
 is "B" for bold, "I" for italic, "_" for underline etc...
@@ -48,7 +48,6 @@ substitute all available fields, and leave the rest unaltered instead of borking
 
 # std
 import re
-import functools as ftl
 from textwrap import dedent
 from collections import UserString
 from string import Formatter as BuiltinFormatter
@@ -57,35 +56,66 @@ from string import Formatter as BuiltinFormatter
 from loguru import logger
 
 # local
+from recipes import dicts
+from recipes.regex import unflag
 from recipes.iter import cofilter
+from recipes.string import indent
 from recipes.oo.temp import temporarily
 from recipes.functionals import not_none
 from recipes.logging import LoggingMixin
+from recipes.oo.property import ForwardProperty
 from recipes.string.brackets import (BracketParser, UnpairedBracketError,
                                      csplit, level)
 
 # relative
 from . import ansi, codes
-from .codes.resolve import InvalidEffect
+from .codes.resolve import InvalidStyle
 
+
+# FIXME: stylize to raise on invalid formatting...
 
 # ---------------------------------------------------------------------------- #
-DEFAULT_FG_MARK = '|'
-DEFAULT_BG_MARK = '/'
-
 STRING_CLASSES = (str, UserString)
-# [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+# classic formatter
+builtin_formatter = BuiltinFormatter()  # oformat
 
-# re.compile(rf'''(?x)
-#     (?P<colon>:)?
-#     (?(colon)({spec_pattern})|)
-#     \}
-# ''')
+# ---------------------------------------------------------------------------- #
 
-RGX_FMT_SPEC_BASE = r'''(?x)
-    # :?
-    (?P<spec>
+
+def _rhs(obj):
+    return 'None' if obj is None else repr(str(obj))
+
+
+def escape_braces(string):
+    return string.replace('{', '{{').replace('}', '}}')
+
+
+class SlotHelper:
+    __slots__ = ()
+
+    def __str__(self):
+        return ''.join(
+            # (self.fill if self.align else ''),
+            (getattr(self, _)  # for b in type(self).__bases__
+             for _ in self.__slots__)
+        )
+
+    def __repr__(self):
+        return dicts.pformat({_: getattr(self, _)
+                              for base in (*type(self).__bases__, type(self))
+                              for _ in base.__slots__},
+                             type(self).__name__,
+                             rhs=_rhs)
+
+
+class FormatSpec(SlotHelper):
+
+    __slots__ = ('fill', 'align', 'sign', 'alt', 'width', 'grouping',
+                 'precision', 'type')
+
     # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+    pattern = r'''
+        (?x)
         (?: # non-capture
             (?P<fill>[^{}])      # fill only valid if followed by align
             (?=[<>=^])           # lookahead (doesn't consume)
@@ -97,19 +127,162 @@ RGX_FMT_SPEC_BASE = r'''(?x)
         (?P<grouping>[_,]?)
         (?P<precision>(?:\.\d+)?)
         (?P<type>[bcdeEfFgGnosxX%]?)
-    )
-'''
+    '''
+    regex = re.compile(pattern.lstrip())
+
+    @classmethod
+    def from_string(cls, string: str):
+        return cls(**cls.parse(string))
+
+    @classmethod
+    def search(cls, string: str):
+        return cls(**cls.parse(string, 'search'))
+
+    @classmethod
+    def parse(cls, string: str):
+        return cls.match(string).groupdict()
+
+    @classmethod
+    def match(cls, string: str, method: str = 'fullmatch'):
+        matcher = getattr(cls.regex, method)
+        if (match := matcher(string)):
+            return match
+
+        raise ValueError(f'No {cls.__name__} pattern in string {string!r}.')
+
+    def __init__(self, fill='', align='', sign='', alt='', width='',
+                 grouping='', precision='', type='', **kws):
+        items = locals()
+        items.pop('self')
+        items.pop('kws')
+        for k, v in items.items():
+            setattr(self, k, v)
+
+    def __str__(self):
+        return ''.join(
+            # (self.fill if self.align else ''),
+            (str(getattr(self, _))  # for b in type(self).__bases__
+             for _ in self.__slots__)
+        )
+
+    def __repr__(self):
+        return dicts.pformat({_: getattr(self, _)
+                              for base in (*type(self).__bases__, type(self))
+                              for _ in base.__slots__},
+                             type(self).__name__)
+
+    def __call__(self, value):
+        # return builtins.format(value, str(self))
+        return builtin_formatter.format_field(value, str(self))
 
 
-@ftl.lru_cache()
-def get_spec_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
-    return re.compile(rf'''{RGX_FMT_SPEC_BASE}
-    # Colour / style format directives
-    (?P<style>
-        ({re.escape(fg_mark)}(?P<fg>[ \w,\[\]\(\)_\- ]*))?  # foreground 
-        ({re.escape(bg_mark)}(?P<bg>[ \w,\[\]\(\) ]*))?     # background 
-    )
-''')
+class Style(SlotHelper):
+
+    __slots__ = ('fg', 'bg')
+    FG_MARK = '|'
+    BG_MARK = '/'
+
+    def __init__(self, fg='', bg=''):
+        self.fg = str(fg or '')
+        self.bg = str(bg or '')
+
+    def __str__(self):
+        return ''.join((getattr(self, _)
+                        for _ in ('FG_MARK', 'fg', 'BG_MARK', 'bg')))
+
+
+class ExtendedFormatSpec(FormatSpec):
+
+    __slots__ = ('style', )
+
+    pattern = dedent(rf'''
+        (?x)
+        (?P<spec>
+            {indent(unflag(FormatSpec.pattern).strip(), 4)}
+        )
+        # Colour / style format directives
+        (?P<style>
+            ({re.escape(Style.FG_MARK)}(?P<fg>[ \w,\[\]\(\)_\- ]*))?  # foreground
+            ({re.escape(Style.BG_MARK)}(?P<bg>[ \w,\[\]\(\) ]*))?     # background
+        )
+    ''').lstrip()
+    regex = re.compile(pattern)
+
+    def __init__(self, *args, fg='', bg='', **kws):
+        super().__init__(*args, **kws)
+        self.style = Style(fg, bg)
+
+    # def __str__(self):
+    #     return ''.join((getattr(self, _)
+    #                     for _ in (*super().__slots__, *extra_slots)))
+
+    def __call__(self, value):
+        return formatter.format_field(value, str(self))
+
+    # @property
+    # def style(self):
+    #     return dict(fg=self.fg, bg=self.bg)
+
+
+class Formattable(SlotHelper):
+
+    __slots__ = ('pre', 'field', 'convert', 'spec', 'post')
+
+    style = ForwardProperty('spec.style')
+
+    @staticmethod
+    def parse(string: str):
+        nspec = 0
+        spec = ''
+        parts = ['', '']
+        for text, _field, _spec, _convert in formatter.parse(string):
+            parts[nspec] += text
+            if _spec:
+                nspec += 1
+                spec = _spec
+                field = _field
+                convert = _convert
+
+            if nspec > 1:
+                raise ValueError(f'{string!r}: Only 1 formattable field'
+                                 f' allowed per cell.')
+
+        pre, post = parts
+        return pre, field, convert, spec, post
+
+    def __init__(self, string: str):
+        self.fmt = string
+
+    def __str__(self):
+        return (f'{escape_braces(self.pre)}{{'
+                f'{self.field}' +
+                (f'!{self.convert}' if self.convert else '') +
+                (f':{self.spec}' if self.spec else '') +
+                f'}}{escape_braces(self.post)}')
+
+    def __repr__(self):
+        return super().__repr__()
+
+    @property
+    def fmt(self):
+        return stylize(str(self))
+
+    @fmt.setter
+    def fmt(self, fmt):
+        self.pre, self.field, self.convert, spec, self.post = self.parse(fmt)
+        self.spec = ExtendedFormatSpec.from_string(spec)
+
+    def __call__(self, value):
+        return format(self.fmt, value)
+
+
+# [[fill]align][sign][#][0][width][grouping_option][.precision][type]
+
+# re.compile(rf'''(?x)
+#     (?P<colon>:)?
+#     (?(colon)({spec_pattern})|)
+#     \}
+# ''')
 
 
 # def get_fmt_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
@@ -124,7 +297,7 @@ def get_spec_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
 #         \}}
 #     ''')
 
-
+# ---------------------------------------------------------------------------- #
 def _apply_style(string, **style):
 
     if not any(style.values()):
@@ -135,7 +308,7 @@ def _apply_style(string, **style):
 
     try:
         return codes.apply(string, **style)
-    except InvalidEffect:  # as err:
+    except InvalidStyle:  # as err:
         # The block above will fail for the short format spec style
         # eg: 'Bk_' to mean 'bold,black,underline' etc
 
@@ -150,7 +323,7 @@ def _apply_style(string, **style):
                      tuple(maybe_short_spec), style, string)
         try:
             return codes.apply(string, *maybe_short_spec, **style)
-        except InvalidEffect as err2:
+        except InvalidStyle as err2:
             raise err2  # from err
 
 # def parse_spec(spec):
@@ -226,6 +399,12 @@ def _is_adjacent(a, b):
     # return escaped, i, k
 
 
+# ---------------------------------------------------------------------------- #
+class FormatWarning(UserWarning):
+    pass
+
+
+# ---------------------------------------------------------------------------- #
 class Formatter(BuiltinFormatter, LoggingMixin):
     """
     Implements a formatting syntax for string colouring and styling.
@@ -237,11 +416,8 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
-    def __init__(self, fg=DEFAULT_FG_MARK, bg=DEFAULT_BG_MARK, adjust_widths=True):
+    def __init__(self, adjust_widths=True):
         self.adjust_widths = bool(adjust_widths)
-        self.spec_regex = get_spec_regex(fg, bg)
-        # self.fmt_regex = get_fmt_regex(fg, bg)
-        # self.parser = BracketParser('{}')
 
     def parse(self, string):
         # yields # literal_text, field_name, format_spec, conversion
@@ -264,7 +440,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         braces = self.parser.findall(string, condition=(level == 0))
         while i < len(braces):
             match = braces[i]
-            self.logger.debug('MATCH {}, pos = {}\n{!r}', i, pos, match)
+            # self.logger.debug('MATCH {}, pos = {}\n{!r}', i, pos, match)
             if match.is_open():
                 # open brace
                 if i == len(braces) - 1:
@@ -272,7 +448,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                     escaped = False
                 else:
                     escaped, j, k = _is_adjacent(match, (match := braces[i + 1]))
-                
+
                 if escaped:
                     # Open double
                     self.logger.debug('Found escaped (double) brace {!r} at {}.',
@@ -384,29 +560,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         self.logger.debug('Received value={!r}, spec={!r}', value, spec)
 
         # get the part that `builtins.format` understands
-        if spec_match := self.spec_regex.fullmatch(spec):
-            # FIXME: is this regex even necessary??? Check performance etc
-            spec = spec_match['spec']
-            fg = spec_match['fg']
-            bg = spec_match['bg']
-            # if spec:
-            #     self.logger.opt(lazy=True).debug('Parsed the following fields:\n{}',
-            #                                      lambda: pformat(spec_match.groupdict()))
-        else:
-            if not self.parser.match(spec):
-                raise ValueError(f'Invalid format specifier: {spec!r}')
-
-            self.logger.debug('Nested braces in spec: {!r}. Parsing manually.',
-                              spec)
-            # Parse spec the hard way
-            style = ''
-            if '|' in spec:
-                spec, *style = self.parser.rcsplit(spec, '|', 1)
-
-            fg, *bg = ''.join(style).split('/')
-
-        #
-        style = dict(fg=fg, bg=bg)
+        spec_match, spec, style = self._parse_spec_style(spec)
         #
         # else:
         # self.logger.opt(lazy=True).debug('Parsed spec = {!r}', spec)
@@ -432,6 +586,32 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                           value, spec, style)
 
         return value, spec, style
+
+    def _parse_spec_style(self, spec):
+        if spec_match := ExtendedFormatSpec.regex.fullmatch(spec):
+            # TODO: is this regex even necessary??? Check performance etc
+            spec = spec_match['spec']
+            fg = spec_match['fg']
+            bg = spec_match['bg']
+            # if spec:
+            #     self.logger.opt(lazy=True).debug('Parsed the following fields:\n{}',
+            #                                      lambda: pformat(spec_match.groupdict()))
+        else:
+            if not self.parser.match(spec):
+                raise ValueError(f'Invalid format specifier: {spec!r}')
+
+            self.logger.debug('Nested braces in spec: {!r}. Parsing manually.',
+                              spec)
+            # Parse spec the hard way
+            style = ''
+            if '|' in spec:
+                spec, *style = self.parser.rcsplit(spec, '|', 1)
+
+            fg, *bg = ''.join(style).split('/')
+
+        #
+        style = dict(fg=fg, bg=bg)
+        return spec_match, spec, style
 
     def _should_adjust_width(self, spec, value, spec_match):
         # self.logger.debug('Checking {!r}', value)
@@ -472,6 +652,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                               ' on {!r}', field_name)
 
             # restore previous _wrap_field state after recursing
+            # with temporarily(self, _wrap_field=self._wrap_field):
             sub = self.format(field_name, *args, **kws)
             return sub, None
 
@@ -509,7 +690,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         ------
         ValueError
             If the standard format specifier is invalid.
-        motley.codes.resolve.InvalidEffect
+        motley.codes.resolve.InvalidStyle
             If the colour / style directives could not be resolved.
         """
         self.logger.debug('Formatting {!r} with {!r} at parent', value, spec)
@@ -523,12 +704,14 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         )
 
     def convert_field(self, value, conversion):
-        if conversion is None:
-            return value
-        if conversion in 'rsa':
-            return super().convert_field(value, conversion)
+        # if conversion is None:
+        #     return value
+
         if conversion == 'q':
             return repr(str(value))
+
+        # if conversion in 'rsa':
+        return super().convert_field(value, conversion)
 
     def format_partial(self, format_string, *args, **kws):
         self.logger.debug('Recieved format string:{}> {!r}',
@@ -564,7 +747,7 @@ class PartialFormatter(Formatter):
             # self._wrap_field = bool(spec and field_name and self.parser.match(field_name, -1))
 
             with temporarily(self, _wrap_field=self._wrap_field):
-                yield literal_text, field_name, spec, convert
+                yield escape_braces(literal_text), field_name, spec, convert
 
     def get_field(self, field_name, args, kws):
         # eg: field_name = '0[name]' or 'label.title' or 'some_keyword'
@@ -581,9 +764,9 @@ class PartialFormatter(Formatter):
                               ' on {!r}', field_name)
             # restore previous _wrap_field state after recursing
             # with temporarily(self, _wrap_field=self._wrap_field):
-            sub = self.format(field_name, *args, **kws)
-            #self._wrap_field = True
-            return sub, None
+            # sub = self.format(field_name, *args, **kws)
+            # self._wrap_field = True
+            return self.format(field_name, *args, **kws), None
 
         self.logger.debug('Trying to retrieve field value with\n    '
                           'Formatter.get_field({!r}, args = {}, kws = {})',
@@ -607,17 +790,17 @@ class PartialFormatter(Formatter):
                 # original field specifier which may have been empty.
                 result = ('' if self._empty_field_name else field_name, None)
                 self.logger.debug('Formatter.get_field failed with\n    {!r}'
-                                  '\n  Returning: value= {}, key= {}',
+                                  '\n  Returning: value = {!r}, key = {!r}',
                                   err, *result)
             else:
                 self.logger.debug('Formatter.get_field succeeded. Returning: '
-                                  'value= {}, key= {}', *result)
+                                  'value = {!r}, key = {!r}', *result)
 
         else:
             result = ('' if self._empty_field_name else field_name, None)
             self.logger.debug('No args or kws avaliable, know to wrap without '
                               'needing to attempting super call. Returning: '
-                              'value= {}, key= {}', *result)
+                              'value = {!r}, key = {!r}', *result)
 
         # logger.critical('WRAP: {}', self._wrap_field)
         return result
@@ -627,10 +810,10 @@ class PartialFormatter(Formatter):
 
         # convert str necessary to measure field width in _parse_spec
         value, spec, style = self._parse_spec(str(value), spec)
-
+            
         # Should we wrap the field in braces again?
-        really_wrap = not any(style.values()) or spec
-        if self._wrap_field and really_wrap:
+        no_wrap = not spec and any(style.values()) and self.parser.match(value)
+        if self._wrap_field and not no_wrap: # and really_wrap:
             self.logger.debug('Wrapping: value = {!r}, spec = {!r}', value, spec)
             value = '{'f'{value}{f":{spec}" if spec else ""}''}'
             # value = ':'.join((value, spec)).join('{}')
