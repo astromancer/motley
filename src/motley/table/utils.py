@@ -12,17 +12,20 @@ from loguru import logger
 
 # local
 from recipes import pprint as ppr
-from recipes.functionals import echo0
+from recipes.functionals import echo0, always
 from recipes.decorators import raises as bork
 
 # relative
 from .. import ansi, codes, formatters
-from ..utils import get_width
+from ..utils import get_width, resolve_alignment
 from .column import resolve_columns
 
 
 # ---------------------------------------------------------------------------- #
 DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
+
+COL_ALIGN_FUNCS = {'<': np.char.ljust,
+                   '>': np.char.rjust}
 
 # ---------------------------------------------------------------------------- #
 
@@ -62,6 +65,19 @@ def _justified_delta(widths, total):
 # def justify_widths(widths, table_width):
 #     widths[1::2] += justified_delta(widths.reshape(-1, 2).sum(1) + 3,
 #                                         table_width)
+
+
+def align_at(data, char, align='<'):
+    """Align column data at character"""
+    align = resolve_alignment(align)
+
+    pre, char, post = np.char.partition(np.array(data, 'U'), char).T
+    tail = list(map(''.join, zip(char, post)))
+    # w0 = max(map(len, i))
+    # w1 = max(map(len, tail))
+    pre_align_func = COL_ALIGN_FUNCS[align]
+    return list(map(''.join, zip(pre_align_func(pre, max(map(len, pre))),
+                                 np.char.ljust(tail, max(map(len, tail))))))
 
 
 def measure_column_widths(data, col_headers=None, count_hidden=False):
@@ -150,11 +166,13 @@ def ensure_dict(obj, n_cols, what='\b'):
 
 # ---------------------------------------------------------------------------- #
 
+null = object()
 
 def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
-                  default_factory=None, args=(), **kws):
+                  default=null, default_factory=None, args=(), **kws):
     """
-    Map input to column index or indices.
+    Map user input to integer column indices.
+    
     This function resolves user input for parameters that need to have either
         - the same number of elements as there are columns in the table or
         - need `aliases` to be provided.
@@ -173,7 +191,9 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
 
     Returns
     -------
-
+    OrderedDict
+        Keys are integer column index. Values are converted input values (or
+        default).
     """
     out = OrderedDict(ensure_dict(obj, n_cols, what))
 
@@ -183,7 +203,7 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
     # convert column name aliases to index positions
     aliases = list(aliases or ())
     if not aliases and (str in set(map(type, out.keys()))):
-        emit(f'Could not assign {what} due to missing `column_headers`')
+        emit(f'Could not assign {what} due to missing `column_headers`.')
 
     if aliases:
         if ... in out:
@@ -202,11 +222,16 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
             out[i] = converter(item)
 
     # get default obj
+    if default is not null:
+        default_factory = always(default)
+        
     if default_factory:
         # idx_no_fmt =
         for i in set(range(n_cols)) - set(out.keys()):
             out[i] = default_factory(i, *args, **kws)
 
+    logger.opt(lazy=True).trace('Resolved {0[0]}:\n{0[1]}', 
+                                lambda: (what, ppr.pformat(out)))
     return out
 
 
@@ -315,7 +340,7 @@ def truncate(item, width, dots=DOTS):
         *pre, text, end = parts
         cw += len(text)
         if cw > width:
-            s += ''.join((*pre, text[:width - 1], DOTS, end))
+            s += ''.join((*pre, text[:width - len(dots)], dots, end))
             break
 
         s += ''.join(parts)

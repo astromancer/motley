@@ -14,13 +14,13 @@ from dataclasses import dataclass
 from shutil import get_terminal_size
 from collections import UserString, abc
 from typing import Callable, Collection, Union
-
+import more_itertools as mit
 # third-party
 import numpy as np
 
 # local
 from recipes.oo import coerce
-from recipes.dicts import merge
+from recipes import dicts
 from recipes.lists import where, cosort
 from recipes.iter import coerced
 from recipes.sets import OrderedSet
@@ -32,38 +32,50 @@ from recipes.decorators import raises as bork
 
 # relative
 from .. import ansi, codes
-from ..formatter import stylize, format
+from ..formatter import stylize, format, formatter, Formattable
 from ..utils import resolve_alignment
 from .utils import *
 from .utils import _underline
 from .xlsx import XlsxWriter
 from .column import resolve_columns
 from motley.table import summary as sm
-# if __name__ == '__main__':
-# do Tests
-# TODO: print pretty things:
-# http://misc.flogisoft.com/bash/tip_colors_and_formatting
-# http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
-# https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
 
 
+# from pydantic.dataclasses import dataclass # for validation!
+
+# ---------------------------------------------------------------------------- #
 # defaults as module constants
-BORDER = '⎪'  # U+23aa Sm CURLY BRACKET EXTENSION ⎪  # '|'
-LEFT_BORDER = '\N{LEFT SQUARE BRACKET EXTENSION}'
-RIGHT_BORDER = '\N{RIGHT SQUARE BRACKET EXTENSION}'
+MID_BORDER = '\N{CURLY BRACKET EXTENSION}'           # '⎪' U+23aa Sm
+LEFT_BORDER = '\N{LEFT SQUARE BRACKET EXTENSION}'    # '⎢'
+RIGHT_BORDER = '\N{RIGHT SQUARE BRACKET EXTENSION}'  # '⎥'
 #  '⋮'      #'\N{LVERTICAL ELLIPSIS}'
+# '|' ??
 OVERLINE = '‾'  # U+203E
 # EMDASH = '—' U+2014
 HEADER_ALIGN = '^'
 # MAX_WIDTH = None  # TODO
 # MAX_LINES = None  # TODO
 
+# ---------------------------------------------------------------------------- #
+
+# defines vectorized length
+lengths = np.vectorize(len, [int])
+
+
+StyleType = Union[str, int, Collection[Union[str, int]]]
+# ---------------------------------------------------------------------------- #
+
+# TODO: print pretty things:
+# http://misc.flogisoft.com/bash/tip_colors_and_formatting
+# http://askubuntu.com/questions/512525/how-to-enable-24bit-true-color-support-in-gnome-terminal
+# https://github.com/robertknight/konsole/blob/master/tests/color-spaces.pl
+
 
 # TODO: dynamical set attributes like title/headers/nrs/data/totals
 # TODO: unit tests!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 # TODO: GIST
 # TODO: HIGHLIGHT COLUMNS
-# TODO: OPTION for plain text row borders?
+# TODO: OPTION for ascii row borders?
 
 # TODO: check out wcwidth lib
 
@@ -89,36 +101,31 @@ HEADER_ALIGN = '^'
 #     """Write to terminal"""
 
 
-class FormatWarning(UserWarning):
-    pass
-
-
-# defines vectorized length
-lengths = np.vectorize(len, [int])
-
-
-# from pydantic.dataclasses import dataclass # for validation!
-
-
-StyleType = Union[str, int, Collection[Union[str, int]]]
-
-
 @dataclass
-class Title:
+class Title(Formattable):
     text:   str = None
-    fmt:    Union[str, Callable] = '{: {align}|{fg}/{bg}}'
-    align:  str = '^'
-    fg:     StyleType = None
-    bg:     StyleType = None
-
-    def __post_init__(self):
-        if isinstance(self.fmt, str):
-            self.fmt = stylize(self.fmt, fg=self.fg, bg=self.bg).format
+    # fmt:    Union[str, Callable] = '{: {align}|{fg}/{bg}}'
+    # align:  str = '^'
+    # fg:     StyleType = None
+    # bg:     StyleType = None
 
     def __str__(self):
         return self.fmt(self.text, align=self.align)
 
 
+class ColumnHeaders(Formattable):
+    # fmt: str = '{:^ |bB_}'
+    # units: abc.Sequence = None
+
+    def __init__(self, names: abc.Sequence, fmt: str = '{}', units=()):
+        super().__init__(fmt)
+        self.names = list(names)
+        if units:
+            assert len(units) == len(names)
+        self.units = list(units)
+
+
+# ---------------------------------------------------------------------------- #
 def split_columns(column, split_nested_types):
     if not (set(split_nested_types) & set(map(type, column))):
         yield column
@@ -213,6 +220,8 @@ def check_flag(obj):
 
     raise TypeError(f'Invalid flag type: {type(obj)}.')
 
+# ---------------------------------------------------------------------------- #
+
 
 class Table(LoggingMixin):
     # TODO split ConsoleWriter(TableWriter)
@@ -222,7 +231,9 @@ class Table(LoggingMixin):
     elements.
     """
 
-    _default_border = BORDER  # TODO move to module scope
+    MID_BORDER = MID_BORDER
+    LEFT_BORDER = LEFT_BORDER
+    RIGHT_BORDER = RIGHT_BORDER
 
     # The column format specification:
     cell_fmt = '{3}{0:{1}{2}}{4}'
@@ -231,19 +242,22 @@ class Table(LoggingMixin):
     #  2 - cell width
     #  3 - lhs border
     #  4 - rhs border
+    unit_fmt = '[{}]'
 
     # foot_fmt = None  # '{flag} : {info}'
     _merge_repeat_groups = True
     _nrs_header = '#'
 
     def resolve_input(self, obj, n_cols=None, what='\b', converter=None,
-                      raises=True, default_factory=None, args=(), **kws):
+                      raises=True, default=null, default_factory=None,
+                      args=(), **kws):
         # resolve aliases from bottommost header line upwards
         aliases = (self._col_headers, *self.col_groups[::-1])
         if n_cols is None:
             n_cols = self.data.shape[1]
+
         return resolve_input(obj, n_cols, aliases, what, converter, raises,
-                             default_factory, args, **kws)
+                             default, default_factory, args, **kws)
 
     def resolve_columns(self, key, n_cols, what, raises=True):
         aliases = (self._col_headers, *self.col_groups[::-1])
@@ -266,7 +280,7 @@ class Table(LoggingMixin):
 
         """
         # keep native types by making columns object arrays
-        return cls(np.ma.column_stack([np.ma.array(a, 'O') for a in columns]),
+        return cls(np.ma.column_stack([np.ma.array(_, 'O') for _ in columns]),
                    **kws)
 
     @classmethod
@@ -339,11 +353,11 @@ class Table(LoggingMixin):
 
     # mappings for terse kws
     @api.Synonyms(
-        merge({
+        dicts.merge({
             'units?':                               'units',
             'footnotes?':                           'footnotes',
             # 'formatters?':                        'formatters',
-            'cell_white(space)?':                   'cell_whitespace',
+            '(cell_?)white(space)?':                'whitespace',
             'minimal(ist)?':                        'minimalist',
             '((col(umn)?)?_?)widths?':              'widths',
             'c(ol(umn)?_?)groups':                  'col_groups',
@@ -351,7 +365,7 @@ class Table(LoggingMixin):
             # 'n(um(be)?)?r?_?rows':                  'row_nrs',
             'n((um(ber)?)|r?)_?rows':               'row_nrs',
             'totals?':                              'totals',
-            'c(ol(umn)?)?_?borders?':               'col_borders',
+            '(c(ol(umn)?)?_?)?borders?':            'col_borders',
             'vlines':                               'col_borders'
         },
             *({f'{p}head(er)?s?':                   f'{rc}_headers',
@@ -399,7 +413,7 @@ class Table(LoggingMixin):
                  col_head_props='bold',
                  col_head_align='^',
                  units=None,
-                 col_borders=_default_border,
+                 col_borders=MID_BORDER,
 
                  col_groups=None,
                  #  core_columns=(),
@@ -428,7 +442,7 @@ class Table(LoggingMixin):
 
                  width=None,
                  too_wide='split',
-                 cell_whitespace=1,
+                 whitespace=1,
                  totals=None,
 
                  flags=None,
@@ -541,7 +555,7 @@ class Table(LoggingMixin):
               each respect `max_width`, and print them one after the other.
              - If 'truncate': #TODO
 
-        cell_whitespace: int
+        whitespace: int
             minimal whitespace in each cell
         frame : bool
             whether to draw a frame for the table
@@ -679,20 +693,15 @@ class Table(LoggingMixin):
         self.frame = bool(frame)
         self.has_row_nrs = hrn = (row_nrs is not False)
         self.has_row_head = hrh = (row_headers is not None)
-        self.has_col_head = bool(self._col_headers)
         self.n_head_col = hrh + hrn
         self.col_groups = self.resolve_groups(col_groups, n_cols)
 
         # units
         self.has_units = (units not in (None, {}))
         self.units = None
-
         if self.has_units:
             units = self.resolve_input(units, n_cols, 'units')
-            self.units = []
-            for i in range(n_cols):
-                u = units.get(i)
-                self.units.append('[{}]'.format(u) if u else '')
+            self.units = list(map(units.get, range(n_cols)))
 
         # get alignment based on column data types
         self.align = self.get_alignment(align, data, self.get_default_align)
@@ -751,22 +760,14 @@ class Table(LoggingMixin):
             totals = self.formatted(self.totals.copy(), self.formatters, '')
             data = np.vstack((data, totals))
 
-        # col borders (rhs)
-        if isinstance(col_borders, str):
-            col_borders = [col_borders]
+        # column borders
+        self.borders = self.resolve_borders(col_borders, frame, n_cols)
 
-        borders = self.resolve_input(col_borders, n_cols, 'border', str,
-                                     default_factory=lambda: self._default_border)
-
-        self.borders = np.array([*borders.values(), RIGHT_BORDER])
-        self.lcb = lengths(self.borders)
-
-        # TODO: row / col sort here
         # Add row / column headers
         # self._col_headers = col_headers  # May be None
         # self.row_headers = row_headers
         self.col_head_props = col_head_props
-        # todo : don't really need this since we have self.highlight
+        # TODO : don't really need this since we have self.highlight
         self.row_head_props = row_head_props
 
         # insert lines
@@ -783,8 +784,9 @@ class Table(LoggingMixin):
         self.pre_table = self.add_headers(data, row_headers, col_headers,
                                           row_nrs)
         # note `pre_table` is dtype='O'
+        self.borders = np.array(self.borders)
 
-        self.cell_white = int(cell_whitespace)
+        self.whitespace = int(whitespace)
 
         # summarize / compactify
         self.summary = sm.SummaryTable.from_table_api(self, summary)
@@ -795,7 +797,7 @@ class Table(LoggingMixin):
         # content of the columns
 
         if width is None:
-            self.col_widths = measure_column_widths(self.pre_table) + self.cell_white
+            self.col_widths = measure_column_widths(self.pre_table) + self.whitespace
         else:
             self.col_widths = self.resolve_widths(width)
             # if requested widths are smaller than that required to fully
@@ -879,7 +881,7 @@ class Table(LoggingMixin):
 
         # Column specs
         # add whitespace for better legibility
-        # self.cell_white = cell_whitespace
+        # self.whitespace = whitespace
         # self.col_widths = self.measure_column_widths()
 
         # decide column widths
@@ -913,6 +915,25 @@ class Table(LoggingMixin):
 
         self.show_colourbar = False
 
+    def resolve_borders(self, col_borders, frame, n_cols):
+        # col borders (rhs)
+        if isinstance(col_borders, str):
+            self.MID_BORDER = col_borders
+            col_borders = [col_borders]
+
+        # if isinstance(border, abc.Sequence):
+        if len(col_borders) == n_cols + 1:
+            self.LEFT_BORDER, *col_borders = col_borders
+        elif not frame:
+            self.LEFT_BORDER = self.RIGHT_BORDER = ''
+
+        default_borders = defaultdict(always(self.MID_BORDER))
+        default_borders[n_cols] = self.RIGHT_BORDER
+        borders = self.resolve_input(col_borders, n_cols, 'border', str,
+                                     default_factory=default_borders.get)
+        return np.array(list(borders.values()))
+        # self.borders = np.array([*borders.values(), self.RIGHT_BORDER])
+
         # if self.summarize == 'footnote':
 
     def __repr__(self):
@@ -926,8 +947,16 @@ class Table(LoggingMixin):
         return str(self)
 
     @property
-    def n_cols(self):
+    def nrows(self):
+        return self.data.shape[0]
+
+    @property
+    def ncols(self):
         return self.data.shape[1]
+
+    # alias
+    n_rows = nrows
+    n_cols = ncols
 
     @property
     def col_headers(self):
@@ -935,10 +964,17 @@ class Table(LoggingMixin):
 
     @col_headers.setter
     def col_headers(self, headers):
-        headers = ensure_list(headers)
-        if headers:
+        if headers := ensure_list(headers):
             assert len(headers) == self.data.shape[1]
         self._col_headers = headers
+
+    @property
+    def has_col_head(self):
+        return bool(self.col_headers)
+
+    @property
+    def lcb(self):
+        return lengths(self.borders)
 
     @property
     def row_headers(self):
@@ -1170,7 +1206,7 @@ class Table(LoggingMixin):
             )
         )
 
-    def truncate_cells(self, widths):
+    def truncate_cells(self, widths, dots=''):
         # this will probably be quite slow ...
         # note textwrap.shorten does this, but won't handle ANSI
 
@@ -1181,45 +1217,44 @@ class Table(LoggingMixin):
         for l, j, in zip(ix.T, ict):
             w = widths[j]
             for i in np.where(l)[0]:
-                self.pre_table[i, j] = truncate(self.pre_table[i, j], w)
+                self.pre_table[i, j] = truncate(self.pre_table[i, j], w, dots)
 
     def resolve_widths(self, width):
         # width_min = 0
         # width_max = np.inf
-        
+
         if width is None:
             # each column will be as wide as the widest data element it contains
-            return measure_column_widths(self.pre_table) + self.cell_white
+            return measure_column_widths(self.pre_table) + self.whitespace
 
         width = np.array(width)
         if width.size == 1:
             # The table will be made exactly this wide
             width = int(width)  # requested width
+            width_ = width - self.lcb.sum()
 
             # Split table if columns too wide for requested width
-            col_widths = measure_column_widths(self.pre_table)  + self.cell_white 
-        
-            if col_widths.sum() + self.lcb.sum() > width:
+            col_widths = measure_column_widths(self.pre_table) + self.whitespace
+            if col_widths.sum() > width_:
                 self.max_width = width
                 return col_widths
-            
+
             # Apportion column widths
-            width -= self.lcb.sum()
-            return justify_widths(col_widths, width)
-        
+            return justify_widths(col_widths, width_)
+
         if np.any(width <= 0):
             raise ValueError('Column widths must be positive.')
-        
+
         if width.size == self.data.shape[1]:
             # each column width specified
-            hcw = self.col_widths[:self.n_head_col]
-            return np.r_[hcw, width]
-        
+            return np.array(width)
+            # hcw = self.col_widths[:self.n_head_col]
+            # return np.r_[hcw, width]
+
         if width.size == self.data.shape[1] + self.has_row_head:
             # each column width specified
             return width
-        
-        
+
         if isinstance(width, range):
             # maximum table width given.
             raise NotImplementedError
@@ -1236,23 +1271,30 @@ class Table(LoggingMixin):
             data = self.pre_table
 
         # get width of columns - widest element in column
-        w = measure_column_widths(data, count_hidden=count_hidden) + self.cell_white
+        w = measure_column_widths(data, count_hidden=count_hidden) + self.whitespace
 
         # add border size
         if with_borders:
             w += self.lcb
         return w
 
-    def get_width(self, indices=None):
-        """get table width"""
+    def get_width(self, indices=None, frame=True):
+        """Get table width as displayed."""
+
         if indices is None:
             indices = self._idx_shown
 
-        # NOTE this excludes the lhs starting border
-        width = (self.col_widths[indices] + self.lcb[indices]).sum()
+        # Full width
+        width = (self.col_widths + self.lcb)[indices].sum()
+        if frame:
+            width += ansi.length(self.LEFT_BORDER)
+        else:
+            width -= ansi.length(self.RIGHT_BORDER)
+
         if self.inset:
-            return max(width, self.inset.get_width() + 1)
-        return max(width, 0)  # self._min_ctable_width()
+            return max(width, self.inset.get_width(frame=True))
+
+        return max(width, 0)
 
     def get_alignment(self, align, data, default_factory):
         """get alignment array for columns"""
@@ -1271,15 +1313,16 @@ class Table(LoggingMixin):
         # return align
 
     def get_default_align(self, col_idx):
-        #
-        ts = self.col_data_types[col_idx]
-        if len(ts) == 1:
-            # all data in this column is of the same type
-            typ, = ts
-            if issubclass(typ, numbers.Integral):
-                return '>'
-            if issubclass(typ, numbers.Real):
-                return '.'
+        type_, *many_types = self.col_data_types[col_idx]
+        if many_types:
+            return '<'
+
+        # all data in this column is of the same type
+        if issubclass(type_, numbers.Integral):
+            return '>'
+
+        if issubclass(type_, numbers.Real):
+            return '.'
 
         return '<'
 
@@ -1317,6 +1360,46 @@ class Table(LoggingMixin):
 
         return totals  # np.ma.array(totals, object)
 
+    def get_header_block(self, row_headers=None, row_nrs=False, col_headers=None):
+        # row and column headers
+        # TODO: error check for len of row/col_headers
+        rheads, cheads = [], []
+        has_row_head = row_headers is not None
+        has_col_head = col_headers is not None
+
+        if has_row_head and self.has_totals:
+            row_headers = [row_headers, 'Totals']
+
+        if has_col_head:
+            cheads.append(col_headers)
+
+            # NOTE: when both are given, the 0,0 table position is ambiguously
+            #  both column and row header
+            if has_row_head:  # and (len(row_headers) == data.shape[0] - 1):
+                row_headers = ['', *row_headers]
+                self.borders = [self.MID_BORDER, *self.borders]
+
+        if self.has_units:
+            cheads.append(
+                [self.unit_fmt.format(u) if u else '' for u in self.units]
+            )
+            if has_row_head:
+                row_headers = ['', *row_headers]
+
+        if has_row_head:
+            rheads.append(row_headers)
+
+        # add row numbers
+        if self.has_row_nrs:  # (row_nrs is not False)
+            nr = int(row_nrs)
+            rheads.append([*([''] * self.has_units),
+                           *([self._nrs_header] * has_col_head),
+                           *np.arange(nr, self.nrows + nr).astype(str),
+                           *([''] * self.has_totals)])
+            self.borders = [self.MID_BORDER, *self.borders]
+
+        return rheads, cheads
+
     # @expose.args()
     # @staticmethod
     def add_headers(self, data,
@@ -1326,145 +1409,17 @@ class Table(LoggingMixin):
         """Add row and column headers to table data"""
 
         # row and column headers
-        # TODO: error check for len of row/col_headers
-        has_row_head = row_headers is not None
-        has_col_head = col_headers is not None
+        rheads, cheads = self.get_header_block(row_headers, row_nrs, col_headers)
 
-        if has_row_head and self.has_totals:
-            row_headers = [row_headers, 'Totals']
+        if cheads:
+            data = np.ma.vstack((cheads, data))
 
-        if self.has_units:
-            data = np.ma.vstack((self.units, data))
-            if has_row_head:
-                row_headers = ['', *row_headers]
-
-        if has_col_head:
-            data = np.ma.vstack((col_headers, data))
-
-            # NOTE: when both are given, the 0,0 table position is ambiguously
-            #  both column and row header
-            if has_row_head:  # and (len(row_headers) == data.shape[0] - 1):
-                row_headers = ['', *row_headers]
-
-        if has_row_head:
-            row_head_col = np.atleast_2d(row_headers).T
-            data = np.ma.hstack((row_head_col, data))
-
-        # add row numbers
-        if self.has_row_nrs:  # (row_nrs is not False)
-            nr = int(row_nrs)
-            nrs = np.arange(nr, data.shape[0] + nr).astype(str)
-            if self.has_units:
-                # self.units = [''] + self.units
-                nrs = ['', *nrs[:-1]]
-
-            if has_col_head:
-                nrs = [self._nrs_header, *nrs[:-1]]
-
-            if self.has_totals:
-                nrs[-1] = ''
-
-            data = np.c_[nrs, data]
+        if rheads:
+            data = np.ma.hstack((np.atleast_2d(rheads).T, data))
 
         return data
 
-    def make_title(self, width, continued=False):
-        """make title line"""
-        text = self.title + (' (continued)' if continued else '')
-        return self.build_line(text, width, self.title_align,
-                               self.title_props)
-
-    def gen_multiline_rows(self, cells, widths, alignment, borders,
-                           underline=False):
-        """
-        handle multi-line cell elements, apply properties to each item in the
-        list of columns create a single string
-
-        Parameters
-        ----------
-        cells
-        widths
-        alignment
-        borders
-        underline
-
-        Returns
-        -------
-
-        """
-
-        # handle multi-line cell elements
-        lines = [col.split('\n') for col in cells]
-        # NOTE: using str.splitlines here creates empty sequences for cells
-        #  with empty strings as contents.  This is undesired since this
-        #  generator will then yield nothing instead of a formatted row
-        n_lines = max(map(len, lines))
-
-        for i, row_items in enumerate(itt.zip_longest(*lines, fillvalue='')):
-            row = self.make_row(row_items, widths, alignment, borders)
-            if (i + 1 == n_lines) and underline:
-                row = _underline(row)
-            yield row
-
-    def make_row(self, cells, widths, alignment, borders):
-
-        # format cells
-        first, *cells = map(self.format_cell, cells, widths, alignment, borders)
-
-        # Apply properties to whitespace filled row headers
-        if self.has_row_head:
-            first = codes.apply(first, self.row_head_props)
-
-        if self.frame:
-            first = LEFT_BORDER + first
-
-        # stick cells together
-        row = ''.join((first, *cells))
-        self.rows.append(row)
-        return row
-
-    def format_cell(self, text, width, align, rhs=_default_border, lhs=''):
-        # this is needed because the alignment formatting gets screwed up by the
-        # ANSI characters (which have length, but are not displayed)
-        # if align == '>':
-        pad_width = ansi.length_codes(text) + width
-        return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
-
-    def build_line(self, text, width, align='<', style=None):
-        # table row line that spans `width` of table.  use to build title
-        # line and summary inset etc..
-
-        width -= int(self.frame)
-        borders = (RIGHT_BORDER, LEFT_BORDER) if self.frame else ('', '')
-
-        style = coerce(style or [], to=list, wrap=str, ignore=dict)  # list / dict
-        lines = text.split(os.linesep)
-
-        if ('underline' in style):
-            # only underline last line for multi-line element
-            style.remove('underline')
-            styles = itt.chain(itt.repeat(style, len(lines) - 1), [(*style, 'underline')])
-        else:
-            styles = itt.repeat(style, len(lines))
-
-        return '\n'.join((
-            codes.apply(self.format_cell(line, width, align, *borders), next(styles))
-            for line in lines
-        ))
-
-    def insert_lines(self, insert, width):
-        if isinstance(insert, str):
-            insert = [insert]
-
-        for line in insert:
-            args = ()
-            if isinstance(line, tuple):
-                line, *args = line
-
-            if not isinstance(line, str):
-                line = str(line)
-            #
-            yield self.build_line(line, width, *args)
+    # ------------------------------------------------------------------------ #
 
     def format(self):
         """Construct the table and return it as as one long str"""
@@ -1532,6 +1487,72 @@ class Table(LoggingMixin):
 
         return split_tables
 
+    def make_title(self, width, continued=False):
+        """make title line"""
+        text = self.title + (' (continued)' if continued else '')
+        return self.make_merged_cell(text, width, self.title_align,
+                               self.title_props)
+
+    def _get_heading_lines(self, idx, table_width, continued):
+        # title
+        if self.has_title:
+            yield self.make_title(table_width, continued)
+
+        # FIXME: problems with too-wide column
+
+        # summarized columns
+        if (self.summary.loc == 0) and self.summary.items:
+            # if isinstance(self.summarize, (numbers.Integral)):
+            # display summarized columns in single row
+            yield self.make_merged_cell(str(self.inset),
+                                  table_width,
+                                  style=['underline' * self.frame])
+
+        # check inset width
+        column_width_total = (len(self.LEFT_BORDER) + self.col_widths[idx] + self.lcb[idx]).sum()
+        if table_width > column_width_total:
+            # This means the inset table is wider than the main table and we
+            # need to add some space to the columns
+            self.col_widths[self._idx_shown] += apportion(
+                table_width - column_width_total, len(self._idx_shown))
+
+        yield from self._get_group_heading_lines(idx)
+
+    def _get_group_heading_lines(self, idx):
+        # column groups
+        # see :  xslx.merge_duplicate_cells
+        for groups in self.col_groups:
+            line = self.LEFT_BORDER if self.frame else ''
+            lbl = groups[idx[0]]  # name of current group
+            gw = 0  # width of current column group header
+
+            # FIXME: this code below in `format cell??`
+            for i, j in enumerate(idx):
+                name = groups[j]
+                w = self.col_widths[j] + self.lcb[j]  # + (j-i)  #
+                if (name == lbl):  # and (self._merge_repeat_groups or gw == 0)
+                    # still within the same group
+                    gw += w
+                else:
+                    # reached a new group. write previous group
+                    if len(lbl) >= gw:
+                        lbl = truncate(lbl, gw - 1)
+
+                    line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
+
+                    gw = w
+                    lbl = name
+
+            # last bit
+            if gw:
+                line += f'{lbl: ^{gw - 1}}{self.RIGHT_BORDER}'
+            #
+            if self.hlines:
+                # only underline if headers are underlined
+                line = _underline(line)
+
+            yield line
+
     def _build(self, column_indices=None, continued=False):
         """
         Build partial or full table.
@@ -1556,66 +1577,11 @@ class Table(LoggingMixin):
             # top line
             # NOTE: ANSI overline not supported (linux terminal) use underlined
             #  whitespace
-            lcb = len(self._default_border)
-            top_line = _underline(' ' * (table_width + lcb))
+            top_line = _underline(' ' * table_width)
             table.append(top_line)
 
-        # title
-        if self.has_title:
-            title = self.make_title(table_width, continued)
-            table.append(title)
-
-        # FIXME: problems with too-wide column
-
-        # summarized columns
-        if (self.summary.loc == 0) and self.summary.items:
-            # if isinstance(self.summarize, (numbers.Integral)):
-            # display summarized columns in single row
-            inset_rows = self.build_line(str(self.inset),
-                                         table_width,
-                                         style=['underline' * self.frame])
-
-            table.append(inset_rows)
-
-        if table_width > (cw := (self.col_widths[idx] + self.lcb[idx]).sum()):
-            # This means the inset table is wider than the main table and we
-            # need to add some space to the columns
-            self.col_widths[self._idx_shown] += apportion(table_width - cw,
-                                                          len(self._idx_shown))
-
-        # column groups
-        # see :  xslx.merge_duplicate_cells
-        for groups in self.col_groups:
-            line = LEFT_BORDER if self.frame else ''
-            lbl = groups[idx[0]]  # name of current group
-            gw = 0  # width of current column group header
-
-            # FIXME: this code below in `format cell??`
-            for i, j in enumerate(idx):
-                name = groups[j]
-                w = self.col_widths[j] + self.lcb[j]  # + (j-i)  #
-                if (name == lbl):  # and (self._merge_repeat_groups or gw == 0)
-                    # still within the same group
-                    gw += w
-                else:
-                    # reached a new group. write previous group
-                    if len(lbl) >= gw:
-                        lbl = truncate(lbl, gw - 1)
-
-                    line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
-
-                    gw = w
-                    lbl = name
-
-            # last bit
-            if gw:
-                line += f'{lbl: ^{gw - 1}}{RIGHT_BORDER}'
-            #
-            if self.hlines:
-                # only underline if headers are underlined
-                line = _underline(line)
-
-            table.append(line)
+        # header block
+        table.extend(self._get_heading_lines(idx, table_width, continued))
 
         # make rows
         start = -(self.has_col_head + self.has_units)
@@ -1623,7 +1589,14 @@ class Table(LoggingMixin):
         widths = self.col_widths[idx]
         alignment = itt.chain(itt.repeat(self.col_head_align[idx], -start),
                               itt.repeat(self.align[idx]))
-        borders = self.borders[idx]
+
+        left = list(mit.padded(self.LEFT_BORDER, '', len(idx)))
+        right = self.borders[idx]
+        borders = (left, right)
+
+        # left = [self.LEFT_BORDER, [''] * len(indices)]
+        # borders = list(itt.zip_longest(self.LEFT_BORDER, self.borders[idx],
+        #                           fillvalue=''))
 
         used = set()
         for i, row_cells in enumerate(part_table, start):
@@ -1634,10 +1607,12 @@ class Table(LoggingMixin):
 
             row_props = self.highlight.get(i)
             underline = (i in self.hlines)
-            for row in self.gen_multiline_rows(
-                    row_cells, widths, next(alignment), borders, underline):
-                table.append(codes.apply(row, row_props))
-                # fixme: maybe don't apply to border symbols
+            table.extend(
+                codes.apply(row, row_props)
+                for row in self._gen_row_lines(
+                    row_cells, widths, next(alignment), borders, underline)
+            )
+            # fixme: maybe don't apply to border symbols
 
         # check if all insert lines have been consumed
         unused = set(self.insert.keys()) - used
@@ -1649,6 +1624,100 @@ class Table(LoggingMixin):
             table.extend(self.footnotes)
 
         return table
+
+    def _gen_row_lines(self, cells, widths, alignment, borders, underline=False):
+        """
+        handle multi-line cell elements, apply properties to each item in the
+        list of columns create a single string
+
+        Parameters
+        ----------
+        cells
+        widths
+        alignment
+        borders
+        underline
+
+        Returns
+        -------
+
+        """
+
+        # handle multi-line cell elements
+        lines = [col.split('\n') for col in cells]
+        # NOTE: using str.splitlines here creates empty sequences for cells
+        #  with empty strings as contents.  This is undesired since this
+        #  generator will then yield nothing instead of a formatted row
+        n_lines = max(map(len, lines))
+
+        for i, row_items in enumerate(itt.zip_longest(*lines, fillvalue='')):
+            row = self.stack_cells(row_items, widths, alignment, borders)
+            if (i + 1 == n_lines) and underline:
+                row = _underline(row)
+            yield row
+
+    def stack_cells(self, cells, widths, alignment, borders):
+
+        # format cells
+        first, *cells = map(self.format_cell, cells, widths, alignment, *borders)
+
+        # Apply properties to whitespace filled row headers
+        if self.has_row_head:
+            first = codes.apply(first, self.row_head_props)
+
+        # if self.frame:
+        #     first = self.LEFT_BORDER + first
+
+        # stick cells together
+        row = ''.join((first, *cells))
+        self.rows.append(row)
+        return row
+
+    def insert_lines(self, insert, width):
+        if isinstance(insert, str):
+            insert = [insert]
+
+        for line in insert:
+            args = ()
+            if isinstance(line, tuple):
+                line, *args = line
+
+            if not isinstance(line, str):
+                line = str(line)
+            #
+            yield self.make_merged_cell(line, width, *args)
+
+    def make_merged_cell(self, text, width, align='<', style=None):
+        # table row line that spans `width` of table.  use to build title
+        # line and summary inset etc..
+
+        # width -= int(self.frame)
+        borders = (self.LEFT_BORDER, self.RIGHT_BORDER) if self.frame else ('', '')
+        width -= sum(map(len, borders))
+
+        style = coerce(style or [], to=list, wrap=str, ignore=dict)  # list / dict
+        lines = text.split(os.linesep)
+
+        if ('underline' in style):
+            # only underline last line for multi-line element
+            style.remove('underline')
+            styles = itt.chain(itt.repeat(style, len(lines) - 1),
+                               [(*style, 'underline')])
+        else:
+            styles = itt.repeat(style, len(lines))
+
+        return '\n'.join((
+            codes.apply(self.format_cell(line, width, align, *borders),
+                        next(styles))
+            for line in lines
+        ))
+
+    def format_cell(self, text, width, align, lhs='', rhs=MID_BORDER):
+        # this is needed because the alignment formatting gets screwed up by the
+        # ANSI characters (which have length, but are not displayed)
+        # if align == '>':
+        pad_width = ansi.length_codes(text) + width
+        return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
 
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes
