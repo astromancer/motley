@@ -615,7 +615,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
     def _should_adjust_width(self, spec, value, spec_match):
         # self.logger.debug('Checking {!r}', value)
-        return (self.adjust_widths and spec_match and (width := spec_match['width'])
+        return (self.adjust_widths and spec_match and spec_match['width']
                 and isinstance(value, STRING_CLASSES) and ansi.has_ansi(value))
         # self.logger.opt(lazy=True).debug(
         #     '{}', lambda: f'{width = }; {ansi.has_ansi(value) = }')
@@ -635,10 +635,14 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         for _ in ('spec', 'style', 'fg', 'bg'):
             spec_info.pop(_)
 
+        if spec_info['fill'] is None:
+            spec_info['fill'] = ''  # implies space fill (the default)
+
         spec_info['width'] = str(int(spec_match['width']) + ansi.length_codes(value))
         self.logger.info('Adjusting field width from {[width]} to {[width]} '
                          'since string has colour formatting code points with '
                          'zero display width.', spec_match, spec_info)
+
         return ''.join(spec_info.values())
 
     def get_field(self, field_name, args, kws):
@@ -810,10 +814,10 @@ class PartialFormatter(Formatter):
 
         # convert str necessary to measure field width in _parse_spec
         value, spec, style = self._parse_spec(str(value), spec)
-            
+
         # Should we wrap the field in braces again?
         no_wrap = not spec and any(style.values()) and self.parser.match(value)
-        if self._wrap_field and not no_wrap: # and really_wrap:
+        if self._wrap_field and not no_wrap:  # and really_wrap:
             self.logger.debug('Wrapping: value = {!r}, spec = {!r}', value, spec)
             value = '{'f'{value}{f":{spec}" if spec else ""}''}'
             # value = ':'.join((value, spec)).join('{}')

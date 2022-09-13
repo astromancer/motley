@@ -228,6 +228,9 @@ test_extended_format = exp({
         # Nested with alignment spec
         mock.format('{{name:s|g}:{line:d|orange}: <21}', name='xyz', line=666):
             '\x1b[;32mxyz\x1b[0m:\x1b[;38;2;255;165;0m666\x1b[0m              ',
+            
+        mock.format('{{now:|B,darkgreen}:<{width:}}|', now='now', width=20):
+            '\x1b[;1;38;2;0;100;0mnow\x1b[0m                 |',
 
         # abstracted effects
         mock.format('{{level}: {message}:|{effects}}',
@@ -398,6 +401,9 @@ test_stylize = exp({
     mock.stylize('{}', 'Hello world'):
         'Hello world',
 
+    mock.stylize('{:|b/k}'):
+        '\x1b[;34;40m{}\x1b[0m',
+
     mock.stylize('{: ^12s|g}'):
         '\x1b[;32m{: ^12s}\x1b[0m',
 
@@ -411,17 +417,20 @@ test_stylize = exp({
     mock.stylize('{:|aquamarine,I/lightgrey}', ' ... '):
         '\x1b[;38;2;127;255;212;3;48;2;211;211;211m ... \x1b[0m',
 
-
     mock.stylize(' {0:<{width}|b}={1:<{width}}', width=10):
         ' \x1b[;34m{0:<10}\x1b[0m={1:<10}',
+
+    mock.stylize('{{{name}.{function}:|green}:{line:d|orange}: <52}|'):
+        '{\x1b[;32m{name}.{function}\x1b[0m:'
+        '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <52}|',
 
     mock.stylize('{elapsed:s|Bb}|'
                  '{{{name}.{function}:|green}:{line:d|orange}: <52}|'
                  '{{level}: {message}:|{style}}',
-                 style='crimson'
-                 ): '\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}\x1b[0m:'
-                    '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <52}|'
-                    '\x1b[;38;2;220;20;60m{level}: {message}\x1b[0m'
+                 style='crimson'):
+        '\x1b[;1;34m{elapsed:s}\x1b[0m|{\x1b[;32m{name}.{function}\x1b[0m:'
+        '\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <52}|'
+        '\x1b[;38;2;220;20;60m{level}: {message}\x1b[0m'
     # NOTE The field width above is not adjusted for the specs where the field
     # name contains braced groups eg: {name} since they will be adjusted on
     # second round format
