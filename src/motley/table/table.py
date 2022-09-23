@@ -688,8 +688,8 @@ class Table(LoggingMixin):
             self.col_data_types.append(set(map(type, col[use])))
 
         # headers
-        self.col_headers = ensure_list(col_headers)
-        self.row_headers = ensure_list(row_headers)
+        self.col_headers = ensure_list(col_headers, str)
+        self.row_headers = ensure_list(row_headers, str)
         self.frame = bool(frame)
         self.has_row_nrs = hrn = (row_nrs is not False)
         self.has_row_head = hrh = (row_headers is not None)
@@ -964,7 +964,7 @@ class Table(LoggingMixin):
 
     @col_headers.setter
     def col_headers(self, headers):
-        if headers := ensure_list(headers):
+        if headers := ensure_list(headers, str):
             assert len(headers) == self.data.shape[1]
         self._col_headers = headers
 
@@ -982,7 +982,7 @@ class Table(LoggingMixin):
 
     @row_headers.setter
     def row_headers(self, headers):
-        headers = ensure_list(headers)
+        headers = ensure_list(headers, str)
         if headers:
             assert len(headers) == self.data.shape[0]
         self._row_headers = headers

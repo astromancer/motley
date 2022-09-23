@@ -134,8 +134,8 @@ def resolve_width(width, data, headers=None):
 # ---------------------------------------------------------------------------- #
 
 
-def ensure_list(obj):
-    return [] if obj is None else list(obj)
+def ensure_list(obj, coerce=echo0):
+    return [] if obj is None else list(map(coerce, obj))
 
 
 def ensure_dict(obj, n_cols, what='\b'):
