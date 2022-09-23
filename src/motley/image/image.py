@@ -14,17 +14,18 @@ from matplotlib.colors import Normalize
 
 # local
 from scrawl.imagine import get_clim
-from recipes.string import vstack
+from recipes import string
 from recipes.functionals import echo0
+from recipes.unicode import subscripts, superscripts
 
 # relative
-from .. import ansi, apply, codes, format, hstack, length, underline
-from ..textbox import TickedGridFrame, textbox
+from .. import ansi, apply, codes, format, underline
+from ..textbox import textbox
 from .trace import trace_boundary
 
 
-RIGHT_BORDER = '\N{RIGHT ONE EIGHTH BLOCK}'
-LEFT_BORDER = '\N{LEFT ONE EIGHTH BLOCK}'
+RIGHT_BORDER = '\N{RIGHT ONE EIGHTH BLOCK}'  # '▕'
+LEFT_BORDER = '\N{LEFT ONE EIGHTH BLOCK}'    # '▏'
 
 # WARNING: Some terminal emulators like Konsole do not render underlined
 # RIGHT ONE EIGHTH BLOCK properly. Underline disappears.
@@ -281,17 +282,35 @@ class TextImage:
         if frame is None:
             frame = self.frame
 
+        if frame is True:
+            frame = '_'
+
         if not frame:
             return stack(self.pixels)
 
-        if xticks or yticks:
-            return TickedGridFrame(xticks, yticks)(stack(self.pixels))
-        
         # if frame in ('_', underline, True):
         #     return AnsiBox()(stack(self.pixels))
             # return stack(frame_inpixel(self.pixels, None))
 
-        return textbox(stack(self.pixels), linestyle=frame)
+        box = textbox(stack(self.pixels), linestyle=frame)
+
+        if xticks:
+            xticks = list(map(superscripts, xticks))
+            w = max(*map(ansi.length, xticks), 2) if xticks else 0
+            if w > 2:
+                w2 = w // 2
+                w = 2 * (w2 + bool(w % 2))
+                xticks = xticks[::w2+1]
+            xticks = map(f'{{:<{w}}}'.format, xticks)
+            box = '\n'.join((box, ''.join(xticks)))
+
+        if yticks:
+            yticks = list(map(subscripts, yticks[::-1]))
+            w = max(map(ansi.length, yticks)) if yticks else 0
+            yticks = map(f'{{:>{w}}}'.format, yticks)
+            box = string.hstack(('\n'.join(yticks), box))
+
+        return box
 
         # # underline first and last row
         # top = underline(' ' * self._pixel_size * (self.shape[1] + 1))
