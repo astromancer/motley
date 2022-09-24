@@ -99,7 +99,7 @@ COLOR_FORMATTERS = {8:  FORMAT_8BIT,
 # ---------------------------------------------------------------------------- #
 
 
-class InvalidEffect(Exception):
+class InvalidStyle(Exception):
     """
     Raised when a user input object cannot be resolved to a code for colour or
     effect.
@@ -118,7 +118,7 @@ class InvalidEffect(Exception):
 @ftl.singledispatch
 def resolve(obj, fg_or_bg='fg'):
     """default dispatch func for resolving ANSI codes from user input"""
-    raise InvalidEffect(obj, fg_or_bg)
+    raise InvalidStyle(obj, fg_or_bg)
 
 
 @resolve.register(type(None))
@@ -138,25 +138,21 @@ def _(obj, fg_or_bg='fg'):
         return
 
     # try resolve as a named color / effect
-    value = CODES[fg_or_bg].get(obj, None)
-    if value:
+    if value := CODES[fg_or_bg].get(obj, None):
         yield value
         return
 
-    # try resolve as a named CSS color
-    value = CSS_TO_RGB.get(obj, None)
-    if value:
+    if value := CSS_TO_RGB.get(obj, None):
         yield FORMAT_24BIT[fg_or_bg].format(*value)
         return
 
     # try resolve RGB string: '[123,1,99]'
-    rgb = RGX_RGB.fullmatch(obj.strip())
-    if rgb:
+    if rgb := RGX_RGB.fullmatch(obj.strip()):
         rgb = rgb.groupdict()
         yield from resolve(tuple(map(int, map(rgb.get, 'rgb'))), fg_or_bg)
         return
 
-    raise InvalidEffect(obj, fg_or_bg)
+    raise InvalidStyle(obj, fg_or_bg)
 
 
 @resolve.register(numbers.Integral)

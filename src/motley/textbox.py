@@ -1,30 +1,22 @@
 
 # std
-from IPython.terminal.embed import embed
-from recipes.string import backspaced
-from recipes.oo import iter_subclasses
 import unicodedata
-import itertools as itt
-import warnings
-import warnings as wrn
+from warnings import warn
 from collections.abc import Collection
 
 # third-party
 import more_itertools as mit
-from more_itertools.more import collapse
 
 # local
 from recipes import api
-from recipes.iter import where
-from recipes.string import justify
 from recipes.functionals import echo0
 from recipes.dicts import AttrReadItem
+from recipes.oo import iter_subclasses
 from recipes.utils import duplicate_if_scalar
-from recipes.unicode import subscripts
-from recipes.string.string import delete
+from recipes.string import backspaced, justify
 
 # relative
-from . import ansi, apply, format, stylize, underline
+from . import ansi, apply, format, underline
 from .utils import get_width, resolve_width
 
 
@@ -345,7 +337,7 @@ def resolve_linestyle(linestyle):
 EMPTY = object()
 
 
-@api.Synonyms({'((line|edge)_?)?colou?rs?':   'linecolor'}, mode='regex')
+@api.synonyms({'((line|edge)_?)?colou?rs?': 'linecolor'})
 def textbox(text,
             linestyle='_',
             linecolor=None,
@@ -485,7 +477,7 @@ class TextBox:
         else:
             width = resolve_width(width)
             if text_width > width:
-                wrn.warn(f'Text too wide for box {text_width} > {width}.')
+                warn(f'Text too wide for box {text_width} > {width}.')
 
         return '\n'.join(self._iter_lines(text, width, align))
 

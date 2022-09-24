@@ -53,10 +53,10 @@ class ConvenienceFunction:
         if bg:
             if fg:
                 doc0 += '{0!r} with'
-                name = '%s_on_%s' % (fg, bg)
+                name = f'{fg}_on_{bg}'
             else:
                 action = 'Give'
-                name = '%s_bg' % bg
+                name = f'{bg}_bg'
             doc0 += ' a {1!r} background.'
         elif fg:
             doc0 += '{0!r}.'

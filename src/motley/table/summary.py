@@ -154,11 +154,10 @@ class SummaryTable(LoggingMixin):
         *args, kws = _resolve(summary)
         return cls(table, *args, **kws)
 
-    @api.Synonyms(
+    @api.synonyms(
         {'n_?cols?': 'ncols',
          'bullets?': 'bullet'},
-        mode='regex',
-        emit='ignore'
+        action=None
     )
     def __init__(self, table, loc=0, ncols=None, ignore=(), bullet=BULLET,
                  fmt='{key: <|B} = {{val}¿ [{unit}]?: <}', whitespace=2, **kws):
@@ -329,7 +328,7 @@ class SummaryTable(LoggingMixin):
 
         #
         lb = ansi.length(self.bullet)
-        start = min(n_items // 2, table_width // max_column_width)
+        start = min(max(n_items // 2, 1), table_width // max_column_width)
         end = max(round(n_items / 2), start) + 1
         trials = [*range(start, end), n_items]
         for i, ncols in enumerate(trials):

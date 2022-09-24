@@ -166,13 +166,15 @@ def ensure_dict(obj, n_cols, what='\b'):
 
 # ---------------------------------------------------------------------------- #
 
+
 null = object()
+
 
 def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
                   default=null, default_factory=None, args=(), **kws):
     """
     Map user input to integer column indices.
-    
+
     This function resolves user input for parameters that need to have either
         - the same number of elements as there are columns in the table or
         - need `aliases` to be provided.
@@ -224,14 +226,15 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
     # get default obj
     if default is not null:
         default_factory = always(default)
-        
+
     if default_factory:
         # idx_no_fmt =
         for i in set(range(n_cols)) - set(out.keys()):
             out[i] = default_factory(i, *args, **kws)
 
-    logger.opt(lazy=True).trace('Resolved {0[0]}:\n{0[1]}', 
+    logger.opt(lazy=True).trace('Resolved {0[0]}:\n{0[1]}',
                                 lambda: (what, ppr.pformat(out)))
+
     return out
 
 
