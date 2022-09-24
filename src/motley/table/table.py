@@ -917,22 +917,23 @@ class Table(LoggingMixin):
 
     def resolve_borders(self, col_borders, frame, n_cols):
         # col borders (rhs)
+        mid_border = MID_BORDER
         if isinstance(col_borders, str):
-            self.MID_BORDER = col_borders
+            mid_border = col_borders
             col_borders = [col_borders]
 
         # if isinstance(border, abc.Sequence):
         if len(col_borders) == n_cols + 1:
             self.LEFT_BORDER, *col_borders = col_borders
-        elif not frame:
+        if not frame:
             self.LEFT_BORDER = self.RIGHT_BORDER = ''
 
-        default_borders = defaultdict(always(self.MID_BORDER))
+        default_borders = defaultdict(always(mid_border))
         default_borders[n_cols] = self.RIGHT_BORDER
         borders = self.resolve_input(col_borders, n_cols, 'border', str,
                                      default_factory=default_borders.get)
-        return np.array(list(borders.values()))
-        # self.borders = np.array([*borders.values(), self.RIGHT_BORDER])
+        # return np.array(list(borders.values()))
+        return np.array([*borders.values(), self.RIGHT_BORDER])
 
         # if self.summarize == 'footnote':
 
