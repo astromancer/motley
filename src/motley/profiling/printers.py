@@ -36,15 +36,16 @@ cdot = u'\u00B7'  # '·'
 
 
 def func2str(func):
-    cls = get_class_that_defined_method(func)
-    if cls is None:
-        if isinstance(func, ftl.partial):
-            func = func.func
-            argstr = str(func.args).strip(')') + ', %s)' % cdot
-            return 'partial(%s%s)' % (func2str(func.func), argstr)
-        return func.__name__
-    else:
+
+    if (cls := get_class_that_defined_method(func)) is not None:
         return '.'.join((cls.__name__, func.__name__))
+    
+    if isinstance(func, ftl.partial):
+        func = func.func
+        argstr = str(func.args).strip(')') + f', {cdot})'
+        return f'partial({func2str(func.func)}{argstr})'
+    
+    return func.__name__
 
 
 def truncate_block_gen(block, width, dots='...'):
@@ -52,7 +53,7 @@ def truncate_block_gen(block, width, dots='...'):
     Truncate a block of text at given *width* adding ellipsis to indicate missing
     text
     """
-    le = length(dots, raw=False)
+    le = length(dots)
     for line in block:
         if len(line) > width:  # need to truncate
             yield line[:(width - le)] + dots
@@ -65,8 +66,7 @@ def truncate_block(block, width, dots='...'):
 
 
 def make_bar(line, fraction, line_width, colour):
-    l = int(np.round(fraction * line_width))
-    if l:
+    if l := int(np.round(fraction * line_width)):
         bar = codes.apply(line[:l], bg=colour)
         return bar + line[l:]
     return line
@@ -337,8 +337,7 @@ class ReportStatsTable(ReportStats):
                 self.smallest = float(s.strip('<'))
                 unhandled.remove(s)
         if len(unhandled):
-            raise ValueError('Unknown option(s) for strip keyword: %s'
-                             % tuple(unhandled))
+            raise ValueError(f'Unknown option(s) for strip keyword: {tuple(unhandled)}')
 
         self.max_line_width = kws.get('max_line_width')  # maxLineWidth
         self.where_gaps = []
@@ -353,12 +352,12 @@ class ReportStatsTable(ReportStats):
         """pre-process the raw source code lines for display"""
         ignore = []
         source_lines = self.sourceCodeLines
-        source = '\n'.join(source_lines)
         start, end = start_line_nr, end_line_nr
 
         # FIXME: not stripping correct lines......
 
         if self.strip_docstring:
+            source = '\n'.join(source_lines)
             # identify various parts of the function in the source code
             line_nr_def, line_nr_doc, line_nr_doc_end, line_nr_body \
                 = _ast_func_index(source)

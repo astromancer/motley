@@ -154,6 +154,10 @@ def unpack_dict(data, split_nested_types=set(), group=(''), level=0):
 def _unpack_convert_dict(data, ignore_keys, converters, header_levels,
                          split_nested_types):
 
+    ignore_keys = ignore_keys or {}
+    converters = converters or {}
+    header_levels = header_levels or {}
+
     keep = OrderedSet(data.keys()) - set(ignore_keys)
     data = dict(zip(keep, map(data.get, keep)))
 
@@ -177,8 +181,8 @@ def _unpack_convert_dict(data, ignore_keys, converters, header_levels,
         yield *headings, list(column)
 
 
-def dict_to_list(data, ignore_keys={}, converters={}, header_levels={},
-                 split_nested_types=set(),  order='r'):
+def dict_to_list(data, ignore_keys=None, converters=None, header_levels=None,
+                 split_nested_types=set(), order='r'):
     """
     Convert input dict to list of values with keys as column / row_headers
     (depending on `order`)
@@ -193,6 +197,7 @@ def dict_to_list(data, ignore_keys={}, converters={}, header_levels={},
     -------
 
     """
+
     assert isinstance(data, abc.Mapping)
 
     if isinstance(split_nested_types, type):
@@ -219,6 +224,17 @@ def check_flag(obj):
         return obj.format
 
     raise TypeError(f'Invalid flag type: {type(obj)}.')
+
+
+def not_null(obj):
+    if obj is None:
+        return False
+
+    if isinstance(obj, str):
+        return True
+
+    return len(obj) != 0
+
 
 # ---------------------------------------------------------------------------- #
 
@@ -279,9 +295,13 @@ class Table(LoggingMixin):
         -------
 
         """
+
+        # TODO: figure out why it's necessary to explicitly resolve kws here
+        synonymns = cls.__init__.__wrapper__.__self__
+        args, kws = synonymns.resolve((), kws)
         # keep native types by making columns object arrays
         return cls(np.ma.column_stack([np.ma.array(_, 'O') for _ in columns]),
-                   **kws)
+                   *args, **kws)
 
     @classmethod
     def from_dict(cls, data, ignore_keys=(), order='r', **kws):
@@ -352,7 +372,7 @@ class Table(LoggingMixin):
     # TODO: test mappings!!
 
     # mappings for terse kws
-    @api.Synonyms(
+    @api.synonyms(
         dicts.merge({
             'units?':                               'units',
             'footnotes?':                           'footnotes',
@@ -373,8 +393,7 @@ class Table(LoggingMixin):
               for rc, p in {'row':  'r(ow)?_?',
                             'col':  'c(ol(umn)?)?_?'}.items())
         ),
-        mode='regex',
-        emit='ignore'
+        action=None
     )
     def __init__(self,
                  data,
@@ -418,6 +437,7 @@ class Table(LoggingMixin):
                  col_groups=None,
                  #  core_columns=(),
 
+                #  order = 'r',
                  # RowHeaders(names, fmt='{:< |bB}', nrs=True)
                  #
                  row_headers=None,
@@ -538,8 +558,8 @@ class Table(LoggingMixin):
         order : {'r', 'c', 'row', 'col'}
             Used when table is initialized from dict, or when data is 1
             dimensional to know whether values should be interpreted as
-            rows or columns. Default is to interpret 1D data as a column with
-            row headers.
+            rows or columns. Default is to interpret 1D data as a row with
+            column headers.
             note that for 2d data this argument is ignored. To create a
             `Table` from a set of columns use the `Table.from_columns`
             constructor.
@@ -636,7 +656,7 @@ class Table(LoggingMixin):
 
         # from recipes import pprint
         # pprint.mapping(locals(), ignore=['self'])
-        logger.debug('SUMMARY {!r}', summary)
+        # logger.debug('SUMMARY {!r}', summary)
 
         # special case: dict
         if isinstance(data, dict):
@@ -663,6 +683,7 @@ class Table(LoggingMixin):
         dim = data.ndim
         if dim == 1:
             data = data[None]
+        
 
         if dim > 2:
             raise ValueError(f'Only 2D data can be tabled! Data is {dim}D')
@@ -761,7 +782,9 @@ class Table(LoggingMixin):
             data = np.vstack((data, totals))
 
         # column borders
+        # print(f'{col_borders = }')
         self.borders = self.resolve_borders(col_borders, frame, n_cols)
+        # print(f'{self.borders = } {self.borders.shape = }')
 
         # Add row / column headers
         # self._col_headers = col_headers  # May be None
@@ -781,8 +804,10 @@ class Table(LoggingMixin):
             data = data[:max_rows]
 
         # add the (row/column) headers / row numbers / totals
-        self.pre_table = self.add_headers(data, row_headers, col_headers,
+        self.pre_table = self.add_headers(data,
+                                          row_headers, self.col_headers,
                                           row_nrs)
+
         # note `pre_table` is dtype='O'
         self.borders = np.array(self.borders)
 
@@ -825,8 +850,10 @@ class Table(LoggingMixin):
             if self.has_title:
                 tw = max(lengths(self.title.split('\n')).max(), tw)
 
-            w = self.get_width() - 1  # -1 to exclude lhs / rhs borders
-            cw = self.col_widths[self._idx_shown]
+            w = self.get_width() - 1
+
+            # -1 to exclude lhs / rhs borders
+            # cw = self.col_widths[self._idx_shown]
             if tw > w:
                 d = tw - w
                 idx = itt.cycle(self._idx_shown)
@@ -1004,7 +1031,7 @@ class Table(LoggingMixin):
     def n_head_lines(self):
         """number of newlines in the table header"""
         n = (self.title.count('\n') + 1) if self.has_title else 0
-        m = len(self.summary.items) // int(bool(self.summarize))
+        m = (len(self.summary.items) // self.summary.ncols) if self.summary else 0
         return n + m + self.n_head_rows + self.frame
 
     def empty_like(self, n_rows, **kws):
@@ -1053,42 +1080,41 @@ class Table(LoggingMixin):
 
         types_ = self.col_data_types[col_idx]
 
-        if len(types_) == 1:
-            type_, = types_  # nb since it's a set, don't try types_[0]
-            # all data in this column is of the same type
-            if issubclass(type_, str):  # this includes np.str_!
-                return echo0
+        #  NOTE: single dispatch not a good option here due to formatting
+        #   subtleties
+        # return formatter.registry[type_](None, precision=precision,
+        #                                  compact=minimalist,
+        #                                  sign=sign,
+        #                                  right_pad=right_pad)
+        if len(types_) != 1:
+            return ppr.PrettyPrinter(precision=precision, minimalist=short).pformat
 
-            if not issubclass(type_, numbers.Real):
-                return str
+        type_, = types_  # nb since it's a set, don't try types_[0]
+        # all data in this column is of the same type
+        if issubclass(type_, str):  # this includes np.str_!
+            return echo0
 
-            # right_pad = 0
-            sign = ''
-            if issubclass(type_, numbers.Integral):
-                if short:
-                    precision = 0
+        if not issubclass(type_, numbers.Real):
+            return str
 
-            else:  # real numbers
-                # if short and (self.align[col_idx] in '<>'):
-                #     right_pad = precision + 1
-                sign = (' ' * int(np.any(data[:, col_idx] < 0)))
+        # right_pad = 0
+        sign = ''
+        if issubclass(type_, numbers.Integral):
+            if short:
+                precision = 0
 
-            # print(col_idx,type_, precision, short, sign, right_pad)
+        else:  # real numbers
+            # if short and (self.align[col_idx] in '<>'):
+            #     right_pad = precision + 1
+            sign = (' ' * int(np.any(data[:, col_idx] < 0)))
 
-            return ftl.partial(ppr.decimal,
-                               precision=precision,
-                               short=short,
-                               sign=sign)
-            #    right_pad=right_pad)
+        # print(col_idx,type_, precision, short, sign, right_pad)
 
-            #  NOTE: single dispatch not a good option here due to formatting
-            #   subtleties
-            # return formatter.registry[type_](None, precision=precision,
-            #                                  compact=minimalist,
-            #                                  sign=sign,
-            #                                  right_pad=right_pad)
-
-        return ppr.PrettyPrinter(precision=precision, minimalist=short).pformat
+        return ftl.partial(ppr.decimal,
+                           precision=precision,
+                           short=short,
+                           sign=sign)
+        #    right_pad=right_pad)
 
     def _get_flags(self, name, data, flags):
         # format flags for column data
@@ -1286,7 +1312,9 @@ class Table(LoggingMixin):
             indices = self._idx_shown
 
         # Full width
-        width = (self.col_widths + self.lcb)[indices].sum()
+        width = (self.col_widths[indices] + self.lcb[indices]).sum()
+
+        # note: the two arrays above may be different shapes.
         if frame:
             width += ansi.length(self.LEFT_BORDER)
         else:
@@ -1314,11 +1342,12 @@ class Table(LoggingMixin):
         # return align
 
     def get_default_align(self, col_idx):
-        type_, *many_types = self.col_data_types[col_idx]
-        if many_types:
+        types = self.col_data_types[col_idx]
+        if len(types) != 1:
             return '<'
 
         # all data in this column is of the same type
+        type_, = types
         if issubclass(type_, numbers.Integral):
             return '>'
 
@@ -1361,15 +1390,36 @@ class Table(LoggingMixin):
 
         return totals  # np.ma.array(totals, object)
 
-    def get_header_block(self, row_headers=None, row_nrs=False, col_headers=None):
+    # @expose.args()
+    # @staticmethod
+
+    def add_headers(self, data,
+                    row_headers=None,
+                    col_headers=None,
+                    row_nrs=False):
+        """Add row and column headers to table data"""
+
+        # row and column headers
+        rheads, cheads = self.get_header_blocks(row_headers, row_nrs, col_headers)
+
+        if cheads:
+            data = np.ma.vstack((cheads, data))
+
+        if rheads:
+            data = np.ma.hstack((np.atleast_2d(rheads).T, data))
+
+        return data
+
+    def get_header_blocks(self, row_headers=None, row_nrs=False, col_headers=None):
         # row and column headers
         # TODO: error check for len of row/col_headers
         rheads, cheads = [], []
-        has_row_head = row_headers is not None
-        has_col_head = col_headers is not None
+
+        has_row_head = not_null(row_headers)
+        has_col_head = not_null(col_headers)
 
         if has_row_head and self.has_totals:
-            row_headers = [row_headers, 'Totals']
+            row_headers = [*row_headers, 'Totals']
 
         if has_col_head:
             cheads.append(col_headers)
@@ -1378,7 +1428,9 @@ class Table(LoggingMixin):
             #  both column and row header
             if has_row_head:  # and (len(row_headers) == data.shape[0] - 1):
                 row_headers = ['', *row_headers]
-                self.borders = [self.MID_BORDER, *self.borders]
+                self.borders = [self.borders[0], *self.borders]
+        elif has_row_head:
+            row_headers = ['', *row_headers]
 
         if self.has_units:
             cheads.append(
@@ -1393,33 +1445,14 @@ class Table(LoggingMixin):
         # add row numbers
         if self.has_row_nrs:  # (row_nrs is not False)
             nr = int(row_nrs)
-            rheads.append([*([''] * self.has_units),
-                           *([self._nrs_header] * has_col_head),
+            rheads.append([*([self._nrs_header] * has_col_head),
+                           *([''] * self.has_units),
                            *np.arange(nr, self.nrows + nr).astype(str),
                            *([''] * self.has_totals)])
-            self.borders = [self.MID_BORDER, *self.borders]
+
+            self.borders = [self.borders[0], *self.borders]
 
         return rheads, cheads
-
-    # @expose.args()
-    # @staticmethod
-    def add_headers(self, data,
-                    row_headers=None,
-                    col_headers=None,
-                    row_nrs=False):
-        """Add row and column headers to table data"""
-
-        # row and column headers
-        rheads, cheads = self.get_header_block(row_headers, row_nrs, col_headers)
-
-        if cheads:
-            data = np.ma.vstack((cheads, data))
-
-        if rheads:
-            data = np.ma.hstack((np.atleast_2d(rheads).T, data))
-
-        return data
-
     # ------------------------------------------------------------------------ #
 
     def format(self):
@@ -1432,7 +1465,7 @@ class Table(LoggingMixin):
         #  ??? OR is there a better way??
 
         table_width = sum(self.col_widths[self._idx_shown] +
-                          self.lcb[self._idx_shown])
+                          self.lcb[self._idx_shown]) + 1
 
         if table_width <= self.max_width:
             return '\n'.join(self._build())
@@ -1492,7 +1525,7 @@ class Table(LoggingMixin):
         """make title line"""
         text = self.title + (' (continued)' if continued else '')
         return self.make_merged_cell(text, width, self.title_align,
-                               self.title_props)
+                                     self.title_props)
 
     def _get_heading_lines(self, idx, table_width, continued):
         # title
@@ -1506,8 +1539,8 @@ class Table(LoggingMixin):
             # if isinstance(self.summarize, (numbers.Integral)):
             # display summarized columns in single row
             yield self.make_merged_cell(str(self.inset),
-                                  table_width,
-                                  style=['underline' * self.frame])
+                                        table_width,
+                                        style=['underline' * self.frame])
 
         # check inset width
         column_width_total = (len(self.LEFT_BORDER) + self.col_widths[idx] + self.lcb[idx]).sum()
