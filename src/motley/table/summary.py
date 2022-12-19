@@ -193,7 +193,8 @@ class SummaryTable(LoggingMixin):
             return
 
         # if a total is asked for on a column, make sure we don't suppress it
-        idx_squash = np.setdiff1d(self.possible(ignore), np.nonzero(table.totals)[0])
+        has_total = [] if table.totals is None else np.nonzero(table.totals)[0]
+        idx_squash = np.setdiff1d(self.possible(ignore), has_total)
         val_squash = data[0, idx_squash]
 
         idx_show = np.setdiff1d(range(data.shape[1]), idx_squash)
