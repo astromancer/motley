@@ -287,8 +287,9 @@ class SummaryTable(LoggingMixin):
 
         # If we are here, there are multiple rows in the summary table
         if leftover := (n_items % ncols):
-            cells.extend([''] * leftover)
-            widths = np.r_[widths, np.zeros(leftover, int)]
+            add = ncols - leftover
+            cells.extend([''] * add)
+            widths = np.r_[widths, np.zeros(add, int)]
 
         rows = np.reshape(cells, (-1, ncols))
         widths = widths.reshape((-1, ncols)).max(0)
