@@ -20,8 +20,7 @@ from recipes.functionals import echo0
 from recipes.unicode import subscripts, superscripts
 
 # relative
-from .. import ansi, apply, codes, format, underline
-from ..textbox import textbox
+from .. import ansi, apply, codes, format, textbox
 from .trace import trace_boundary
 
 
@@ -312,7 +311,7 @@ class TextImageBase:
         #     return AnsiBox()(stack(self.pixels))
             # return stack(frame_inpixel(self.pixels, None))
 
-        box = textbox(stack(self.pixels), linestyle=frame, **kws)
+        box = textbox.textbox(stack(self.pixels), linestyle=frame, **kws)
 
         if xticks:
             xticks = list(map(superscripts, xticks))
@@ -430,24 +429,28 @@ class AnsiImage(TextImageBase):
 
         if not frame:
             return stack(self.pixels)
-        
-        # format 
+
+        # format
         s = super().format(frame, xticks, yticks, **kws)
+
+        if not self.needs_edge:
+            return s
 
         # HACK: Add mask edge in frame if needed
         topline, *_ = s.split('\n', 1)
         i0 = topline.index('  ')
         shape = np.array(self.pixels.shape)
+        style = textbox.LINESTYLE_TO_EDGESTYLES.get(frame)[0]
         new = ''
         for ix in np.array(self.needs_edge):
             i = ix[ix != shape].item()
             new += ''.join((topline[:(i0 + 2 * i + 1)],
-                            apply('  ', (frame, self.mask_color)),
-                            topline[:i0], # style
+                            apply('  ', (style, self.mask_color)),
+                            topline[:i0],  # style
                             topline[(i0 + 2 * (i + 1) + 1):]))
 
         return s.replace(topline, new)
-        
+
 
 class BinaryTextImage(TextImageBase):
     def __init__(self, data, origin=0):

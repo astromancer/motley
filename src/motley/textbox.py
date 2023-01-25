@@ -282,7 +282,7 @@ CORNERS = {
 CORNERS_HEAVY = '┏┓┗┛'
 
 
-LINESTYLE_TO_EFFECTS = {
+LINESTYLE_TO_EDGESTYLES = {
     # top, bottom, left, right
     '_': ('_', '_', '', ''),
     '[': '_',
@@ -411,7 +411,7 @@ def textbox(text, fg=None, bg=None,
         left=left, top=top,
         right=right, bottom=bottom,
         corners=corners,
-        linecolor=LINESTYLE_TO_EFFECTS.get(linestyle, linecolor)
+        linecolor=LINESTYLE_TO_EDGESTYLES.get(linestyle, linecolor)
     )(text, **kws)
 
     # return (TextBox.for_style(linestyle), init_kws)
