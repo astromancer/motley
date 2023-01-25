@@ -16,16 +16,17 @@ import more_itertools as mit
 from recipes.dicts import ManyToOneMap
 
 # relative
-from ..ansi import parse
 from ..colors import CSS_TO_RGB
 from ._codes import *
+from .utils import parse
+from .exceptions import InvalidStyle
 
 
 # ---------------------------------------------------------------------------- #
 # Escape sequence
 ESC = '\033'  # All sequences start with this character # equivalent to '\x1b'
-CSI = ESC + '['  # Control Sequence Initiator
-END = CSI + '0m'
+CSI = f'{ESC}['  # Control Sequence Initiator
+END = f'{CSI}0m'
 
 # rgb string matcher
 RGX_RGB = re.compile(r'''(?x)
@@ -96,20 +97,6 @@ FORMAT_24BIT = KeywordResolver(fg='38;2;{:d};{:d};{:d}',
 COLOR_FORMATTERS = {8:  FORMAT_8BIT,
                     24: FORMAT_24BIT}
 
-# ---------------------------------------------------------------------------- #
-
-
-class InvalidStyle(Exception):
-    """
-    Raised when a user input object cannot be resolved to a code for colour or
-    effect.
-    """
-
-    def __init__(self, obj, fg_or_bg):
-        super().__init__(
-            (f'Could not interpret object {obj!r} of type {type(obj)!r} as a '
-             f'valid {fg_or_bg!r} colour or effect.')
-        )
 
 # ---------------------------------------------------------------------------- #
 # Dispatch functions for translating user input to ANSI codes

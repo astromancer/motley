@@ -19,8 +19,9 @@ from recipes.misc import get_terminal_size
 from recipes.oo.singleton import Singleton
 
 # relative
-from . import ansi, codes, formatter
+from . import codes, formatter
 
+from .codes import utils as ansi
 
 ALIGNMENT_MAP = {'r': '>',
                  'l': '<',

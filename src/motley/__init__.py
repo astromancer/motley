@@ -14,7 +14,6 @@ from loguru import logger
 
 # relative
 from . import codes
-from .ansi import *
 from .utils import *
 from .string import Str
 from .codes import bg, fg
@@ -22,6 +21,7 @@ from .formatter import format, format_partial, formatter, stylize
 
 #
 logger.disable('motley')
+
 
 # aliases
 apply = hue = codes.apply

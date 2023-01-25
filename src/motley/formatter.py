@@ -51,6 +51,7 @@ import re
 from textwrap import dedent
 from collections import UserString
 from string import Formatter as BuiltinFormatter
+from .codes import utils as ansi
 
 # third-party
 from loguru import logger
@@ -68,8 +69,7 @@ from recipes.string.brackets import (BracketParser, UnpairedBracketError,
                                      csplit, level)
 
 # relative
-from . import ansi, codes
-from .codes.resolve import InvalidStyle
+from . import codes
 
 
 # FIXME: stylize to raise on invalid formatting...
@@ -308,7 +308,7 @@ def _apply_style(string, **style):
 
     try:
         return codes.apply(string, **style)
-    except InvalidStyle:  # as err:
+    except codes.exceptions.InvalidStyle:  # as err:
         # The block above will fail for the short format spec style
         # eg: 'Bk_' to mean 'bold,black,underline' etc
 
@@ -323,7 +323,7 @@ def _apply_style(string, **style):
                      tuple(maybe_short_spec), style, string)
         try:
             return codes.apply(string, *maybe_short_spec, **style)
-        except InvalidStyle as err2:
+        except codes.exceptions.InvalidStyle as err2:
             raise err2  # from err
 
 # def parse_spec(spec):
@@ -694,7 +694,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         ------
         ValueError
             If the standard format specifier is invalid.
-        motley.codes.resolve.InvalidStyle
+        motley.codes.exceptions.InvalidStyle
             If the colour / style directives could not be resolved.
         """
         self.logger.debug('Formatting {!r} with {!r} at parent', value, spec)

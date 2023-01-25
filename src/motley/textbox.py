@@ -6,6 +6,7 @@ from collections.abc import Collection
 
 # third-party
 import more_itertools as mit
+from .codes import utils as ansi
 
 # local
 from recipes import api
@@ -16,7 +17,7 @@ from recipes.utils import duplicate_if_scalar
 from recipes.string import backspaced, justify
 
 # relative
-from . import ansi, apply, format, underline
+from . import apply, format, underline
 from .utils import get_width, resolve_width
 
 

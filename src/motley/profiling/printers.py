@@ -3,6 +3,7 @@ Printers for displaying profiled source code
 """
 
 # builtin libs
+# std
 import re
 import ast
 import sys
@@ -16,15 +17,15 @@ import numpy as np
 import more_itertools as mit
 
 # local
-from recipes.iter import where_true, where_false
-from recipes.introspect import get_class_that_defined_method
 from recipes import pprint
+from recipes.iter import where_false, where_true
+from recipes.introspect import get_class_that_defined_method
 
 # relative
 from .. import codes
-from ..ansi import length
 from ..table import Table
-from ..utils import ConditionalFormatter
+from ..codes.utils import length
+
 
 # FIXME: line stripping still buggy
 

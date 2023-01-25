@@ -31,8 +31,7 @@ from recipes.logging import LoggingMixin
 from recipes.decorators import raises as bork
 
 # relative
-from .. import ansi, codes
-from ..formatter import stylize, format, formatter, Formattable
+from .. import codes
 from ..utils import resolve_alignment
 from .utils import *
 from .utils import _underline

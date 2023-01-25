@@ -12,11 +12,11 @@ from loguru import logger
 
 # local
 from recipes import pprint as ppr
-from recipes.functionals import echo0, always
 from recipes.decorators import raises as bork
+from recipes.functionals import always, echo0
 
 # relative
-from .. import ansi, codes, formatters
+from .. import codes, formatters
 from ..utils import get_width, resolve_alignment
 from .column import resolve_columns
 
@@ -339,7 +339,7 @@ def truncate(item, width, dots=DOTS):
     # TODO: if DOTS more than 1 chr long
     cw = 0  # cumulative width
     s = ''
-    for parts in ansi.parse(str(item), named=True):
+    for parts in codes.parse(str(item), named=True):
         *pre, text, end = parts
         cw += len(text)
         if cw > width:

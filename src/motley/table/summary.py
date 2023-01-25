@@ -1,5 +1,4 @@
 # std
-from curses.ascii import isspace
 import numbers
 import operator as op
 from warnings import warn
@@ -15,9 +14,10 @@ from recipes.logging import LoggingMixin
 from recipes.string.brackets import BracketParser, braces
 
 # relative
-from .. import ansi
 from ..formatter import format
+from ..codes import utils as ansi
 from .utils import align_at, apportion
+
 
 # from .utils import justified_delta
 # ---------------------------------------------------------------------------- #
@@ -146,7 +146,7 @@ class SummaryTable(LoggingMixin):
     def from_table_api(cls, table, summary):
         if summary and (len(table.data) <= 1 or not table.has_col_head):
             msg = ("no column headers provided",
-                   "table contains only a single row of data")[table.has_col_head] 
+                   "table contains only a single row of data")[table.has_col_head]
             cls.logger.warning(f'Requested `summary` representation, but {msg}.'
                                ' Ignoring.')
             return cls(table, False)

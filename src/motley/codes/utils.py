@@ -1,12 +1,20 @@
 """
-Tools for recognising and stripping ANSI codes
+Tools for recognising and stripping ANSI codes.
 """
 
+# std
 import re
 from collections import namedtuple
-from recipes.functionals import echo
+
+# third-party
 import more_itertools as mit
 
+# local
+from recipes.functionals import echo
+
+
+__all__ = ['has_ansi', 'strip', 'pull', 'parse', 'split', 'length', 
+           'length_codes', 'length_seen']
 
 # REGEX_ANSI = re.compile(r'''(?x)
 #     (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
