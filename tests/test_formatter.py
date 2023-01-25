@@ -7,9 +7,10 @@ import pytest
 from loguru import logger
 
 # local
-from motley.formatter import Formatter, formatter
-from recipes.testing import Expected, Throws, mock
+from motley.formatter import (ExtendedFormatSpec, FormatSpec, Formattable,
+                              Formatter, formatter)
 from recipes.string.brackets import UnpairedBracketError
+from recipes.testing import Expected, Throws, expected, mock
 
 
 # ---------------------------------------------------------------------------- #
@@ -128,6 +129,9 @@ test_extended_format = exp({
             'c, b, a',
         ('{0:|r}{1:|g}{0:|b}', 'abra', 'cad'):   # arguments' indices can be repeated
         '\x1b[;31mabra\x1b[0m\x1b[;32mcad\x1b[0m\x1b[;34mabra\x1b[0m',
+
+        # empty style fields
+        ('{0!r:s|/}', ' ... '): "' ... '",
 
         # Accessing arguments by name:
         mock.format('Coordinates: {latitude:|w/k}, {longitude:|k/w}',
@@ -419,6 +423,9 @@ test_stylize = exp({
 
     mock.stylize(' {0:<{width}|b}={1:<{width}}', width=10):
         ' \x1b[;34m{0:<10}\x1b[0m={1:<10}',
+        
+    mock.stylize("{0:-<{width}}{foo}", '', width=50): #FIXME
+        '--------------------------------------------------{foo}',
 
     mock.stylize('{{{name}.{function}:|green}:{line:d|orange}: <52}|'):
         '{\x1b[;32m{name}.{function}\x1b[0m:'
@@ -435,3 +442,28 @@ test_stylize = exp({
     # name contains braced groups eg: {name} since they will be adjusted on
     # second round format
 })
+
+
+class TestFormatSpec:
+    @pytest.mark.parametrize(
+        'spec, expected',
+        {' ^+12_.4f|cB/k':
+            {'fill': ' ',
+            'align': '^',
+            'sign': '+',
+            'alt': '',
+            'width': '12',
+            'grouping': '_',
+            'precision': '.4',
+            'type': 'f'}
+        }.items())
+    def test_match(self, spec, expected):
+        groups = FormatSpec.regex.match(spec).groupdict()
+        print(groups)
+
+    def test_formatspec():
+        # spec = FormatSpec.from_string(' ^12.4f')
+
+        espec = ExtendedFormatSpec.from_string(' ^+12_.4f|cB/k')
+
+        fmt = Formattable('A {{}} format string {{{!r: ^+12_.4f|cB/k}}} !!')

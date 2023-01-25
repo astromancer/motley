@@ -158,18 +158,18 @@ class FormatSpec(SlotHelper):
         for k, v in items.items():
             setattr(self, k, v)
 
-    def __str__(self):
-        return ''.join(
-            # (self.fill if self.align else ''),
-            (str(getattr(self, _))  # for b in type(self).__bases__
-             for _ in self.__slots__)
-        )
+    # def __str__(self):
+    #     return ''.join(
+    #         # (self.fill if self.align else ''),
+    #         (str(getattr(self, _))  # for b in type(self).__bases__
+    #          for _ in self.__slots__)
+    #     )
 
-    def __repr__(self):
-        return dicts.pformat({_: getattr(self, _)
-                              for base in (*type(self).__bases__, type(self))
-                              for _ in base.__slots__},
-                             type(self).__name__)
+    # def __repr__(self):
+    #     return dicts.pformat({_: getattr(self, _)
+    #                           for base in (*type(self).__bases__, type(self))
+    #                           for _ in base.__slots__},
+    #                          type(self).__name__)
 
     def __call__(self, value):
         # return builtins.format(value, str(self))
@@ -412,7 +412,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
     parser = BracketParser('{}')
     _rgb_parser = BracketParser('()')
     # supporting [] is more complicated because of ansi codes containing these:
-    # Eg '\x1b[;1;34m'
+    #    eg: '\x1b[;1;34m'
 
     # TODO: ('{:%Y-%m-%d %H:%M:%S}', datetime.datetime(2010, 7, 4, 12, 15, 58)):
 
@@ -431,7 +431,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         # >>> format('hello {world[0]:-<5s}', world='world')
         # >>> format('{::^11s}', 'x')
 
-        self.logger.opt(lazy=True).debug('Recieved format string:{0[0]}> {0[1]!r}',
+        self.logger.opt(lazy=True).debug('Received format string:{0[0]}> {0[1]!r}',
                                          lambda: ('\n' * (len(string) > 40), string))
 
         i = 0
@@ -718,7 +718,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         return super().convert_field(value, conversion)
 
     def format_partial(self, format_string, *args, **kws):
-        self.logger.debug('Recieved format string:{}> {!r}',
+        self.logger.debug('Received format string:{}> {!r}',
                           '\n' * (len(format_string) > 40), format_string)
         return PartialFormatter().format(format_string, *args, **kws)
 
@@ -755,6 +755,7 @@ class PartialFormatter(Formatter):
 
     def get_field(self, field_name, args, kws):
         # eg: field_name = '0[name]' or 'label.title' or 'some_keyword'
+        # Returns a tuple (obj, used_key).
         self.logger.opt(lazy=True).debug(
             '{}', lambda: f'{field_name = }, {args = }, {kws = }')
 
@@ -821,22 +822,16 @@ class PartialFormatter(Formatter):
             self.logger.debug('Wrapping: value = {!r}, spec = {!r}', value, spec)
             value = '{'f'{value}{f":{spec}" if spec else ""}''}'
             # value = ':'.join((value, spec)).join('{}')
-        else:
-            self.logger.debug('Not wrapping; {}', value)
+            return _apply_style(value, **style)
 
-        return _apply_style(value, **style)
-
-        # else:
-        #     self.logger.debug('Passing up for formatting: value = {!r}, spec = {!r}',
-        #                 value, spec)
-        #     return super().format_field(value, spec)
+        self.logger.debug('Not wrapping; {!r}', value)
+        if spec:
+            self.logger.debug('Passing up for formatting: value = {!r}, spec = {!r}',
+                              value, spec)
+            value = BuiltinFormatter.format_field(self, value, spec)
 
         # self.logger.debug('Formatted field:\n{}', ff)
-        # return ff
-
-    # def _parse_spec(self, value, spec):
-
-    #     value, spec, style = super()._parse_spec(value, spec)
+        return _apply_style(value, **style)
 
     def convert_field(self, value, conversion):
         if self._wrap_field and conversion:
