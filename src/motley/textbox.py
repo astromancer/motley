@@ -6,18 +6,17 @@ from collections.abc import Collection
 
 # third-party
 import more_itertools as mit
-from .codes import utils as ansi
 
 # local
-from recipes import api
+from recipes import api, iter as itr
 from recipes.functionals import echo0
 from recipes.dicts import AttrReadItem
-from recipes.oo import iter_subclasses
 from recipes.utils import duplicate_if_scalar
 from recipes.string import backspaced, justify
 
 # relative
 from . import apply, format, underline
+from .codes import utils as ansi
 from .utils import get_width, resolve_width
 
 
@@ -438,7 +437,7 @@ class TextBox:
 
     @classmethod
     def for_style(cls, style):
-        return next((kls for kls in iter_subclasses(cls)
+        return next((kls for kls in itr.subclasses(cls)
                      if style in kls._supported_linestyles),
                     TextBox)
 

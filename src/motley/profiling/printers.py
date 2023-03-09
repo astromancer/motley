@@ -19,7 +19,7 @@ import more_itertools as mit
 # local
 from recipes import pprint
 from recipes.iter import where_false, where_true
-from recipes.introspect import get_class_that_defined_method
+from recipes.introspect import get_defining_class
 
 # relative
 from .. import codes
@@ -38,7 +38,7 @@ cdot = u'\u00B7'  # '·'
 
 def func2str(func):
 
-    if (cls := get_class_that_defined_method(func)) is not None:
+    if (cls := get_defining_class(func)) is not None:
         return '.'.join((cls.__name__, func.__name__))
     
     if isinstance(func, ftl.partial):

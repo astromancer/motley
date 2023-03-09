@@ -51,16 +51,15 @@ import re
 from textwrap import dedent
 from collections import UserString
 from string import Formatter as BuiltinFormatter
-from .codes import utils as ansi
 
 # third-party
 from loguru import logger
 
 # local
-from recipes import dicts
 from recipes.regex import unflag
 from recipes.iter import cofilter
 from recipes.string import indent
+from recipes.oo.slots import SlotRepr
 from recipes.oo.temp import temporarily
 from recipes.functionals import not_none
 from recipes.logging import LoggingMixin
@@ -70,6 +69,7 @@ from recipes.string.brackets import (BracketParser, UnpairedBracketError,
 
 # relative
 from . import codes
+from .codes import utils as ansi
 
 
 # FIXME: stylize to raise on invalid formatting...
@@ -82,30 +82,27 @@ builtin_formatter = BuiltinFormatter()  # oformat
 # ---------------------------------------------------------------------------- #
 
 
-def _rhs(obj):
-    return 'None' if obj is None else repr(str(obj))
-
-
 def escape_braces(string):
     return string.replace('{', '{{').replace('}', '}}')
 
 
-class SlotHelper:
+# ---------------------------------------------------------------------------- #
+
+
+class SlotHelper(SlotRepr):
+    """
+    Helper class for obects with slots.
+    """
+
     __slots__ = ()
 
-    def __str__(self):
-        return ''.join(
-            # (self.fill if self.align else ''),
-            (getattr(self, _)  # for b in type(self).__bases__
-             for _ in self.__slots__)
-        )
+    def __init__(self, **kws):
+        # generic init that sets attributes for input keywords
+        for _ in {'self', 'kws', '__class__'}:
+            kws.pop(_, None)
 
-    def __repr__(self):
-        return dicts.pformat({_: getattr(self, _)
-                              for base in (*type(self).__bases__, type(self))
-                              for _ in base.__slots__},
-                             type(self).__name__,
-                             rhs=_rhs)
+        for key, val in kws.items():
+            setattr(self, key, val)
 
 
 class FormatSpec(SlotHelper):

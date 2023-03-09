@@ -45,8 +45,8 @@ class KeywordResolver(ManyToOneMap):
     """
     Resolve all the various ways in which colours or effects can be specified.
     """
-    template = ('{key:r} is not a valid description for a text or '
-                'background effect.')
+    template = ('{key:r} is not a valid description for a text (fg) or '
+                'background (bg) effect.')
 
     def __missing__(self, key):
         try:
@@ -64,7 +64,7 @@ class CodeResolver(KeywordResolver):
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
         # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
-        self.add_mapping(colorAliasMap)
+        self.add_mapping(color_alias_map)
         # add a layer that maps to lower case: 'REd' --> 'red'
         self.add_func(str.lower)
         # add light -> bright translation
@@ -78,7 +78,7 @@ class CodeResolver(KeywordResolver):
 # additional shorthands for bold / italic text
 BG_CODES = CodeResolver(BG_CODES)
 FG_CODES = CodeResolver(FG_CODES)
-FG_CODES.add_mapping(effectAliasMap)
+FG_CODES.add_mapping(style_alias_map)
 
 
 # Keyword Translator
@@ -176,10 +176,7 @@ def is_24bit(obj):
         return False
 
     types, *bad = set(map(type, obj))
-    if bad:
-        return False
-
-    return issubclass(types, numbers.Real)
+    return False if bad else issubclass(types, numbers.Real)
 
 
 def to_24bit(triplet):
@@ -293,24 +290,27 @@ def apply(s, *effects, **kws):
 
     # get code bits eg: '34;48;5;22'
     new_codes = get_code_str(*effects, **kws)
-    if not new_codes:
-        return s
-
+    
     # In order to get the correct representation of the string, we strip and
     # ANSI codes that are in place and stack the new codes This means previous
     # colours are replaced, but effects like 'bold' or 'italic' will stack for
-    # recursive invocations of this function.  This also means we get the
-    # shortest possible representation of the string given the parameters which
-    # is nice and efficient. If we were to apply blindly our string would be
-    # longer than needed by a few (non-display) characters. This might seem
+    # recursive invocations of this function.  As a bonus we then also get the
+    # shortest possible representation of the string given the requested style
+    # which is nice and efficient. If we were to apply blindly our string would
+    # be longer than needed by a few (non-display) characters. This might seem
     # innocuous but becomes important once you start doing more complicated
     # effects on longer strings.
 
     # NOTE: final byte 'm' only valid for SGR (Select Graphic Rendition) and not
     # other codes, but this is all we support for now
-
-    return ''.join(f'{CSI}{params};{new_codes}m{w}{END}'
-                   for _, params, _, w, _ in parse(s))
+    return (
+        ''.join(
+            f'{CSI}{params};{new_codes}m{w}{END}'
+            for _, params, _, w, _ in parse(s)
+        )
+        if new_codes
+        else s
+    )
 
 
 def apply_naive(s, *effects, **kws):
@@ -321,7 +321,4 @@ def apply_naive(s, *effects, **kws):
 
     # get code string eg: '34;48;5;22'
     code = get(*effects, **kws)
-    if not code:
-        return s
-
-    return ''.join((code, s, END))
+    return ''.join((code, s, END)) if code else s

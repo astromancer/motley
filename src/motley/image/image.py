@@ -3,12 +3,12 @@ Image rendering in the console!
 """
 
 # std
-from ast import Return
 import itertools as itt
 import functools as ftl
 
 # third-party
 import numpy as np
+import more_itertools as mit
 from loguru import logger
 from matplotlib.pyplot import get_cmap
 from matplotlib.colors import Normalize
@@ -20,7 +20,8 @@ from recipes.functionals import echo0
 from recipes.unicode import subscripts, superscripts
 
 # relative
-from .. import ansi, apply, codes, format, textbox
+from .. import apply, codes, format, textbox
+from ..codes import utils as ansi
 from .trace import trace_boundary
 
 
@@ -139,7 +140,7 @@ def overlay(mask, pixels, color=None):
         # update current pixel position
         current += step
 
-    return out.astype(str), needs_edge
+    return out.astype(str), np.array(needs_edge)
 
 # FRAMES = {
 #     '-':,

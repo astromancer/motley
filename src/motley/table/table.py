@@ -5,39 +5,38 @@ Pretty printed tables for small data sets
 
 # std
 import os
-import operator as op
 import numbers
 import warnings as wrn
 import functools as ftl
 import itertools as itt
 from dataclasses import dataclass
 from shutil import get_terminal_size
+from typing import Collection, Union
 from collections import UserString, abc
-from typing import Callable, Collection, Union
-import more_itertools as mit
+
 # third-party
 import numpy as np
+import more_itertools as mit
 
 # local
 from recipes.oo import coerce
-from recipes import dicts
-from recipes.lists import where, cosort
 from recipes.iter import coerced
 from recipes.sets import OrderedSet
 from recipes.functionals import echo0
-from recipes.decorators import catch
-from recipes import api, pprint as ppr
+from recipes.lists import cosort, where
 from recipes.logging import LoggingMixin
-from recipes.decorators import raises as bork
+from recipes import api, dicts, pprint as ppr
+from recipes.decorators import catch, raises as bork
 
 # relative
 from .. import codes
 from ..utils import resolve_alignment
+from ..formatter import Formattable, formatter
+from . import summary as sm
+from .xlsx import XlsxWriter
 from .utils import *
 from .utils import _underline
-from .xlsx import XlsxWriter
 from .column import resolve_columns
-from motley.table import summary as sm
 
 
 # from pydantic.dataclasses import dataclass # for validation!
@@ -54,6 +53,7 @@ OVERLINE = '‾'  # U+203E
 HEADER_ALIGN = '^'
 # MAX_WIDTH = None  # TODO
 # MAX_LINES = None  # TODO
+CONTINUED = ' (continued)'
 
 # ---------------------------------------------------------------------------- #
 
@@ -436,7 +436,7 @@ class Table(LoggingMixin):
                  col_groups=None,
                  #  core_columns=(),
 
-                #  order = 'r',
+                 #  order = 'r',
                  # RowHeaders(names, fmt='{:< |bB}', nrs=True)
                  #
                  row_headers=None,
@@ -676,13 +676,22 @@ class Table(LoggingMixin):
                 units = units_
 
         # convert to object array
-        data = np.asanyarray(data, 'O')
+        try:
+            data = np.asanyarray(data, 'O')
+        except ValueError as err: # FIXME
+            if 'invalid __array_struct__' in str(err):
+                z = np.empty((len(data), len(data[0])), 'O')
+                for i, row in enumerate(data):
+                    for j, d in enumerate(row):
+                        z[i, j] = d
+                data = z
+            else:
+                raise
 
         # check data shape / dimensions
         dim = data.ndim
         if dim == 1:
             data = data[None]
-        
 
         if dim > 2:
             raise ValueError(f'Only 2D data can be tabled! Data is {dim}D')
@@ -1315,9 +1324,9 @@ class Table(LoggingMixin):
 
         # note: the two arrays above may be different shapes.
         if frame:
-            width += ansi.length(self.LEFT_BORDER)
+            width += codes.length(self.LEFT_BORDER)
         else:
-            width -= ansi.length(self.RIGHT_BORDER)
+            width -= codes.length(self.RIGHT_BORDER)
 
         if self.inset:
             return max(width, self.inset.get_width(frame=True))
@@ -1381,7 +1390,7 @@ class Table(LoggingMixin):
 
                 # attempt to compute total
                 try:
-                    totals[i] = sum(filter(None, data[:, i]))
+                    totals[i] = np.sum(list(filter(None, data[:, i])))
                 except Exception as err:
                     wrn.warn(
                         f'Could not compute total for column {i} due to the '
@@ -1470,9 +1479,8 @@ class Table(LoggingMixin):
             return '\n'.join(self._build())
 
         # if self.handle_too_wide == 'split':
-        if self.has_title:
-            self.title += '\n'  # to indicate continuation under title line
-
+        # if self.has_title:
+        #     self.title += '\n'  # to indicate continuation under title line
         #
         split_tables = self.split()
 
@@ -1490,6 +1498,7 @@ class Table(LoggingMixin):
         rhw = widths[:self.n_head_col].sum()  # row header width
 
         # location of current split
+        first = True
         splix = self.n_head_col
         while splix != self._idx_shown[-1]:
             # cumulative total column width
@@ -1511,18 +1520,19 @@ class Table(LoggingMixin):
                              self._idx_shown[splix:endix]]
 
             split_tables.append(
-                '\n'.join(map(str, self._build(idx_show, bool(splix))))
+                '\n'.join(map(str, self._build(idx_show, not first and bool(splix))))
             )
 
             if endix is None:
                 break
             splix = endix
+            first = False
 
         return split_tables
 
     def make_title(self, width, continued=False):
         """make title line"""
-        text = self.title + (' (continued)' if continued else '')
+        text = self.title + (CONTINUED if continued else '')
         return self.make_merged_cell(text, width, self.title_align,
                                      self.title_props)
 
@@ -1749,7 +1759,7 @@ class Table(LoggingMixin):
         # this is needed because the alignment formatting gets screwed up by the
         # ANSI characters (which have length, but are not displayed)
         # if align == '>':
-        pad_width = ansi.length_codes(text) + width
+        pad_width = codes.length_codes(text) + width
         return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
 
     # def expand_dtype(self, data):

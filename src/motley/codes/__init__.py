@@ -11,11 +11,11 @@ def _make_named_codes(fg_or_bg):
     # this can be used to create the 'fg.py' and 'bg.py' modules which
     # contain named foreground and background colors respectively
     #
-    aliases = dict(fg=effectAliasMap)
+    aliases = dict(fg=style_alias_map)
     # named code strings as module constants
     return {name.replace(' ', '').upper(): get(**{fg_or_bg: name})
             for name in {**CODES[fg_or_bg],
-                         **colorAliasMap,
+                         **color_alias_map,
                          **aliases.get(fg_or_bg, {}),
                          **CSS_TO_RGB}
             if name.replace(' ', '').isalpha()}

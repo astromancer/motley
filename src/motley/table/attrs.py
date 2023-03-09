@@ -363,19 +363,17 @@ class AttrTable:
                  for colname, flag in self.flags.items()}
         align = {k: v for k, v in self.align.items() if k in col_headers}
         return Table(data, **{**self.kws,  # defaults
-                                **{**dict(title=container.__class__.__name__,
+                              **{**dict(title=container.__class__.__name__,
                                         align=align,
                                         col_headers=col_headers,
                                         col_groups=self.get_groups(attrs),
                                         totals=self.totals,
                                         flags=flags,
                                         footnotes=self.footnotes),
-                                    **{key: self.get_defaults(attrs, key)
+                                 **{key: self.get_defaults(attrs, key)
                                     for key in ('units', 'formatters')},
-                                    **kws},  # keywords from user input
-                                })
-    
-            
+                                 **kws},  # keywords from user input
+                              })
 
     def prepare(self, groups, **kws):
         # class GroupedTables:
