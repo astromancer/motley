@@ -472,7 +472,7 @@ class AnsiImage(TextImageBase):
         if not len(self.needs_edge):
             return s
 
-        pixel_size = 2  # + (frame in '[+E')
+        pixel_size = self._pixel_size + (frame in '[+E')
         shape = np.array(self.pixels.shape)
 
         if frame:
