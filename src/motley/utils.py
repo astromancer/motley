@@ -6,8 +6,11 @@ Utility functions and classes.
 # std
 import os
 import numbers
+import unicodedata
 import functools as ftl
 from collections import abc
+
+from wcwidth import wcswidth
 
 # third-party
 import numpy as np
@@ -43,7 +46,7 @@ def resolve_width(width):
 
 
 # @ftl.lru_cache()
-def get_width(text, count_hidden=False):
+def get_width(text, raw=False):
     """
     For string `text` get the maximal line width (number of characters in
     longest line).
@@ -53,7 +56,7 @@ def get_width(text, count_hidden=False):
     text: str
         String, possibly multi-line, possibly containing non-display characters
         such as ANSI colour codes.
-    count_hidden: bool
+    raw: bool
         Whether to count the "hidden" non-display characters such as ANSI escape
         codes.  If True, this function returns the same result as you would get
         from `len(text)`. If False, the length of the string as it would appear
@@ -63,9 +66,17 @@ def get_width(text, count_hidden=False):
     -------
     int
     """
-    length = ftl.partial(ansi.length, raw=count_hidden)
-    # deal with cell elements that contain newlines
-    return max(map(length, text.split(os.linesep)))
+    # length = ftl.partial(ansi.length, raw=count_hidden)
+    # length = ansi.length_raw if raw else ansi.length_seen
+    # length = ftl.partial(, length_func=length)
+    text = str(text)
+    if raw:
+        return max(map(len,  text.split(os.linesep)))
+    
+    # get longest line for cell elements that contain newlines
+    # deal with unicode combining, double width, emoji's etc..
+    return max(map(wcswidth, ansi.strip(text).split(os.linesep)))
+
 
 
 def hstack(tables, spacing=0, offsets=0):
@@ -463,8 +474,10 @@ class GroupTitle:
     def format_key(keys):
         if isinstance(keys, str):
             return keys
+        
         if isinstance(keys, abc.Collection):
             return "; ".join(map(str, keys))
+        
         return str(keys)
 
     def __str__(self):

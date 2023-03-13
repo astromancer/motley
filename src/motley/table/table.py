@@ -6,6 +6,7 @@ Pretty printed tables for small data sets
 # std
 import os
 import numbers
+import unicodedata
 import warnings as wrn
 import functools as ftl
 import itertools as itt
@@ -678,7 +679,7 @@ class Table(LoggingMixin):
         # convert to object array
         try:
             data = np.asanyarray(data, 'O')
-        except ValueError as err: # FIXME
+        except ValueError as err:  # FIXME
             if 'invalid __array_struct__' in str(err):
                 z = np.empty((len(data), len(data[0])), 'O')
                 for i, row in enumerate(data):
@@ -929,7 +930,7 @@ class Table(LoggingMixin):
         self.highlight[-self.has_units - 1] = col_head_props
 
         # init rows
-        self.rows = []
+        # self.rows = []
         self.states = []
         self.state_props = []
 
@@ -1652,7 +1653,7 @@ class Table(LoggingMixin):
             underline = (i in self.hlines)
             table.extend(
                 codes.apply(row, row_props)
-                for row in self._gen_row_lines(
+                for row in self._row_lines(
                     row_cells, widths, next(alignment), borders, underline)
             )
             # fixme: maybe don't apply to border symbols
@@ -1668,7 +1669,7 @@ class Table(LoggingMixin):
 
         return table
 
-    def _gen_row_lines(self, cells, widths, alignment, borders, underline=False):
+    def _row_lines(self, cells, widths, alignment, borders, underline=False):
         """
         handle multi-line cell elements, apply properties to each item in the
         list of columns create a single string
@@ -1685,6 +1686,8 @@ class Table(LoggingMixin):
         -------
 
         """
+        # from IPython import embed
+        # embed(header="Embedded interpreter at 'src/motley/table/table.py':1687")
 
         # handle multi-line cell elements
         lines = [col.split('\n') for col in cells]
@@ -1694,12 +1697,12 @@ class Table(LoggingMixin):
         n_lines = max(map(len, lines))
 
         for i, row_items in enumerate(itt.zip_longest(*lines, fillvalue='')):
-            row = self.stack_cells(row_items, widths, alignment, borders)
+            row = self._row_stack_cells(row_items, widths, alignment, borders)
             if (i + 1 == n_lines) and underline:
                 row = _underline(row)
             yield row
 
-    def stack_cells(self, cells, widths, alignment, borders):
+    def _row_stack_cells(self, cells, widths, alignment, borders):
 
         # format cells
         first, *cells = map(self.format_cell, cells, widths, alignment, *borders)
@@ -1712,9 +1715,9 @@ class Table(LoggingMixin):
         #     first = self.LEFT_BORDER + first
 
         # stick cells together
-        row = ''.join((first, *cells))
-        self.rows.append(row)
-        return row
+        # row = ''.join((first, *cells))
+        # self.rows.append(row)
+        return ''.join((first, *cells))
 
     def insert_lines(self, insert, width):
         if isinstance(insert, str):
@@ -1759,8 +1762,12 @@ class Table(LoggingMixin):
         # this is needed because the alignment formatting gets screwed up by the
         # ANSI characters (which have length, but are not displayed)
         # if align == '>':
-        pad_width = codes.length_codes(text) + width
-        return self.cell_fmt.format(text, align, pad_width, lhs, rhs)
+
+        # if (pad := (len(text) - width)) > 0:
+        #     width += pad
+        # TODO: maybe faster to capture pad sizes when splitting the cell content....
+        width += codes.length_codes(text) + sum(map(unicodedata.combining, text))
+        return self.cell_fmt.format(text, align, width, lhs, rhs)
 
     # def expand_dtype(self, data):
     #     # enlarge the data type if needed to fit escape codes

@@ -20,10 +20,12 @@ from recipes.functionals import echo0
 from recipes.unicode import subscripts, superscripts
 
 # relative
-from .. import apply, codes, format, textbox
+from .. import apply, codes, table, textbox
 from ..codes import utils as ansi
 from .trace import trace_boundary
 
+
+# ---------------------------------------------------------------------------- #
 
 RIGHT_BORDER = '\N{RIGHT ONE EIGHTH BLOCK}'  # '▕'
 LEFT_BORDER = '\N{LEFT ONE EIGHTH BLOCK}'    # '▏'
@@ -38,6 +40,8 @@ BLOCKS = tuple(' ▄▀█')
 # '▀'   UPPER HALF BLOCK    U+2580
 # '▄'   LOWER HALF BLOCK    U+2584
 # '█'   FULL BLOCK          U+2588
+
+# ---------------------------------------------------------------------------- #
 
 
 def _add_edge(pixel, left, char, color):
@@ -194,66 +198,64 @@ def stack(pixels):
     return ''.join(''.join(row) + '\n' for row in pixels)
 
 
-def show(self,  frame=True, origin=0, cmap=None):
+def show(self,  frame=True, orient=0, cmap=None):
 
-    origin = int(origin)
-    assert origin in {0, 1}
+    orient = int(orient)
+    assert orient in {0, 1}
 
     # re-orient data
-    o = (-1, 1)[origin]
+    o = (-1, 1)[orient]
     data = self.data[::o]
 
     return AnsiImage(data, cmap).render(frame)
 
 
-def thumbnails(images, masks=(),
-               cmap=None, contour_color=('r', 'B'),
-               #    title=None,
-               labels=(), label_fmt='{{label:d|B_}: ^{width}}',
-               #    frame=True,
-               #    layout=()
-               ):
+def get_ticks(origin, image, every=2):
+    return map(ticker, origin, np.add(origin, image.shape) + 1, (every, every))
+
+
+def ticker(start, stop, every):
+    ticks = np.empty(stop - start,
+                     dtype=f'<U{np.floor(np.log10(100) + 1):.0f}')
+    ticks[::every] = np.arange(start, stop, every)
+    return list(ticks)
+
+
+def thumbnails(images, masks=(), origins=(), cmap=None, contour=('r', 'B'),
+               frame=True, **kws):
     """
     Cutout image thumbnails displayed as a grid in terminal. Optional binary
     contours overlaid.
 
     Parameters
     ----------
-    image : np.ndarray
-        Image array with sources to display.
-    seg : obstools.image.segmentation.SegmentedImage
-        The segmented image of detected sources
-    top : int
-        Number of brightest sources to display images for.
-    image_cmap : str, optional
+    images : np.ndarray
+        Image arrays to display.
+
+    cmap : str, optional
         Colour map, by default 'cmr.voltage_r'.
-    contour_color : str, optional
+    contour : str, optional
         Colour for the overlaid contour, by default 'r'.
-    label_fmt : str, optional
-        Format string for the image titles, by default
-        '{{label:d|B_}: ^{width}}'. This will produce centre justified lables in
-        bold, underlined text above each image.
 
     """
     #    contour_cmap='hot'):
     # contours_cmap = seg.get_cmap(contour_cmap)
     # line_colours  = cmap(np.linspace(0, 1, top))
     # format(label_fmt, label=lbl, width=2 * biggest[1])
+
+    if frame is True and origins:
+        frame = '['
+
     stack = []
-    for label, image, mask in itt.zip_longest(labels, images, masks):
-        img = AnsiImage(image, cmap)
+    for origin, image, mask in itt.zip_longest(origins, images, masks):
+        img = AnsiImage(image, cmap, frame=frame)
 
         if mask is not None:
-            img.overlay(mask, contour_color)
-        # contours_cmap(i / top)[:-1]
+            img.overlay(mask, contour)
 
-        if label:
-            label = format(label_fmt, label=label, width=2*len(image[0]))
-
-        stack.append(img
-                     # '\n'.join(filter(None, (label, img.format(frame))))
-                     )
-    # if layout:
+        # Tick labels
+        xticks, yticks = get_ticks(origin, image)
+        stack.append(img.format(frame, xticks, yticks))
 
     return stack
     #
@@ -265,6 +267,40 @@ def thumbnails(images, masks=(),
 
     # return text
 
+    #    cmap=None, contour=('r', 'B'),
+    #    #    title=None,
+    #    labels=(), label_fmt='{{label:d|B_}: ^{width}}',
+
+    #    title=None,
+    #    labels=(), label_fmt='{{label:d|B_}: ^{width}}',
+
+
+# label_fmt : str, optional
+#     Format string for the image titles, by default
+#     '{{label:d|B_}: ^{width}}'. This will produce centre justified lables in
+#     bold, underlined text above each image.
+
+
+def thumbnails_table(images, masks=(), labels=..., origins=(),
+                     cmap=None, contour=('r', 'B'), frame=True,
+                     info=(), **kws):
+
+    thumbs = thumbnails(images, masks, origins, cmap, contour, frame)
+
+    row_headers = None
+    if info:
+        row_headers = ['Image', *info.keys()]
+        thumbs = [thumbs, *info.values()]
+
+    return table.Table(thumbs,
+                       col_headers=labels,
+                       row_headers=row_headers,
+                       order='c',
+                       **kws)
+
+
+# ---------------------------------------------------------------------------- #
+
 
 class TextImageBase:
     """
@@ -275,20 +311,20 @@ class TextImageBase:
     _pixel_size = 2
     # frame = False
 
-    def __init__(self, data, origin=0, frame=False, *args, **kws):
-        self.pixels = self.get_pixels(data, origin)
+    def __init__(self, data, orient=0, frame=False, *args, **kws):
+        self.pixels = self.get_pixels(data, orient)
         self.shape = self.pixels.shape
         self.frame = bool(frame)
 
-    def get_pixels(self, data, origin=0):
+    def get_pixels(self, data, orient=0):
         data = np.array(data)
         assert data.ndim == 2, f'Only 2D arrays can be imaged by {type(self)}.'
         # assert (data.dtype.kind in 'ib'), 'Only integer arrays can be imaged.'
 
         # re-orient data
-        origin = int(origin)
-        assert origin in {0, 1}
-        o = (-1, 1)[origin]
+        orient = int(orient)
+        assert orient in {0, 1}
+        o = (-1, 1)[orient]
         return data[::o]
 
     def __str__(self):
@@ -298,13 +334,18 @@ class TextImageBase:
         # format here for ineractive use
         return self.format()
 
-    def format(self, frame=None, xticks=(), yticks=(), **kws):
+    def _get_frame(self, frame):
         if frame is None:
             frame = self.frame
 
         if frame is True:
             frame = '_'
 
+        return frame
+
+    def format(self, frame=None, xticks=(), yticks=(), **kws):
+
+        frame = self._get_frame(frame)
         if not frame:
             return stack(self.pixels)
 
@@ -382,26 +423,24 @@ class AnsiImage(TextImageBase):
     """
     Fast image rendering in the terminal!
 
-    ... for tiny images ...
+    ... suitable for tiny images ...
 
     Pixels are represented as two spaces coloured using ansi codes.
     """
 
-    _top_row_added = False
-
-    def __init__(self, data, cmap=None, origin=0, frame=True):
+    def __init__(self, data, cmap=None, orient=0, frame=True):
         # colour map
         self.cmap = get_cmap(cmap)
         # init base
-        TextImageBase.__init__(self, data, origin, frame)
+        TextImageBase.__init__(self, data, orient, frame)
         self.needs_edge = []
         self.mask_color = None
 
-    def get_pixels(self, data, origin):
+    def get_pixels(self, data, orient):
         from . import codes
 
         #
-        data = super().get_pixels(data, origin)
+        data = super().get_pixels(data, orient)
 
         # normalize
         data = data.astype(float)
@@ -422,42 +461,53 @@ class AnsiImage(TextImageBase):
 
     def format(self, frame=None, xticks=(), yticks=(), **kws):
 
-        if frame is None:
-            frame = self.frame
+        frame = self._get_frame(frame)
 
-        if frame is True:
-            frame = '_'
-
-        if not frame:
+        if not frame and not len(self.needs_edge):
             return stack(self.pixels)
 
         # format
         s = super().format(frame, xticks, yticks, **kws)
 
-        if not self.needs_edge:
+        if not len(self.needs_edge):
             return s
 
-        # HACK: Add mask edge in frame if needed
-        topline, *_ = s.split('\n', 1)
-        i0 = topline.index('  ')
+        pixel_size = 2  # + (frame in '[+E')
         shape = np.array(self.pixels.shape)
-        style = textbox.LINESTYLE_TO_EDGESTYLES.get(frame)[0]
-        new = ''
-        for ix in np.array(self.needs_edge):
-            i = ix[ix != shape].item()
-            new += ''.join((topline[:(i0 + 2 * i + 1)],
-                            apply('  ', (style, self.mask_color)),
-                            topline[:i0],  # style
-                            topline[(i0 + 2 * (i + 1) + 1):]))
 
-        return s.replace(topline, new)
+        if frame:
+            # HACK: Add mask edge in frame if needed
+            first = '\x1b[;4m  '
+            topline, *_ = s.split('\n', 1)
+            style, *_ = textbox.LINESTYLE_TO_EDGESTYLES[frame]
+
+            if first in topline:
+                i0 = topline.index(first) + len(first)
+                active_code = ''.join(codes.pull(topline[:i0])[0])
+        else:
+            i0 = 0
+            style = '_'
+            active_code = ''
+            topline = ' ' * pixel_size * shape[1]
+
+        code = codes.get(style, self.mask_color)
+        ix = np.sort(self.needs_edge[self.needs_edge != shape])
+        insert = i0 - int(bool(frame)) + pixel_size * np.r_[ix, ix[-1] + 1]
+        current, new = 0, ''
+        for i, j in mit.pairwise(insert):
+            new += ''.join((topline[current:i], code,
+                            topline[i:j], codes.END, active_code))
+            current = j
+        new += topline[current:]
+
+        return s.replace(topline, new) if frame else '\n'.join((new, s))
 
 
 class BinaryTextImage(TextImageBase):
-    def __init__(self, data, origin=0):
+    def __init__(self, data, orient=0):
         assert data.dtype.kind == 'b'
 
-        super().__init__(data, origin)
+        super().__init__(data, orient)
 
 
 class BinaryImageUnicodeBlocks(BinaryTextImage):
