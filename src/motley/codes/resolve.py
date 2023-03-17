@@ -185,28 +185,27 @@ def to_24bit(triplet):
                          'bit Colours are represented by a sequence of 3 '
                          'integers in range (0, 256), or 3 floats in range (0, '
                          '1).')
-    
+
     triplet = list(triplet)
     for i, val in enumerate(triplet):
         if isinstance(val, numbers.Integral):
             if not (0 <= val < 256):
                 raise ValueError(
                     f'RGB colour value integer {val!r} outside range (0, 256).'
-        )
+                )
         elif isinstance(val, numbers.Real):
             if (0 <= val <= 1):
                 triplet[i] = int(val * 256)
             else:
                 raise ValueError(
                     f'RGB colour value float {val!r} outside range (0, 1).'
-        )
+                )
         else:
             raise TypeError(
                 f'Could not interpret key {triplet!r} as a 24 bit colour.'
             )
     return triplet
 
-    
 
 # to_rgb = to_24bit
 
@@ -290,7 +289,7 @@ def apply(s, *effects, **kws):
 
     # get code bits eg: '34;48;5;22'
     new_codes = get_code_str(*effects, **kws)
-    
+
     # In order to get the correct representation of the string, we strip and
     # ANSI codes that are in place and stack the new codes This means previous
     # colours are replaced, but effects like 'bold' or 'italic' will stack for
@@ -303,14 +302,10 @@ def apply(s, *effects, **kws):
 
     # NOTE: final byte 'm' only valid for SGR (Select Graphic Rendition) and not
     # other codes, but this is all we support for now
-    return (
-        ''.join(
-            f'{CSI}{params};{new_codes}m{w}{END}'
-            for _, params, _, w, _ in parse(s)
-        )
-        if new_codes
-        else s
-    )
+    return (''.join(f'{CSI}{params};{new_codes}m{w}{END}'
+                    for _, params, _, w, _ in parse(s))
+            if new_codes
+            else s)
 
 
 def apply_naive(s, *effects, **kws):

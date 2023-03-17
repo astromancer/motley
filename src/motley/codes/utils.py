@@ -45,7 +45,7 @@ REGEX_ANSI_OPEN = r'''
 # REGEX_ANSI_NOT_RESET = re.compile(REGEX_ANSI_OPEN, re.X)
 
 # matches any
-REGEX_ANSI_FULL = re.compile(fr'''(?x)
+REGEX_ANSI_ENCODED = re.compile(fr'''(?x)
     (?P<code>{REGEX_ANSI_OPEN})     # the ANSI code
     (?P<text>.*?)                   # the string to which the code applies
     (?P<end>{REGEX_ANSI_CLOSE})     # the ANSI reset code
@@ -111,7 +111,7 @@ def parse(s, named=False):
     wrapper = AnsiEncodedString if named else echo
 
     idx = 0
-    for mo in REGEX_ANSI_FULL.finditer(s):
+    for mo in REGEX_ANSI_ENCODED.finditer(s):
         start = mo.start()
         if start != idx:
             yield wrapper('', '', '', s[idx:start], '')
