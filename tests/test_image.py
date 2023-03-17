@@ -59,9 +59,10 @@ test_display = Expected(format_with_overlay)({
 })
 
 # logger.enable('motley')
+FRAMES = ('', '_', '-', '=', '+', '[', 'E')
 
-
-def test_edge_mask():
+@pytest.mark.parametrize('frame', FRAMES)
+def test_edge_mask(frame):
     mask = np.array(
         [[False, False, False, False, False, False, False, False, False, False],
          [False, False, False, False, False, False, False, False, False, False],
@@ -71,15 +72,13 @@ def test_edge_mask():
          [False, False,  True,  True,  True,  True,  True,  True, False, False],
          [False, False, False, False,  True, False, False, False, False, False]]
     )
-    image = np.ones(mask.shape)
-    img = AnsiImage(image)
+    img = AnsiImage(np.ones(mask.shape), frame=frame)
     img.overlay(mask, 'r')
     print(img)
 
 
 if __name__ == "__main__":
-    #
-    for frame in ('_', '-', '=', '+', '[', 'E'):   #
+    for frame in FRAMES:   #
         print(frame * 80)
         xticks = [''] * 11
         xticks[::2] = range(102, 113, 2)
@@ -90,8 +89,6 @@ if __name__ == "__main__":
                                   yticks=yticks)
         #    yticks=range(10)[::-1])
         print(img)
-        # from IPython import embed
-        # embed(header="Embedded interpreter at 'tests/test_image.py':80")
         # print(repr(img))
         print('*' * 80)
-        # break
+        break

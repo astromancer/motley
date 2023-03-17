@@ -290,7 +290,8 @@ LINESTYLE_TO_EDGESTYLES = ls2es = {
     '_': ('', '_',  '', '_'),
     '[': '_'
 }
-ls2es['+'] = ls2es['_']
+ls2es['+']  = ls2es['_']
+ls2es['-'] = ['']
 ls2es['E'] = ls2es['[']
 del ls2es
 

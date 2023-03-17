@@ -211,7 +211,7 @@ def show(self,  frame=True, orient=0, cmap=None):
 
 
 def get_ticks(origin, image, every=2):
-    return map(ticker, origin, np.add(origin, image.shape) + 1, (every, every))
+    return map(ticker, origin, np.add(origin, image.shape[::-1]) + 1, (every, every))
 
 
 def ticker(start, stop, every):
@@ -314,7 +314,7 @@ class TextImageBase:
     def __init__(self, data, orient=0, frame=False, *args, **kws):
         self.pixels = self.get_pixels(data, orient)
         self.shape = self.pixels.shape
-        self.frame = bool(frame)
+        self.frame = frame
 
     def get_pixels(self, data, orient=0):
         data = np.array(data)
@@ -462,37 +462,38 @@ class AnsiImage(TextImageBase):
     def format(self, frame=None, xticks=(), yticks=(), **kws):
 
         frame = self._get_frame(frame)
-
         if not frame and not len(self.needs_edge):
             return stack(self.pixels)
 
         # format
-        s = super().format(frame, xticks, yticks, **kws)
-
         if not len(self.needs_edge):
-            return s
+            return super().format(frame, xticks, yticks, **kws)
 
-        pixel_size = self._pixel_size + (frame in '[+E')
+        # HACK: Add mask edge in frame if needed
+        uframe = (frame in ('[', '+', 'E', '_'))
+        pixel_size = self._pixel_size + (frame in ('[', '+', 'E'))
         shape = np.array(self.pixels.shape)
 
-        if frame:
-            # HACK: Add mask edge in frame if needed
-            first = '\x1b[;4m  '
+        i0 = 0
+        active_code = ''
+        if uframe:
+            s = super().format(frame, xticks, yticks, **kws)
             topline, *_ = s.split('\n', 1)
-            style, *_ = textbox.LINESTYLE_TO_EDGESTYLES[frame]
+            style, *_ = textbox.LINESTYLE_TO_EDGESTYLES.get(frame, '')
 
-            if first in topline:
-                i0 = topline.index(first) + len(first)
+            if (first := '\x1b[;4m  ') in topline:
+                i0 = topline.index(first) + len(first) - 1
                 active_code = ''.join(codes.pull(topline[:i0])[0])
         else:
-            i0 = 0
             style = '_'
-            active_code = ''
             topline = ' ' * pixel_size * shape[1]
+            s = '\n'.join((topline, 
+                           super().format(False, xticks, yticks, **kws)))
 
+        #
         code = codes.get(style, self.mask_color)
         ix = np.sort(self.needs_edge[self.needs_edge != shape])
-        insert = i0 - int(bool(frame)) + pixel_size * np.r_[ix, ix[-1] + 1]
+        insert = i0 + pixel_size * np.r_[ix, ix[-1] + 1]
         current, new = 0, ''
         for i, j in mit.pairwise(insert):
             new += ''.join((topline[current:i], code,
@@ -500,7 +501,7 @@ class AnsiImage(TextImageBase):
             current = j
         new += topline[current:]
 
-        return s.replace(topline, new) if frame else '\n'.join((new, s))
+        return s.replace(topline, new) # if uframe else '\n'.join((new, s))
 
 
 class BinaryTextImage(TextImageBase):
