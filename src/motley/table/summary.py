@@ -186,9 +186,10 @@ class SummaryTable(LoggingMixin):
             raise NotImplementedError
 
         data = table.data
-        if loc is False or ncols is False:
+        n_head_col = table.n_head_col
+        if (loc is False) or (ncols is False):
             self.items = {}
-            self.index_shown = np.arange(table.ncols + table.n_head_col)
+            self.index_shown = np.arange(table.ncols + n_head_col)
             self.loc = -1
             return
 
@@ -198,20 +199,24 @@ class SummaryTable(LoggingMixin):
         val_squash = data[0, idx_squash]
 
         idx_show = np.setdiff1d(range(data.shape[1]), idx_squash)
-        idx_show = np.r_[np.arange(table.n_head_col), idx_show + table.n_head_col]
+        idx_show = np.r_[np.arange(n_head_col), idx_show + n_head_col]
+        
         # check if any data left to display
         if idx_show.size == 0:
             self.logger.warning('No data left in table after summarizing '
                                 'singular value columns.')
 
         # get summarized items. columns for which all data identical
-        items = op.itemgetter(*idx_squash)(
-            list(zip(table.col_headers, table.units))
-        )
-        if len(idx_squash) == 1:
-            items = [items]
+        headers, units = (), ()
+        if (n := len(idx_squash)):
+            items = op.itemgetter(*idx_squash)(
+                list(zip(table.col_headers, table.units)))
 
-        headers, units = zip(*items)
+            if n == 1:
+                items = [items]
+
+            headers, units = zip(*items)
+
         self.items = dict(zip(headers, zip(val_squash, units)))
         self.index_shown = idx_show
         self.loc = int(loc)
@@ -236,7 +241,9 @@ class SummaryTable(LoggingMixin):
         return np.setdiff1d(np.arange(n), self.index_shown)
 
     def allowed(self):
-        return self.table.allow_summary()
+        """Check if table allows summarizarion."""
+        return (len(self.table.data) > 1) and self.table.has_col_head
+        
 
     def possible(self, ignore=()):
         if not self.allowed():

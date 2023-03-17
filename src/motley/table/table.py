@@ -20,19 +20,18 @@ import numpy as np
 import more_itertools as mit
 
 # local
-from recipes.oo import coerce
-from recipes.iter import coerced
 from recipes.sets import OrderedSet
 from recipes.functionals import echo0
 from recipes.lists import cosort, where
 from recipes.logging import LoggingMixin
 from recipes import api, dicts, pprint as ppr
 from recipes.decorators import catch, raises as bork
+from recipes.utils import ensure_list, ensure_wrapped
 
 # relative
 from .. import codes
 from ..utils import resolve_alignment
-from ..formatter import Formattable, formatter
+from ..formatter import Formattable
 from . import summary as sm
 from .xlsx import XlsxWriter
 from .utils import *
@@ -133,7 +132,7 @@ def split_columns(column, split_nested_types):
 
     # wrap strings
     if str not in split_nested_types:
-        column = coerced(column, list, wrap=str)
+        column = ensure_list(column, coerce=str)
 
     yield from itt.zip_longest(*column, fillvalue='')
 
@@ -154,31 +153,34 @@ def unpack_dict(data, split_nested_types=set(), group=(''), level=0):
 def _unpack_convert_dict(data, ignore_keys, converters, header_levels,
                          split_nested_types):
 
-    ignore_keys = ignore_keys or {}
+    ignore_keys = ensure_wrapped(ignore_keys, set, str)
     converters = converters or {}
     header_levels = header_levels or {}
+
+    if isinstance(header_levels, numbers.Integral):
+        header_levels = defaultdict(lambda: header_levels)
 
     keep = OrderedSet(data.keys()) - set(ignore_keys)
     data = dict(zip(keep, map(data.get, keep)))
 
-    # headings, columns
-    headings, columns = zip(*unpack_dict(data, split_nested_types))
-    headings = list(itt.zip_longest(*headings, fillvalue=''))
+    # headers, columns
+    headers, columns = zip(*unpack_dict(data, split_nested_types))
+    headers = list(itt.zip_longest(*headers, fillvalue=''))
 
     # get conversion functions
     type_convert, col_converters = resolve_converters(converters)
     col_converters = resolve_input(col_converters, len(columns),
-                                   headings, 'converter')
+                                   headers, 'converter')
 
-    for i, (headings, column) in enumerate(zip(zip(*headings), columns)):
-        # print(headings, column)
+    for i, (headers, column) in enumerate(zip(zip(*headers), columns)):
+        # print(headers, column)
         column = map(col_converters.get(i, type_convert), column)
 
-        title = headings[-1]
+        title = headers[-1]
         if header_levels.get(title, 0) < 0:
-            headings = [*headings[1:], '']
+            headers = [*headers[1:], '']
 
-        yield *headings, list(column)
+        yield *headers, list(column)
 
 
 def dict_to_list(data, ignore_keys=None, converters=None, header_levels=None,
@@ -208,12 +210,32 @@ def dict_to_list(data, ignore_keys=None, converters=None, header_levels=None,
 
     # transpose if needed
     if order.startswith('r'):
-        return None, headers, list(zip(*data))
+        return (), headers, list(zip(*data))
 
     if order.startswith('c'):
-        return headers, None, data
+        return headers, (), data
 
     raise ValueError(f'Invalid value for parameter: {order=!r}')
+
+
+def _from_tree(node, row_header_level=0, level=0):
+    groups = []
+    columns = defaultdict(list)
+    for name, child in node.items():
+        if isinstance(child, type(node)):
+            igroups, inner = _from_tree(child, row_header_level, level + 1)
+            if igroups and (len(groups) <= level):
+                groups.append(igroups)
+
+            for key, dat in inner.items():
+                if (key not in columns) and (level != row_header_level):
+                    groups.append(name)
+                columns[key].extend(dat)
+        else:
+            columns[name].append(child)
+
+    return groups, columns
+
 
 
 def check_flag(obj):
@@ -224,16 +246,6 @@ def check_flag(obj):
         return obj.format
 
     raise TypeError(f'Invalid flag type: {type(obj)}.')
-
-
-def not_null(obj):
-    if obj is None:
-        return False
-
-    if isinstance(obj, str):
-        return True
-
-    return len(obj) != 0
 
 
 # ---------------------------------------------------------------------------- #
@@ -338,6 +350,26 @@ class Table(LoggingMixin):
                       'col_groups': zip(*col_groups),
                       **kws}
 
+    @classmethod
+    def from_tree(cls, node, row_header_level=0, ignore_keys=(), col_sort=None, **kws):
+        #
+        groups, columns = _from_tree(node, row_header_level)
+        ng = []
+        for *g, key in zip(*groups, list(columns.keys())):
+            if key in ignore_keys:
+                columns.pop(key)
+                continue
+
+            ng.append(g)
+            # [*map(columns.pop, ignore_keys)]
+        
+        if callable(col_sort):
+            keys, values, groups = cosort(*zip(*columns.items()), ng, key=col_sort)
+            columns = dict(zip(keys, values))
+            
+        kws.setdefault('col_groups', groups)
+        return cls.from_dict(columns, **kws)
+
     # def _resolve_data_and_headers(self, data, **kws):
     #     # special case: dict
     #     if isinstance(data, dict):
@@ -372,6 +404,7 @@ class Table(LoggingMixin):
     # TODO: test mappings!!
 
     # mappings for terse kws
+
     @api.synonyms(
         dicts.merge({
             'units?':                               'units',
@@ -386,7 +419,8 @@ class Table(LoggingMixin):
             'n((um(ber)?)|r?)_?rows':               'row_nrs',
             'totals?':                              'totals',
             '(c(ol(umn)?)?_?)?borders?':            'col_borders',
-            'vlines':                               'col_borders'
+            'vlines':                               'col_borders',
+            'title_style':                          'title_props',
         },
             *({f'{p}head(er)?s?':                   f'{rc}_headers',
                f'{p}head(er)?_prop(erties)?':       f'{rc}_head_props'}
@@ -720,16 +754,15 @@ class Table(LoggingMixin):
         # headers
         self.col_headers = ensure_list(col_headers, str)
         self.row_headers = ensure_list(row_headers, str)
+
         self.frame = bool(frame)
         self.has_row_nrs = hrn = (row_nrs is not False)
-        self.has_row_head = hrh = (row_headers is not None)
-        self.n_head_col = hrh + hrn
+        self.n_head_col = self.has_row_head + hrn
         self.col_groups = self.resolve_groups(col_groups, n_cols)
 
         # units
-        self.has_units = (units not in (None, {}))
         self.units = None
-        if self.has_units:
+        if not_null(units):
             units = self.resolve_input(units, n_cols, 'units')
             self.units = list(map(units.get, range(n_cols)))
 
@@ -829,7 +862,6 @@ class Table(LoggingMixin):
         # Next get column widths (without borders)
         # These are either those input by the user, or determined from the
         # content of the columns
-
         if width is None:
             self.col_widths = measure_column_widths(self.pre_table) + self.whitespace
         else:
@@ -927,7 +959,8 @@ class Table(LoggingMixin):
         #     invalid =  set(map(type, self.insert.values())) - {list, str}
 
         self.highlight = dict(highlight or {})
-        self.highlight[-self.has_units - 1] = col_head_props
+        for i in range(-self.n_head_rows, 0):
+            self.highlight[i] = col_head_props
 
         # init rows
         # self.rows = []
@@ -1010,6 +1043,10 @@ class Table(LoggingMixin):
         return bool(self.col_headers)
 
     @property
+    def has_units(self):
+        return not_null(self.units)
+
+    @property
     def lcb(self):
         return lengths(self.borders)
 
@@ -1023,6 +1060,10 @@ class Table(LoggingMixin):
         if headers:
             assert len(headers) == self.data.shape[0]
         self._row_headers = headers
+
+    @property
+    def has_row_head(self):
+        return bool(self.row_headers)
 
     @property
     def n_head_rows(self):
@@ -1054,23 +1095,21 @@ class Table(LoggingMixin):
                      width=self.measure_column_widths()[self._idx_shown],
                      **kws)
 
-    def allow_summary(self):
-        """Check if table allows summarizarion."""
-        return (len(self.data) > 1) and self.has_col_head
-
     def resolve_groups(self, col_groups, n_cols):
         # handle column group headers
-        if col_groups is None:
+        if is_null(col_groups):
             return []
 
-        col_groups = list(col_groups)
-        assert len(col_groups) == n_cols
+        if (n := len(col_groups)) != n_cols:
+            raise ValueError(f'Invalid number of column groups: {n} for table'
+                             f' with {n_cols} columns.')
 
-        col_groups = itt.chain(itt.repeat('', self.n_head_col), col_groups)
-        col_groups = coerced(col_groups, list, wrap=str)
-        col_groups = itt.zip_longest(*col_groups, fillvalue='')
         # FIXME: too wide col_groups should truncate
-        return list(col_groups)
+        return list(itt.zip_longest(
+            *(ensure_list(g, coerce=str)
+              for g in itt.chain(itt.repeat('', self.n_head_col), col_groups)),
+            fillvalue=''
+        ))
 
     def get_default_formatter(self, col_idx, precision, short, data):
         """
@@ -1213,8 +1252,8 @@ class Table(LoggingMixin):
         return data
 
     def _format_column_footnote(self, i, flag, flag_info):
-        foot_fmt = None
         hdr = ''
+        foot_fmt = None
         if (info := flag_info.get(flag)):
             # footnotes for all columns
             foot_fmt = self.foot_fmt or ' {flag} : {info}'
@@ -1232,14 +1271,9 @@ class Table(LoggingMixin):
         if isinstance(foot_fmt, str):
             foot_fmt = foot_fmt.format
 
-        grp = ''
-        if self.col_groups:
-            grp = self.col_groups[-1][i + self.n_head_col]
-
+        grp = self.col_groups[-1][i + self.n_head_col] if self.col_groups else ''
         self.footnotes.append(
-            foot_fmt(
-                flag=flag, info=info, grp=grp, hdr=hdr, tbl=self
-            )
+            foot_fmt(flag=flag, info=info, grp=grp, hdr=hdr, tbl=self)
         )
 
     def truncate_cells(self, widths, dots=''):
@@ -1591,6 +1625,8 @@ class Table(LoggingMixin):
             if gw:
                 line += f'{lbl: ^{gw - 1}}{self.RIGHT_BORDER}'
             #
+            line = codes.apply(line, self.col_head_props)
+            
             if self.hlines:
                 # only underline if headers are underlined
                 line = _underline(line)
@@ -1623,7 +1659,7 @@ class Table(LoggingMixin):
             #  whitespace
             top_line = _underline(' ' * table_width)
             table.append(top_line)
-
+        
         # header block
         table.extend(self._get_heading_lines(idx, table_width, continued))
 
@@ -1686,8 +1722,6 @@ class Table(LoggingMixin):
         -------
 
         """
-        # from IPython import embed
-        # embed(header="Embedded interpreter at 'src/motley/table/table.py':1687")
 
         # handle multi-line cell elements
         lines = [col.split('\n') for col in cells]
@@ -1741,7 +1775,9 @@ class Table(LoggingMixin):
         borders = (self.LEFT_BORDER, self.RIGHT_BORDER) if self.frame else ('', '')
         width -= sum(map(len, borders))
 
-        style = coerce(style or [], to=list, wrap=str, ignore=dict)  # list / dict
+        if not isinstance(style, dict):
+            style = ensure_list(style)
+
         lines = text.split(os.linesep)
 
         if ('underline' in style):

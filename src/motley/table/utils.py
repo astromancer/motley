@@ -36,7 +36,24 @@ def str2tup(keys):
     return keys
 
 
+def is_null(obj, except_=('', )):
+    if obj is None:
+        return True
+
+    # sourcery skip: assign-if-exp, reintroduce-else
+    for trial in except_:
+        if obj == trial:
+            return False
+
+    return (len(obj) == 0)
+
+
+def not_null(obj):
+    return not is_null(obj)
+
 # ---------------------------------------------------------------------------- #
+
+
 def apportion(width, n):
     # divide space as equally as possible between `n` columns
     space = np.array([width // n] * n)
@@ -134,10 +151,6 @@ def resolve_width(width, data, headers=None):
 # ---------------------------------------------------------------------------- #
 
 
-def ensure_list(obj, coerce=echo0):
-    return [] if obj is None else list(map(coerce, obj))
-
-
 def ensure_dict(obj, n_cols, what='\b'):
 
     if not obj:  # in (None, False, ()):
@@ -197,6 +210,7 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
         Keys are integer column index. Values are converted input values (or
         default).
     """
+
     out = OrderedDict(ensure_dict(obj, n_cols, what))
 
     # set action raise / warn
