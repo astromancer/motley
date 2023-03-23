@@ -21,6 +21,23 @@ from ..utils import get_width, resolve_alignment
 from .column import resolve_columns
 
 
+__all__ = ('str2tup',
+           'null',
+           'is_null',
+           'not_null',
+           'apportion',
+           'justify_widths',
+           'align_at',
+           'measure_column_widths',
+           'resolve_width',
+           'ensure_dict',
+           'resolve_input',
+           'resolve_converters',
+           'highlight',
+           'truncate',
+           'is_astropy_table',
+           '_underline')
+
 # ---------------------------------------------------------------------------- #
 DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
 
