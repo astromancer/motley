@@ -19,11 +19,13 @@ from .string import Str
 from .formatter import format, format_partial, stylize
 
 
+# ---------------------------------------------------------------------------- #
 logger.disable('motley')
 
 
 # aliases
 apply = hue = codes.apply
+# ---------------------------------------------------------------------------- #
 
 
 class ConvenienceFunction:

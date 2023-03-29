@@ -54,7 +54,7 @@ def str2tup(keys):
 
 
 def is_null(obj, except_=('', )):
-    if obj is None:
+    if obj is None or obj is False:
         return True
 
     # sourcery skip: assign-if-exp, reintroduce-else
@@ -276,7 +276,9 @@ def resolve_converters(converters):
     if callable(converters):
         return type_convert, defaultdict(lambda: converters)
 
-    assert isinstance(converters, abc.Mapping)
+    if not isinstance(converters, abc.Mapping):
+        raise TypeError(f"expected 'converters' to be mapping, not {type(converters)}")
+        
     col_converters = {}  # defaultdict(lambda: echo0)
 
     for type_or_col, fun in converters.items():

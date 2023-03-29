@@ -505,8 +505,11 @@ class AttrTable:
         # tables.update(empty)
         return tables
 
-    def to_xlsx(self, path, widths={}, **kws):
+    def to_xlsx(self, path, formats=(), widths=None, **kws):
 
+        if widths is None:
+            widths = {}
+            
         data = np.array(self.get_data(self.parent.sort_by('t.t0')))
 
         # FIXME: better to use get_table here, but then we need to keep
@@ -523,7 +526,8 @@ class AttrTable:
             formatters={self.attrs.index(k): v for k, v in self.formatters.items()},
             totals=[col_headers.index(t) for t in self.totals],
             title=self.title,
-            shape=(len(data), len(self.attrs))
+            shape=(len(data), len(self.attrs)),
+            n_cols= len(self.attrs)
         )
 
         # may need to set widths manually eg. for cells that contain formulae
@@ -531,4 +535,4 @@ class AttrTable:
         # table = tmp()
         tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
         #  self.align,
-        return XlsxWriter(tmp, widths, **kws).write(path)
+        return XlsxWriter(tmp, widths, **kws).write(path, formats)

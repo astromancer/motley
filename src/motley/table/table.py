@@ -137,8 +137,12 @@ _AUTOKEY = itt.count()
 
 
 class _AutoKey:
+    # for splitting nested containers into separate columns
     def __init__(self):
         self.key = next(_AUTOKEY)
+
+    def __str__(self):
+        return ''
 
 
 def _split_columns(key, column, split_nested_types):
@@ -147,7 +151,7 @@ def _split_columns(key, column, split_nested_types):
         return
 
     # Ensure each nested object is iterable
-    preprocess = EnsureWrapped(list, scalars={str} - split_nested_types)
+    preprocess = EnsureWrapped(list, is_scalar=tuple({str} - split_nested_types))
     for column in itt.zip_longest(*map(preprocess, column), fillvalue=''):
         yield (*key, _AutoKey()), column
 
@@ -194,8 +198,8 @@ def _get_columns(data, ignore_keys, convert_key, split_nested_types, group,
     return columns
 
 
-def _convert_dict(data, converters, ignore_keys, convert_keys, header_levels,
-                  split_nested_types,):
+def _convert_dict(data, converters=(), ignore_keys=(), convert_keys=(),
+                  header_levels=(), split_nested_types=set()):
 
     ignore_keys = ensure_set(ignore_keys)
     converters = converters or {}
@@ -360,7 +364,13 @@ class Table(LoggingMixin):
                    *args, **kws)
 
     @classmethod
-    @api.synonyms({'convert': 'converters'})
+    @api.synonyms(
+        {
+            'convert':                  'converters',
+            'split_nested(_types?)?':   'split_nested_types'
+        },
+        action=None
+    )
     def from_dict(cls, data, converters=(), ignore_keys=(), convert_keys=(),
                   order='r', col_sort=None, **kws):
 
@@ -378,7 +388,7 @@ class Table(LoggingMixin):
 
         data, kws = cls._parse_from_dict(data, converters,
                                          ignore_keys, convert_keys,
-                                         order, col_sort=None, **kws)
+                                         order, col_sort=col_sort, **kws)
         return cls(data, **kws)
 
     @staticmethod
@@ -400,9 +410,10 @@ class Table(LoggingMixin):
         if col_groups:
             *col_groups, col_headers = col_groups
 
-        if kws.pop('col_sort', None):
-            col_headers, *col_groups, columns = cosort(
+        if col_sort := kws.pop('col_sort', None):
+            col_headers, *col_groups, data = cosort(
                 col_headers, *col_groups, zip(*data), key=col_sort)
+            data = zip(*data)
 
         return data, {'row_headers': row_headers,
                       'col_headers': col_headers,
@@ -441,10 +452,13 @@ class Table(LoggingMixin):
                  # TODO: THIS API:
                  # Table(data,
                  #      # first argument is usually data. Can be array, list, dict
-                 #      # to init from  map of columns use `from_columns` constructor.
+                 #      # to init from list of arrays (each being single ot multiple columns)
+                 #      use `from_columns` constructor.
+
                  #      # You can also place the data anywhere in the argument sequence
                  #      # if you use the `Data` identifier
                  #      #    eg: `Table(Title('foo'), Data([1,2]))`
+
                  #       DataFormat(precision, minimalist, align, masked),
                  #       Title('{"MY DATA TABLE":^s|Bg_/c}'),
                  #       ColumnGroups(group_names, fmt='{:^ |B_}'),
@@ -703,7 +717,7 @@ class Table(LoggingMixin):
             data, kws = self._parse_from_dict(data, **kws)
             # return self.__init__(data, **kws)
 
-        if isinstance(data, set):
+        if isinstance(data, (set, zip)):
             data = list(data)
 
         # special case: astropy.table.Table
@@ -1943,6 +1957,6 @@ class Table(LoggingMixin):
     #     # TODO
     # to_xlsx = XlsxWriter().write
 
-    def to_xlsx(self, path=None, widths=(), **kws):
+    def to_xlsx(self, path=None, formats=(), widths=(), **kws):
         # may need to set widths manually eg. for cells that contain formulae
-        return XlsxWriter(self, widths, **kws).write(path)
+        return XlsxWriter(self, widths, **kws).write(path, formats)
