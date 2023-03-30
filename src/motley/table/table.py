@@ -437,10 +437,10 @@ class Table(LoggingMixin):
             'totals?':                              'totals',
             '(c(ol(umn)?)?_?)?borders?':            'col_borders',
             'vlines':                               'col_borders',
-            'title_style':                          'title_props',
+            # 'title_style':                          'title_style',
         },
             *({f'{p}head(er)?s?':                   f'{rc}_headers',
-               f'{p}head(er)?_prop(erties)?':       f'{rc}_head_props'}
+               f'{p}head(er)?_style':               f'{rc}_head_style'}
               for rc, p in {'row':  'r(ow)?_?',
                             'col':  'c(ol(umn)?)?_?'}.items())
         ),
@@ -479,11 +479,11 @@ class Table(LoggingMixin):
 
                  title=None,
                  title_align='center',
-                 title_props=('underline', ),
+                 title_style=('underline', ),
 
                  # ColumnHeaders(names, fmt='{:< |bB}', units)
                  col_headers=None,
-                 col_head_props='bold',
+                 col_head_style='bold',
                  col_head_align='^',
                  units=None,
                  col_borders=MID_BORDER,
@@ -495,7 +495,7 @@ class Table(LoggingMixin):
                  # RowHeaders(names, fmt='{:< |bB}', nrs=True)
                  #
                  row_headers=None,
-                 row_head_props='bold',
+                 row_head_style='bold',
                  row_nrs=False,
 
                  max_rows=np.inf,
@@ -544,7 +544,7 @@ class Table(LoggingMixin):
 
         title : str
             The table title
-        title_props : str, tuple, dict
+        title_style : str, tuple, dict
             ANSICodes property descriptors
         align, title_align, col_head_align: {'left', 'right', 'center', '<', '>', '^', None}
             The column / column header / title alignment
@@ -553,9 +553,9 @@ class Table(LoggingMixin):
 
         col_headers, row_headers  : array_like
             column -, row headers as sequence of str objects.
-        col_head_props, row_head_props : str or dict or array_like
+        col_head_style, row_head_style : str or dict or array_like
             Column header properties.  If `row_nrs` is True,
-            the row_head_props will be applied to the number column as well
+            the row_head_style will be applied to the number column as well
             TODO: OR a sequence of these, one for each column
         col_groups: array-like
             sequence of strings giving column group names. If given, a group
@@ -764,7 +764,7 @@ class Table(LoggingMixin):
         self.title = title
 
         self.has_title = title not in (None, False)
-        self.title_props = title_props
+        self.title_style = title_style
         self.title_align = resolve_alignment(title_align)
 
         # get data types of elements for automatic formatting / alignment
@@ -853,9 +853,9 @@ class Table(LoggingMixin):
         # Add row / column headers
         # self._col_headers = col_headers  # May be None
         # self.row_headers = row_headers
-        self.col_head_props = col_head_props
+        self.col_head_style = col_head_style
         # TODO : don't really need this since we have self.highlight
-        self.row_head_props = row_head_props
+        self.row_head_style = row_head_style
 
         # insert lines
         self.insert = dict(insert or {})
@@ -982,7 +982,7 @@ class Table(LoggingMixin):
 
         self.highlight = dict(highlight or {})
         for i in range(-self.n_head_rows, 0):
-            self.highlight[i] = col_head_props
+            self.highlight[i] = col_head_style
 
         # init rows
         # self.rows = []
@@ -1598,7 +1598,7 @@ class Table(LoggingMixin):
         """make title line"""
         text = self.title + (CONTINUED if continued else '')
         return self.make_merged_cell(text, width, self.title_align,
-                                     self.title_props)
+                                     self.title_style)
 
     def _get_heading_lines(self, idx, table_width, continued):
         # title
@@ -1654,7 +1654,7 @@ class Table(LoggingMixin):
             if gw:
                 line += f'{lbl: ^{gw - 1}}{self.RIGHT_BORDER}'
             #
-            line = codes.apply(line, self.col_head_props)
+            line = codes.apply(line, self.col_head_style)
 
             if self.hlines:
                 # only underline if headers are underlined
@@ -1772,7 +1772,7 @@ class Table(LoggingMixin):
 
         # Apply properties to whitespace filled row headers
         if self.has_row_head:
-            first = codes.apply(first, self.row_head_props)
+            first = codes.apply(first, self.row_head_style)
 
         # if self.frame:
         #     first = self.LEFT_BORDER + first

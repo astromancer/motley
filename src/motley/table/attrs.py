@@ -446,7 +446,7 @@ class AttrTable:
                 # FIXME: problem with dynamically formatted group title.
                 # Table wants to know width at runtime....
                 title = titled(gid)
-                # title = titled(i, gid, kws.get('title_props'))
+                # title = titled(i, gid, kws.get('title_style'))
 
             tables[gid] = tbl = self.get_table(group, attrs,
                                                title=title,

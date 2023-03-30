@@ -33,17 +33,17 @@ tables = [
     Table(data,
           title='Random data',
           precision=3,
-          title_props=tp),
+          title_style=tp),
 
     # test col_headers
     Table(data,
           title='Random data',
           precision=3,
-          title_props=tp,
+          title_style=tp,
           total=True,
           row_nrs=True,
           col_headers=random_words(5, nc),
-          col_head_props=('italic', 'y')),
+          col_head_style=('italic', 'y')),
 
     # test terse keywords
     Table(data,
@@ -68,21 +68,21 @@ tables = [
     Table(data,
           title='Random data',
           precision=3,
-          title_props=(dict(txt=('bold', 'm'), bg='g')),
+          title_style=(dict(txt=('bold', 'm'), bg='g')),
           totals=True,
           row_nrs=True,
           col_headers=random_words(5, nc),
-          col_head_props=('italic', 'y')),
+          col_head_style=('italic', 'y')),
 
     Table.from_columns(*np.random.randn(3, nc),
                        *np.random.randint(0, 1000, (3, nc)),
                        title='Mixed float, int',
                        precision=3, minimalist=True, ),
-    # title_props=(dict(txt=('bold', 'm'), bg='g')),
+    # title_style=(dict(txt=('bold', 'm'), bg='g')),
     # total=True,
     # row_nrs=True,
     # col_headers=random_words(5, 10),
-    # col_head_props=('italic', 'y'))
+    # col_head_style=('italic', 'y'))
 ]
 
 for tbl in tables:
