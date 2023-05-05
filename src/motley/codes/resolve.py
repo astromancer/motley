@@ -45,21 +45,21 @@ class KeywordResolver(ManyToOneMap):
     """
     Resolve all the various ways in which colours or effects can be specified.
     """
-    template = ('{key:r} is not a valid description for a text (fg) or '
+    template = ('{key!r} is not a valid description for a text (fg) or '
                 'background (bg) effect.')
 
     def __missing__(self, key):
         try:
             return super().__missing__(key)
         except KeyError:
-            raise KeyError(self.template.format(key)) from None
+            raise KeyError(self.template.format(key=key)) from None
 
 
 class CodeResolver(KeywordResolver):
     """
     Resolve all the various names for colours or effects into ansi codes.
     """
-    template = '{key:r} is not a valid colour or effect.'
+    template = '{key!r} is not a valid colour or effect.'
 
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
