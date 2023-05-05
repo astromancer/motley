@@ -23,8 +23,8 @@ from recipes.lists import cosort, where
 from recipes.logging import LoggingMixin
 from recipes import api, dicts, pprint as ppr
 from recipes.functionals import always, echo0
-from recipes.utils import EnsureWrapped, is_scalar
 from recipes.decorators import catch, raises as bork
+from recipes.utils import EnsureWrapped, is_null, is_scalar, not_null
 
 # relative
 from .. import codes
@@ -1060,7 +1060,7 @@ class Table(LoggingMixin):
 
     def _set_headers(self, headers, which):
         w = which[:3]
-        if headers and (headers := ensure_list(headers, str)):
+        if not_null(headers) and (headers := ensure_list(headers, str)):
             if (n := len(headers)) != (m := getattr(self, f'n{w}s')):
                 if n != m + 1:
                     raise ValueError(f'Incorrect number of {which} headers {n} '

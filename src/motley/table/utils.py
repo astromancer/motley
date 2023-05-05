@@ -2,7 +2,6 @@
 
 # std
 import functools as ftl
-import itertools as itt
 from typing import OrderedDict
 from collections import abc, defaultdict
 
@@ -11,9 +10,9 @@ import numpy as np
 from loguru import logger
 
 # local
-from recipes import pprint as ppr
 from recipes.decorators import raises as bork
-from recipes.functionals import always, echo0
+from recipes.functionals import always, echo0, negate
+from recipes import duplicate_if_scalar, pprint as ppr
 
 # relative
 from .. import codes, formatters
@@ -23,8 +22,6 @@ from .column import resolve_columns
 
 __all__ = ('str2tup',
            'null',
-           'is_null',
-           'not_null',
            'apportion',
            'justify_widths',
            'align_at',
@@ -36,6 +33,7 @@ __all__ = ('str2tup',
            'highlight',
            'truncate',
            'is_astropy_table',
+           'convert_astropy_table',
            '_underline')
 
 # ---------------------------------------------------------------------------- #
@@ -53,20 +51,7 @@ def str2tup(keys):
     return keys
 
 
-def is_null(obj, except_=('', )):
-    if obj is None or obj is False:
-        return True
 
-    # sourcery skip: assign-if-exp, reintroduce-else
-    for trial in except_:
-        if obj == trial:
-            return False
-
-    return (len(obj) == 0)
-
-
-def not_null(obj):
-    return not is_null(obj)
 
 # ---------------------------------------------------------------------------- #
 
@@ -169,23 +154,19 @@ def resolve_width(width, data, headers=None):
 
 
 def ensure_dict(obj, n_cols, what='\b'):
+    # convert obj to dict
 
-    if not obj:  # in (None, False, ()):
+    if not obj:
         return {}
 
     if isinstance(obj, abc.Mapping):
         return obj
 
-    # convert obj to dict
-    if not isinstance(obj, abc.Collection):
-        raise TypeError(f'Cannot resolve {type(obj)} to columns of table.')
+    # obj not a mapping
+    obj = duplicate_if_scalar(obj, n_cols)
 
     # auto index
     n_obj = len(obj)
-    if n_obj == 1:
-        # duplicate for all columns
-        return dict(enumerate(itt.repeat(obj[0], n_cols)))
-
     if n_obj == n_cols:
         return dict(enumerate(obj))
 
@@ -278,7 +259,7 @@ def resolve_converters(converters):
 
     if not isinstance(converters, abc.Mapping):
         raise TypeError(f"expected 'converters' to be mapping, not {type(converters)}")
-        
+
     col_converters = {}  # defaultdict(lambda: echo0)
 
     for type_or_col, fun in converters.items():
