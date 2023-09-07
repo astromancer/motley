@@ -19,17 +19,17 @@ import numpy as np
 import more_itertools as mit
 
 # local
-from recipes.lists import cosort, where
+from recipes.lists import cosort, where, where_duplicate
 from recipes.logging import LoggingMixin
-from recipes import api, dicts, pprint as ppr
+from recipes import api, dicts, pprint as ppr, op
 from recipes.functionals import always, echo0
 from recipes.decorators import catch, raises as bork
 from recipes.utils import EnsureWrapped, is_null, is_scalar, not_null
 
 # relative
 from .. import codes
-from ..formatter import Formattable
-from ..utils import resolve_alignment
+from ..formatter import Formattable, format as mformat
+from ..utils import resolve_alignment, get_width
 from . import summary as sm
 from .utils import *
 from .xlsx import XlsxWriter
@@ -105,11 +105,8 @@ ensure_set = EnsureWrapped(typing.Set[str])
 
 
 class Title(Formattable):
-    # text:   str = None
-    # fmt:    Union[str, Callable] = '{: {align}|{fg}/{bg}}'
-    # align:  str = '^'
-    # fg:     StyleType = None
-    # bg:     StyleType = None
+
+    __slots__ = ('text', )
 
     def __init__(self, text, fmt=_DEFAULT_FORMAT, **kws):
         super().__init__(fmt, **kws)
@@ -129,6 +126,38 @@ class Title(Formattable):
 #         if units:
 #             assert len(units) == len(names)
 #         self.units = list(units)
+
+# ---------------------------------------------------------------------------- #
+
+def _hstack(items, fill=''):
+    ok = [not_null(item) for item in items]
+    if any(ok):
+        return np.hstack([items[i] if o else fill for i, o in enumerate(ok)])
+
+
+def hstack(tables, **kws):
+
+    nrows = set(map(Table.nrows.fget, tables))
+    assert len(nrows) == 1
+    nrows = nrows.pop()
+    # col_groups',
+
+    stacked = {attr: _hstack(op.AttrVector(attr)(tables))
+               for attr in ('col_headers', 'units', 'data')}
+
+    for attr in ('align', 'col_groups'):
+        stacked[attr] = _hstack(
+            [np.array(v)[..., i:]
+             for v, i in op.AttrVector(attr, 'has_row_head')(tables)]
+        ).T
+
+    return Table(**stacked,
+                 **{**dict(too_wide=False,  # FIXME # LAST COLUMN DROPPED???!!
+                           row_headers=tables[0].row_headers),
+                    **kws})
+
+    # for k in ('align', 'col_groups'):
+    #     stacked[k] = stacked[k].squeeze()[int(tables[0].has_row_head):]
 
 
 # ---------------------------------------------------------------------------- #
@@ -157,25 +186,29 @@ def _split_columns(key, column, split_nested_types):
 
 
 def get_columns(data, ignore_keys=(), convert_key=echo0,
-                split_nested_types=set(), group=('')):
+                split_nested_types=set(), group=(''), row_level=-1):
 
     convert_key = convert_key or echo0
     assert callable(convert_key)
 
     return _get_columns(data, set(ignore_keys), convert_key, split_nested_types,
-                        group)
+                        group, row_level)
 
 
 def _get_columns(data, ignore_keys, convert_key, split_nested_types, group,
-                 level=0):
+                 level=0, row_level=-1):
 
     columns = defaultdict(list)
-
+    row_headers = []
     for key, obj in data.items():
         if key in ignore_keys:
             continue
 
-        key = (*group, key)
+        if level != row_level:
+            key = (*group, key)
+        else:
+            row_headers.append(key)
+            key = (key,)
 
         if is_scalar(obj):
             # Reach data level. Get / create column
@@ -185,8 +218,9 @@ def _get_columns(data, ignore_keys, convert_key, split_nested_types, group,
         # Dict indicates group of columns
         if isinstance(obj, dict):
             # logger.trace(f'{group=}, {name=}, {level=}')
-            inner = _get_columns(obj, ignore_keys, convert_key,
-                                 split_nested_types, key, level + 1)
+            row_headers, inner = _get_columns(obj, ignore_keys, convert_key,
+                                              split_nested_types, key, level + 1)
+
             for key, col in inner.items():
                 columns[key].extend(col)
             continue
@@ -195,11 +229,11 @@ def _get_columns(data, ignore_keys, convert_key, split_nested_types, group,
         for key, col in _split_columns(key, obj, split_nested_types):
             columns[key] = col
 
-    return columns
+    return row_headers, columns
 
 
 def _convert_dict(data, converters=(), ignore_keys=(), convert_keys=(),
-                  header_levels=(), split_nested_types=set()):
+                  header_levels=(), split_nested_types=set(), row_level=-1):
 
     ignore_keys = ensure_set(ignore_keys)
     converters = converters or {}
@@ -209,7 +243,9 @@ def _convert_dict(data, converters=(), ignore_keys=(), convert_keys=(),
         header_levels = defaultdict(lambda: header_levels)
 
     # get columns as dict[list]
-    columns = get_columns(data, ignore_keys, convert_keys, split_nested_types)
+    row_headers, columns = get_columns(data, ignore_keys, convert_keys,
+                                       split_nested_types, row_level=row_level)
+
     headers, columns = zip(*columns.items())
     headers = list(itt.zip_longest(*headers, fillvalue=''))
 
@@ -218,7 +254,6 @@ def _convert_dict(data, converters=(), ignore_keys=(), convert_keys=(),
     col_converters = resolve_input(col_converters, len(columns), headers, 'converter')
 
     for i, (headers, column) in enumerate(zip(zip(*headers), columns)):
-        # print(headers, column)
         column = map(col_converters.get(i, type_convert), column)
 
         title = headers[-1]
@@ -229,7 +264,8 @@ def _convert_dict(data, converters=(), ignore_keys=(), convert_keys=(),
 
 
 def _preprocess_dict(data, converters=(), ignore_keys=(), convert_keys=(),
-                     header_levels=(), split_nested_types=set(), order='r'):
+                     header_levels=(), split_nested_types=set(), order='r',
+                     row_level=-1):
     """
     Convert input dict to list of values with keys as column / row_headers
     (depending on `order`)
@@ -250,12 +286,15 @@ def _preprocess_dict(data, converters=(), ignore_keys=(), convert_keys=(),
     if isinstance(split_nested_types, type):
         split_nested_types = {split_nested_types}
 
-    *headers, data = zip(*_convert_dict(data, converters,
-                                        ignore_keys, convert_keys,
-                                        header_levels, split_nested_types))
+    *headers, data = zip(*_convert_dict(
+        data, converters,
+        ignore_keys, convert_keys,
+        header_levels, split_nested_types, row_level
+    ))
 
     # transpose if needed
     if order.startswith('r'):
+        # *col_groups, col_headers = headers
         return (), headers, list(zip(*data))
 
     if order.startswith('c'):
@@ -364,6 +403,29 @@ class Table(LoggingMixin):
                    *args, **kws)
 
     @classmethod
+    def from_rows(cls, *rows, ignore_keys=(), fill='--', sort=None,
+                  convert_keys=echo0, **kws):
+
+        assert callable(convert_keys)
+
+        if len(rows) == 1 and isinstance(rows[0], dict):
+            kws['row_headers'], rows = zip(*rows[0].items())
+
+        cols = defaultdict(list)
+        col_names = set(mit.collapse(map(dict.keys, rows))) - ensure_set(ignore_keys)
+
+        if sort:
+            if sort is True:
+                sort = None
+            kws['row_headers'], rows = cosort(kws['row_headers'], rows, key=sort)
+
+        for row in rows:
+            for key in col_names:
+                cols[convert_keys(key)].append(row.get(key, fill))
+
+        return cls.from_dict(cols, **kws)
+
+    @classmethod
     @api.synonyms(
         {
             'convert':                  'converters',
@@ -388,25 +450,20 @@ class Table(LoggingMixin):
 
         data, kws = cls._parse_from_dict(data, converters,
                                          ignore_keys, convert_keys,
-                                         order, col_sort=col_sort, **kws)
+                                         order=order, col_sort=col_sort, **kws)
+
         return cls(data, **kws)
 
     @staticmethod
     def _parse_from_dict(data, *args, **kws):
         #
-        # not_init = ('converters', 'ignore_keys', 'convert_keys',
-        # 'header_levels',
-        # *map(kws.pop, not_init, itt.repeat(()))
-
-        #             'split_nested_types')
-
-        *headers, data = _preprocess_dict(data, *args[:-1],
-                                          kws.pop('header_levels', ()),
-                                          kws.pop('split_nested_types', ()),
-                                          args[-1])
+        _prekws = ('order', 'row_level', 'header_levels', 'split_nested_types')
+        kws, _prekws = dicts.split(kws, *_prekws)
+        *headers, data = _preprocess_dict(data, *args[:-1], **_prekws)
 
         col_headers = ()
         row_headers, col_groups = headers
+
         if col_groups:
             *col_groups, col_headers = col_groups
 
@@ -415,15 +472,27 @@ class Table(LoggingMixin):
                 col_headers, *col_groups, zip(*data), key=col_sort)
             data = zip(*data)
 
+        # if row_sort := kws.pop('row_sort', False):
+        #     if row_sort is True:
+        #         row_sort = None
+
+        #     from IPython import embed
+        #     embed(header="Embedded interpreter at 'src/motley/table/table.py':469")
+
+        #     row_headers, rows = cosort(row_headers, data, key=row_sort)
+
         return data, {'row_headers': row_headers,
                       'col_headers': col_headers,
-                      'col_groups': list(zip(*col_groups)), **kws}
+                      'col_groups': list(zip(*col_groups)),
+                      'order': _prekws.pop('order', 'r'),
+                      **kws}
 
     # TODO: test mappings!!
 
     # mappings for terse kws
     @api.synonyms(
         dicts.merge({
+            'sub_title':                            'subtitle',
             'units?':                               'units',
             'footnotes?':                           'footnotes',
             # 'formatters?':                        'formatters',
@@ -452,7 +521,7 @@ class Table(LoggingMixin):
                  # TODO: THIS API:
                  # Table(data,
                  #      # first argument is usually data. Can be array, list, dict
-                 #      # to init from list of arrays (each being single ot multiple columns)
+                 #      # to init from list of arrays (each being single or multiple columns)
                  #      use `from_columns` constructor.
 
                  #      # You can also place the data anywhere in the argument sequence
@@ -481,6 +550,10 @@ class Table(LoggingMixin):
                  title_align='center',
                  title_style=('underline', ),
 
+                 subtitle=None,
+                 subtitle_align=None,
+                 subtitle_style=None,
+
                  # ColumnHeaders(names, fmt='{:< |bB}', units)
                  col_headers=None,
                  col_head_style='bold',
@@ -489,6 +562,7 @@ class Table(LoggingMixin):
                  col_borders=MID_BORDER,
 
                  col_groups=None,
+                 col_groups_align='^',
                  #  core_columns=(),
 
                  #  order = 'r',
@@ -762,10 +836,14 @@ class Table(LoggingMixin):
         # title
         # if isinstance(title, Title)
         self.title = title
+        self.subtitle = subtitle
 
         self.has_title = title not in (None, False)
         self.title_style = title_style
         self.title_align = resolve_alignment(title_align)
+
+        self.subtitle_style = subtitle_style or self.title_style
+        self.subtitle_align = subtitle_align or self.title_align
 
         # get data types of elements for automatic formatting / alignment
         self.col_data_types = []
@@ -781,6 +859,7 @@ class Table(LoggingMixin):
         self.has_row_nrs = hrn = (row_nrs is not False)
         self.n_head_col = self.has_row_head + hrn
         self.col_groups = self.resolve_groups(col_groups, n_cols)
+        self.col_groups_align = resolve_alignment(col_groups_align)
 
         # units
         self.units = None
@@ -885,7 +964,7 @@ class Table(LoggingMixin):
         # These are either those input by the user, or determined from the
         # content of the columns
         if width is None:
-            self.col_widths = measure_column_widths(self.pre_table) + self.whitespace
+            self.col_widths = self.measure_column_widths()  # + self.whitespace
         else:
             self.col_widths = self.resolve_widths(width)
             # if requested widths are smaller than that required to fully
@@ -1105,7 +1184,8 @@ class Table(LoggingMixin):
     @property
     def n_head_lines(self):
         """number of newlines in the table header"""
-        n = (self.title.count('\n') + 1) if self.has_title else 0
+        nsub = self.subtitle.count('\n') if self.subtitle else 0
+        n = (self.title.count('\n') + nsub + 1) if self.has_title else 0
         m = (len(self.summary.items) // self.summary.ncols) if self.summary else 0
         return n + m + self.n_head_rows + self.frame
 
@@ -1113,6 +1193,7 @@ class Table(LoggingMixin):
     def lcb(self):
         return lengths(self.borders)
 
+    # ------------------------------------------------------------------------ #
     def empty_like(self, n_rows, **kws):
         """
         A string representing an empty row of the table. Has the same
@@ -1124,19 +1205,40 @@ class Table(LoggingMixin):
                      width=self.measure_column_widths()[self._idx_shown],
                      **kws)
 
+    def hstack(self, other, **kws):
+
+        assert (nrows := self.nrows) == other.nrows
+
+        stack_attrs = ('col_groups', 'col_headers', 'units', 'align', 'data')
+        stacked = {attr: _hstack(op.AttrVector(attr)(tables))
+                   for attr in stack_attrs}
+
+        for k in ('align', 'col_groups'):
+            stacked[k] = stacked[k].squeeze()[int(tables[0].has_row_head):]
+
+        stacked.pop('col_groups')
+
+        return Table(**stacked,
+                     **{**dict(too_wide=False,  # FIXME # LAST COLUMN DROPPED???!!
+                               row_headers=tables[0].row_headers),
+                        **kws})
+
+    # ------------------------------------------------------------------------ #
+
     def resolve_groups(self, col_groups, n_cols):
         # handle column group headers
         if is_null(col_groups):
             return []
 
-        if (n := len(col_groups)) != n_cols:
+        if (n := len(col_groups)) not in {n_cols, n_cols + 1}:
             raise ValueError(f'Invalid number of column groups: {n} for table'
                              f' with {n_cols} columns.')
 
         # FIXME: too wide col_groups should truncate
+        excess = n - n_cols
         return list(itt.zip_longest(
             *(ensure_list(g, str)
-              for g in itt.chain(itt.repeat('', self.n_head_col), col_groups)),
+              for g in itt.chain(itt.repeat('', self.n_head_col - excess), col_groups)),
             fillvalue=''
         ))
 
@@ -1372,9 +1474,18 @@ class Table(LoggingMixin):
         # get width of columns - widest element in column
         w = measure_column_widths(data, count_hidden=count_hidden) + self.whitespace
 
+        if self.col_groups:
+            for headers in self.col_groups:
+                indices = set(range(self.ncols))
+                for idx in where_duplicate(headers):
+                    indices -= set(idx)
+                for i in indices:
+                    w[i] += get_width(headers[i], count_hidden)
+
         # add border size
         if with_borders:
             w += self.lcb
+
         return w
 
     def get_width(self, indices=None, frame=True):
@@ -1600,10 +1711,17 @@ class Table(LoggingMixin):
         return self.make_merged_cell(text, width, self.title_align,
                                      self.title_style)
 
+        # return '\n'.join(title, subtitle
+
     def _get_heading_lines(self, idx, table_width, continued):
         # title
         if self.has_title:
             yield self.make_title(table_width, continued)
+
+        if self.subtitle:
+            yield self.make_merged_cell(self.subtitle, table_width,
+                                        self.subtitle_align,
+                                        self.subtitle_style)
 
         # FIXME: problems with too-wide column
 
@@ -1645,14 +1763,17 @@ class Table(LoggingMixin):
                     if len(lbl) >= gw:
                         lbl = truncate(lbl, gw - 1)
 
-                    line += f'{lbl: ^{gw - 1}}{self.borders[j]}'
+                    # part = f'{lbl: {self.col_groups_align}{gw - 1}}{self.borders[j]}'
+                    line += mformat('{: {}{}}{}',
+                                    lbl, self.col_groups_align, gw - 1,
+                                    self.borders[j])
 
                     gw = w
                     lbl = name
 
             # last bit
             if gw:
-                line += f'{lbl: ^{gw - 1}}{self.RIGHT_BORDER}'
+                line += f'{lbl: {self.col_groups_align}{gw - 1}}{self.RIGHT_BORDER}'
             #
             line = codes.apply(line, self.col_head_style)
 
