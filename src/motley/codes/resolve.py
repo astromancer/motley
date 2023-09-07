@@ -227,7 +227,7 @@ def _iter_codes(*effects, **kws):
     kws
 
     Yields
-    -------
+    ------
     code: int
     """
 

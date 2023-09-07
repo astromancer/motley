@@ -10,8 +10,9 @@ import numpy as np
 from loguru import logger
 
 # local
+from recipes.utils import is_null
 from recipes.decorators import raises as bork
-from recipes.functionals import always, echo0, negate
+from recipes.functionals import always, echo0
 from recipes import duplicate_if_scalar, pprint as ppr
 
 # relative
@@ -49,8 +50,6 @@ def str2tup(keys):
     if isinstance(keys, str):
         keys = (keys, )  # a tuple
     return keys
-
-
 
 
 # ---------------------------------------------------------------------------- #
@@ -156,7 +155,7 @@ def resolve_width(width, data, headers=None):
 def ensure_dict(obj, n_cols, what='\b'):
     # convert obj to dict
 
-    if not obj:
+    if is_null(obj):
         return {}
 
     if isinstance(obj, abc.Mapping):

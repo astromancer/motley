@@ -141,9 +141,9 @@ class XlsxWriter:
     def __init__(self, table, widths=None, align=None,
                  merge_unduplicate=('headers'), header_formatter=str):
 
-        if widths is None:
+        if widths is None:  # is_null
             widths = {}
-        if align is None:
+        if align is None:  # is_null
             align = {}
         self.table = table
         self.workbook = Workbook()
@@ -189,7 +189,7 @@ class XlsxWriter:
         # logger.debug(i, header, hwidth, fwidth, width, minimum)
         return max(hwidth, width, minimum)
 
-    def write(self, path):
+    def write(self, path, formats=()):
         # ('rows', 'cells')
 
         table = self.table
@@ -228,7 +228,8 @@ class XlsxWriter:
 
         # -------------------------------------------------------------------- #
         # Set number formats
-        for idx, fmt in table.formatters.items():
+        formats = self.table.resolve_input(formats, what='formats')
+        for idx, fmt in formats.items():
             if isinstance(fmt, str):
                 col = chr(idx + 65)
                 # logger.debug(col, fmt)

@@ -35,7 +35,7 @@ ALIGNMENT_MAP_INV = invert(ALIGNMENT_MAP)
 def resolve_alignment(align):
     # resolve_align  # alignment.resolve() # alignment[align]
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
-    if align not in '<^>':
+    if align not in '<^>.':
         raise ValueError(f'Unrecognised alignment {align!r}.')
     return align
 
@@ -72,11 +72,14 @@ def get_width(text, raw=False):
     text = str(text)
     if raw:
         return max(map(len,  text.split(os.linesep)))
-    
+
     # get longest line for cell elements that contain newlines
     # deal with unicode combining, double width, emoji's etc..
     return max(map(wcswidth, ansi.strip(text).split(os.linesep)))
 
+
+# alias
+get_text_width = get_width
 
 
 def hstack(tables, spacing=0, offsets=0):
@@ -125,7 +128,8 @@ class _vstack(Singleton):  # NOTE this could just be a module...
     Singleton helper class for vertical text stacking.
     """
 
-    def __call__(self, tables, strip_titles=True, strip_headers=True, spacing=1):
+    def __call__(self, tables, strip_titles=True, strip_headers=True, spacing=1,
+                 **kws):
         """
         Vertically stack tables while aligning column widths.
 
@@ -145,7 +149,7 @@ class _vstack(Singleton):  # NOTE this could just be a module...
         """
         return self.stack(tables, strip_titles, strip_headers, spacing)
 
-    def stack(self, tables, strip_titles=True, strip_headers=True, spacing=1):
+    def stack(self, tables, strip_titles=True, strip_headers=True, spacing=1, **kws):
 
         # check that all tables have same number of columns
         ncols = [tbl.n_cols + tbl.n_head_col for tbl in tables]
@@ -153,23 +157,29 @@ class _vstack(Singleton):  # NOTE this could just be a module...
             raise ValueError(f'Cannot stack tables with unequal number of '
                              f'columns: {ncols}.')
 
-        w = np.max([tbl.col_widths for tbl in tables], 0)
-        vspace = '\n' * (spacing + 1)
-        s = ''
-        for i, tbl in enumerate(tables):
-            tbl.col_widths = w  # set all column widths equal
-            nnl = tbl.n_head_lines * bool(i and strip_headers)
-            *head, r = str(tbl).split('\n', nnl)
-            keep = []
-            if head:
-                if not strip_titles:
-                    keep += head[tbl.frame:(-tbl.n_head_rows or None)]
-                if not strip_headers:
-                    keep += head[(tbl.frame + tbl.has_title):]
+        col_widths = np.max([tbl.col_widths for tbl in tables], 0)
+        return ('\n' * (spacing + 1)).join(
+            self._istack(tables, col_widths, strip_headers, strip_titles)
+        ).lstrip('\n')
 
-            s += '\n'.join((vspace, *keep, r))
+    def _istack(self, tables, col_widths, strip_headers, strip_titles):
+        for i, table in enumerate(tables):
+            yield '\n'.join(
+                self.__istack(i, table, col_widths, strip_headers, strip_titles)
+            )
 
-        return s.lstrip('\n')
+    def __istack(self, i, table, col_widths, strip_headers, strip_titles):
+        table.col_widths = col_widths  # set all column widths equal
+        nnl = table.n_head_lines * bool(i and strip_headers)
+
+        *head, r = str(table).split('\n', nnl)
+        if head:
+            if not strip_titles:
+                yield from head[table.frame:(-table.n_head_rows or None)]
+            if not strip_headers:
+                yield from head[(table.frame + table.has_title):]
+
+        yield r
 
     @staticmethod
     def compact(tables):
@@ -188,7 +198,8 @@ class _vstack(Singleton):  # NOTE this could just be a module...
 
         return varies
 
-    def from_dict(self, groups, strip_titles=False, braces=False, vspace=1):
+    def from_dict(self, groups, strip_titles=False, strip_headers=True,
+                  braces=False, vspace=1):
         """
         Pretty print dict of table objects.
 
@@ -217,18 +228,18 @@ class _vstack(Singleton):  # NOTE this could just be a module...
         stack = [groups[key] for key in ordered_keys]
 
         if not braces:
-            return self.stack(stack, strip_titles, True, vspace)
+            return self.stack(stack, strip_titles, strip_headers, vspace)
 
         braces = ''
         for i, gid in enumerate(ordered_keys):
             tbl = groups[gid]
             braces += ('\n' * bool(i) +
-                       hbrace(tbl.data.shape[0], gid) +
+                       vbrace(tbl.data.shape[0], gid) +
                        '\n' * (tbl.has_totals + vspace))
 
         # vertical offset
         offsets = stack[0].n_head_lines
-        return string.hstack([self.stack(stack, strip_titles, True, vspace),
+        return string.hstack([self.stack(stack, strip_titles, strip_headers, vspace),
                               braces],
                              spacing=1, offsets=offsets)
 
@@ -251,11 +262,11 @@ def make_group_title(keys):
         return str(keys)
 
 
-def hbrace(size, name=''):
+def vbrace(size, name=''):
     """
     Create a multi-line right brace.
 
-    Parameters🏴‍☠️
+    Parameters
     ----------
     size : int
         Number of lines to span.
@@ -264,7 +275,7 @@ def hbrace(size, name=''):
 
     Examples
     --------
-    >>> hbrace(5, 'Text!')
+    >>> vbrace(5, 'Text!')
     '⎫\n'
     '⎪\n'
     '⎬ Text!\n'
@@ -474,10 +485,10 @@ class GroupTitle:
     def format_key(keys):
         if isinstance(keys, str):
             return keys
-        
+
         if isinstance(keys, abc.Collection):
             return "; ".join(map(str, keys))
-        
+
         return str(keys)
 
     def __str__(self):

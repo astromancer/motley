@@ -91,7 +91,7 @@ def parse(s, named=False):
         attributes of the returned objects.
 
     Yields
-    -------
+    ------
     Yields successive 5-tuples of str
         (csi, params, final_byte, string, END) where
         csi :        Control sequence introducer, eg:            '\x1b['

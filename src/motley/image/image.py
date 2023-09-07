@@ -14,7 +14,7 @@ from matplotlib.pyplot import get_cmap
 from matplotlib.colors import Normalize
 
 # local
-from scrawl.image import get_clim
+from scrawl.image import resolve_clim
 from recipes import string
 from recipes.functionals import echo0
 from recipes.unicode import subscripts, superscripts
@@ -444,7 +444,7 @@ class AnsiImage(TextImageBase):
 
         # normalize
         data = data.astype(float)
-        data = Normalize(*get_clim(data))(data)
+        data = Normalize(*resolve_clim(data))(data)
 
         # get the 24 bit colours
         shape = data.shape
