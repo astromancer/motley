@@ -2078,6 +2078,6 @@ class Table(LoggingMixin):
     #     # TODO
     # to_xlsx = XlsxWriter().write
 
-    def to_xlsx(self, path=None, formats=(), widths=(), **kws):
+    def to_xlsx(self, path=None, sheet=None, formats=(), widths=(), **kws):
         # may need to set widths manually eg. for cells that contain formulae
-        return XlsxWriter(self, widths, **kws).write(path, formats)
+        return XlsxWriter(self, widths, **kws).write(path, sheet, formats)

@@ -3,7 +3,8 @@ Output tables to Excel spreadsheet
 """
 
 # std
-import contextlib
+import contextlib as ctx
+from copy import copy
 from collections import defaultdict
 
 # third-party
@@ -16,11 +17,11 @@ from openpyxl.styles import Alignment, Border, Font, Side
 
 # local
 from recipes import op
-from recipes.iter import where, cofilter
 from recipes.string import sub
 from recipes.dicts import AttrDict
-from recipes.lists import where_duplicate
+from recipes.iter import cofilter, where
 from recipes.utils import duplicate_if_scalar
+from recipes.lists import unique, where_duplicate
 from recipes.string.brackets import BracketParser
 
 
@@ -61,7 +62,16 @@ _xl_fmt_nondisplay = {'"': '', '@': ''}
 #         raise
 
 
-def set_style(cell, kws):
+def set_style(cell, **kws):
+    # stack borders
+    if (border := kws.get('border', ())):
+        new = copy(cell.border)
+        for atr, val in vars(border).items():
+            if val and val != getattr(cell.border, atr) and val != Side():
+                setattr(new, atr, val)
+
+        kws['border'] = new
+
     op.AttrSetter(*kws.keys())(cell, kws.values())
 
 
@@ -69,7 +79,7 @@ def set_block_style(cells, **kws):
     itr = [cells] if isinstance(cells, Cell) else mit.flatten(cells)
     for cell in itr:
         # stack_cell_attributes(cell, kws)
-        set_style(cell, kws)
+        set_style(cell, **kws)
         # for key, val in kws.items():
         #     setattr(cell, key, val)
 
@@ -108,32 +118,44 @@ class XlsxWriter:
     # styling defaults
 
     # TODO: move to config
-    font = dict(name='Ubuntu Mono',
-                size=10)
-    font_data = Font(**font)
+    font = dict(name='Ubuntu Mono', size=10)
     rule = Side('thin')
     rule2 = Side('double')
-    header_style = dict(
-        font=Font(name='Libertinus Sans',
-                  size=12,
-                  bold=True),
+    bottomrule = True
+
+    style = {}
+    style['title'] = dict(
+        font=Font(**{**font,
+                     'size': 14,
+                     'bold': True}),
         alignment=Alignment(horizontal='center',
                             vertical='center',
                             wrap_text=True),
         border=Border(bottom=rule2)
     )
-    style_units = dict(
-        font=font_data,
+
+    style['headers'] = dict(
+        font=Font(**{**font,
+                     'size': 12,
+                     'bold': True}),
+        alignment=Alignment(horizontal='center',
+                            vertical='center',
+                            wrap_text=True),
+        # border=Border(bottom=rule2)
+    )
+
+    style['units'] = dict(
+        font=Font(**font),
         alignment=Alignment(horizontal='center',
                             vertical='top'),
-        border=Border(bottom=rule2)
+        # border=Border(bottom=rule2)
     )
-    style_data = dict(
-        font=font_data,
+    style['data'] = dict(
+        font=Font(**font),
         # alignment=Alignment(horizontal='center',
         #                     vertical='center')
     )
-    style_totals = dict(
+    style['totals'] = dict(
         font=Font(**font, bold=True),
         border=Border(bottom=rule, top=rule)
     )
@@ -145,8 +167,10 @@ class XlsxWriter:
             widths = {}
         if align is None:  # is_null
             align = {}
+
         self.table = table
         self.workbook = Workbook()
+        # wb.create_sheet("Mysheet") # insert at the end (default)
         self.worksheet = self.workbook.active
         # worksheet.title = ""
 
@@ -177,7 +201,7 @@ class XlsxWriter:
                          for f in fmt.split(';'))) + padding
         else:
             # width = table.col_width[i]
-            with contextlib.suppress(TypeError):
+            with ctx.suppress(TypeError):
                 width = max(map(len, table.data[:, i]))
 
         hwidth = 0
@@ -189,11 +213,11 @@ class XlsxWriter:
         # logger.debug(i, header, hwidth, fwidth, width, minimum)
         return max(hwidth, width, minimum)
 
-    def write(self, path, formats=()):
+    def write(self, path, sheet=None, formats=()):
         # ('rows', 'cells')
 
         table = self.table
-        ncols = table.data.shape[1]
+        nrows, ncols = table.data.shape
         j = ncols + 65  # column index: ord(65) == 'A'
 
         # -------------------------------------------------------------------- #
@@ -202,7 +226,16 @@ class XlsxWriter:
 
         # -------------------------------------------------------------------- #
         # data
-        ws = self.worksheet
+        if sheet:
+            if sheet in self.workbook.sheetnames:
+                ws = self.workbook[sheet]
+            else:
+                ws = self.workbook.create_sheet(sheet)
+                ws.title = sheet
+        else:
+            ws = self.workbook.active
+        self.worksheet = ws
+
         r0 = ws._current_row + 1  # first data row
 
         for r, row in enumerate(table.data, r0):
@@ -223,12 +256,14 @@ class XlsxWriter:
 
         if any(totals):
             #           data    row style
-            self.append(totals, **self.style_totals)
+            self.append(totals, **self.style['totals'])
             r += 1
 
         # -------------------------------------------------------------------- #
         # Set number formats
-        formats = self.table.resolve_input(formats, what='formats')
+        formats = {**table.formatters,
+                   **self.table.resolve_input(formats, what='formats')}
+
         for idx, fmt in formats.items():
             if isinstance(fmt, str):
                 col = chr(idx + 65)
@@ -237,7 +272,7 @@ class XlsxWriter:
                                 number_format=fmt)
 
         # style for "data" cells
-        set_block_style(ws[f'A{r0}:{j-1:c}{r}'], **self.style_data)
+        set_block_style(ws[f'A{r0}:{j-1:c}{r}'], **self.style['data'])
 
         # set col widths
         # double_rows = defaultdict(bool)
@@ -253,8 +288,22 @@ class XlsxWriter:
         #     if tf:
         #         ws.row_dimensions[r].height = 10 * 3
 
+        # borders
+        if table.col_groups:
+            for val, (*_, index) in unique(table.col_groups[0]).items():
+                col = chr(index + 65)
+                set_block_style(ws[f'{col}1:{col}{r}'],
+                                border=Border(right=self.rule2))
+
+            # if val in self.merge_unduplicate:
+            #     self.merge_duplicate_rows( )
+
         if 'data' in self.merge_unduplicate:
-            self.merge_duplicate_rows(table.data, r0,)
+            self.merge_duplicate_rows(table.data, r0, nrows)
+
+        if self.bottomrule and not table.totals:
+            set_block_style(self.worksheet[f'A{r+1}:{ncols + 64:c}{r+1}'],
+                            border=Border(top=self.rule2))
 
         if path:
             self.workbook.save(path)
@@ -274,7 +323,7 @@ class XlsxWriter:
         for i, cell in enumerate(cells):
             if align := self.alignments.get(i):
                 style.update(alignment=align)
-            set_style(cell, style)
+            set_style(cell, **style)
         # else:
         #     set_block_style(cells, **style)
         return r
@@ -294,25 +343,36 @@ class XlsxWriter:
         ncols = table.data.shape[1]
 
         # title
-        self.make_header_row([table.title] * ncols)
+        self.make_header_row([table.title] * ncols, **self.style['title'])
         r = self.worksheet._current_row
-
-        # col group headers
-        for groups in table.col_groups:
-            self.make_header_row(groups, False)
 
         # headers
         # headers = table.get_headers()
         col_headers = list(map(self.header_formatter, table.col_headers))
-        style = {'border': Border()} if table.units else {}
-        self.make_header_row(col_headers, False, **style)
+        # col group headers
+        headers = [*table.col_groups, col_headers]
+        if table.units:
+            headers.append(table.units)
+
+        # final_style = dict(self.style['headers' if table.units else 'headers'])
+        style = dict(self.style['headers'])
+        for i, row in enumerate(headers):
+            if i == 1:
+                f = style['font'] = copy(style.pop('font'))
+                f.size -= 2
+
+            self.make_header_row(row, False, **style)
+
+        # header borders
+        q = self.worksheet._current_row
+        set_block_style(
+            self.worksheet[f'A{q}:{64 + ncols:c}{q}'],
+            **self.style['units' if table.units or table.col_groups else 'headers'],
+            border=Border(bottom=self.rule2)
+        )
 
         if 'headers' in self.merge_unduplicate:
-            headings = (*table.col_groups, col_headers)
-            self.merge_duplicate_cells(headings, r + 1)
-
-        # units
-        self.append(table.units, **self.style_units)
+            self.merge_duplicate_cells(headers, r + 1)
 
     def make_header_row(self, data, merge_duplicate_cells=2, **style):
         if data is None:
@@ -328,9 +388,9 @@ class XlsxWriter:
 
         # set style
         set_block_style(sheet[f'A{r}:{len(data) + 64:c}{r}'],
-                        **{**self.header_style, **style})
+                        **{**self.style['headers'], **style})
 
-    def merge_duplicate_rows(self, data, r0, **style):
+    def merge_duplicate_rows(self, data, r0, trigger=2, **style):
         for i, col in enumerate(data.T):
             col_style = dict(style)
             if (align := self.alignments.get(i)):
@@ -340,12 +400,16 @@ class XlsxWriter:
                 j, *_, k = idx
                 # logger.debug(idx, j, k + 1)
                 if idx != list(range(j, k + 1)):
+                    # not sorted!
+                    continue
+
+                if len(idx) < trigger:
                     continue
 
                 # logger.debug(i, j, k, r0)
                 # logger.debug(f'merging {i:c}{j + r0}:{i:c}{k + r0}')
                 cell0, cell1 = (f'{(c:=i+65):c}{j + r0}', f'{c:c}{k + r0}')
-                set_style(self.worksheet[cell0], col_style)
+                set_style(self.worksheet[cell0], **col_style)
                 self.worksheet.merge_cells(f'{cell0}:{cell1}')
 
     def merge_duplicate_cells(self, data, row_index, trigger=2):

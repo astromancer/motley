@@ -533,6 +533,6 @@ class AttrTable:
         # may need to set widths manually eg. for cells that contain formulae
         # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
         # table = tmp()
+        align = {**self.align, **kws.pop('align', {})}
         tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
-        #  self.align,
-        return XlsxWriter(tmp, widths, **kws).write(path, formats)
+        return XlsxWriter(tmp, widths, align=align, **kws).write(path, formats)
