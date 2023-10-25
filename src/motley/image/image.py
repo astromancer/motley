@@ -17,7 +17,7 @@ from matplotlib.colors import Normalize
 from scrawl.image import resolve_clim
 from recipes import string
 from recipes.functionals import echo0
-from recipes.unicode import subscripts, superscripts
+from recipes.string.unicode import subscripts, superscripts
 
 # relative
 from .. import apply, codes, table, textbox

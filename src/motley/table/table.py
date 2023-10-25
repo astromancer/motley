@@ -19,17 +19,16 @@ import numpy as np
 import more_itertools as mit
 
 # local
-from recipes.lists import cosort, where, where_duplicate
 from recipes.logging import LoggingMixin
-from recipes import api, dicts, pprint as ppr, op
-from recipes.functionals import always, echo0
-from recipes.decorators import catch, raises as bork
+from recipes import api, dicts, flow, op, pprint as ppr
+from recipes.lists import cosort, where, where_duplicate
+from recipes.functionals import always, echo0, raises as bork
 from recipes.utils import EnsureWrapped, is_null, is_scalar, not_null
 
 # relative
 from .. import codes
+from ..utils import get_width, resolve_alignment
 from ..formatter import Formattable, format as mformat
-from ..utils import resolve_alignment, get_width
 from . import summary as sm
 from .utils import *
 from .xlsx import XlsxWriter
@@ -458,7 +457,9 @@ class Table(LoggingMixin):
     def _parse_from_dict(data, *args, **kws):
         #
         _prekws = ('order', 'row_level', 'header_levels', 'split_nested_types')
-        kws, _prekws = dicts.split(kws, *_prekws)
+
+        kws, _prekws = dicts.split(kws, _prekws)
+
         *headers, data = _preprocess_dict(data, *args[:-1], **_prekws)
 
         col_headers = ()
@@ -1297,8 +1298,8 @@ class Table(LoggingMixin):
 
     def _get_flags(self, name, data, flags):
         # format flags for column data
-        with catch(warn='Could not resolve flags for column {name!r} due '
-                   'to the following exception:\n{err}', name=name):
+        with flow.catch(warn='Could not resolve flags for column {name!r} due '
+                        'to the following exception:\n{err}', name=name):
             # get flags
             if callable(flags):
                 flags = [flags(val) if val else '' for val in data]
@@ -1326,9 +1327,9 @@ class Table(LoggingMixin):
 
         result = []
         for j, (cell, flag) in enumerate(itt.zip_longest(data, flags, fillvalue='')):
-            with catch(warn='Could not format cell {j} in column {name!r} with'
-                       ' formatter {fmt!r} due to the following exception:\n{err}',
-                       j=j, name=name, fmt=fmt):
+            with flow.catch(warn='Could not format cell {j} in column {name!r} with'
+                            ' formatter {fmt!r} due to the following exception:\n{err}',
+                            j=j, name=name, fmt=fmt):
                 # format cell value and concatenate with flag
                 cell = fmt(cell)
                 # format flag
@@ -1480,7 +1481,7 @@ class Table(LoggingMixin):
                 for idx in where_duplicate(headers):
                     indices -= set(idx)
                 for i in indices:
-                    w[i] += get_width(headers[i], count_hidden)
+                    w[i] = max(w[i], get_width(headers[i], count_hidden))
 
         # add border size
         if with_borders:

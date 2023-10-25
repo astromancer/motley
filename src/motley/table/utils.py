@@ -11,9 +11,8 @@ from loguru import logger
 
 # local
 from recipes.utils import is_null
-from recipes.decorators import raises as bork
-from recipes.functionals import always, echo0
 from recipes import duplicate_if_scalar, pprint as ppr
+from recipes.functionals import always, echo0, raises as bork
 
 # relative
 from .. import codes, formatters
