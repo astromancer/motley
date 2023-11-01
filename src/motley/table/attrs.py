@@ -505,7 +505,8 @@ class AttrTable:
         # tables.update(empty)
         return tables
 
-    def to_xlsx(self, path, formats=(), widths=None, **kws):
+    def to_xlsx(self, path, sheet=None, formats=(), widths=None, overwrite=False,
+                **kws):
 
         if widths is None:
             widths = {}
@@ -535,4 +536,5 @@ class AttrTable:
         # table = tmp()
         align = {**self.align, **kws.pop('align', {})}
         tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
-        return XlsxWriter(tmp, widths, align=align, **kws).write(path, formats)
+        return XlsxWriter(tmp, widths, align=align, **kws).write(
+            path, sheet, formats, overwrite)

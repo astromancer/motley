@@ -5,21 +5,23 @@ Output tables to Excel spreadsheet
 # std
 import contextlib as ctx
 from copy import copy
+from pathlib import Path
 from collections import defaultdict
 
 # third-party
 import numpy as np
 import more_itertools as mit
 from loguru import logger
-from openpyxl import Workbook
 from openpyxl.cell import Cell
+from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, Side
 
 # local
 from recipes import op
 from recipes.string import sub
 from recipes.dicts import AttrDict
-from recipes.iter import cofilter, where
+from recipes.logging import LoggingMixin
+from recipes.iter import cofilter, duplicates
 from recipes.utils import duplicate_if_scalar
 from recipes.lists import unique, where_duplicate
 from recipes.string.brackets import BracketParser
@@ -112,7 +114,7 @@ def set_block_style(cells, **kws):
 #         yield max(hwidth, width, minimum)
 
 
-class XlsxWriter:
+class XlsxWriter(LoggingMixin):
 
     # -------------------------------------------------------------------- #
     # styling defaults
@@ -163,15 +165,15 @@ class XlsxWriter:
     def __init__(self, table, widths=None, align=None,
                  merge_unduplicate=('headers'), header_formatter=str):
 
+        self.logger.debug('Initializing writer.')
+
         if widths is None:  # is_null
             widths = {}
         if align is None:  # is_null
             align = {}
 
         self.table = table
-        self.workbook = Workbook()
-        # wb.create_sheet("Mysheet") # insert at the end (default)
-        self.worksheet = self.workbook.active
+        self.worksheet = None
         # worksheet.title = ""
 
         self.header_formatter = header_formatter
@@ -213,8 +215,35 @@ class XlsxWriter:
         # logger.debug(i, header, hwidth, fwidth, width, minimum)
         return max(hwidth, width, minimum)
 
-    def write(self, path, sheet=None, formats=()):
+    def write(self, path, sheet=None, formats=(), overwrite=False):
         # ('rows', 'cells')
+
+        if path and Path(path).exists():
+            workbook = load_workbook(path)
+            if sheet in (None, *workbook.sheetnames) and not overwrite:
+                raise FileExistsError('File at: {} exists. Overwrite is False.')
+
+            if sheet:
+                if sheet in workbook.sheetnames:
+                    ws = workbook[sheet]
+                    ws._current_row = 0  # !!!!
+                else:
+                    # new sheet
+                    if workbook.sheetnames == ['Sheet']:
+                        workbook.active.title = sheet
+                    else:
+                        ws = workbook.create_sheet(sheet)
+            else:
+                ws = workbook.active
+        else:
+            workbook = Workbook()
+            ws = workbook.active
+            if sheet:
+                ws.title = sheet
+
+        self.worksheet = ws
+
+        self.logger.debug('Begin writing to workbook {!s}::{}', path or '', sheet)
 
         table = self.table
         nrows, ncols = table.data.shape
@@ -226,16 +255,6 @@ class XlsxWriter:
 
         # -------------------------------------------------------------------- #
         # data
-        if sheet:
-            if sheet in self.workbook.sheetnames:
-                ws = self.workbook[sheet]
-            else:
-                ws = self.workbook.create_sheet(sheet)
-                ws.title = sheet
-        else:
-            ws = self.workbook.active
-        self.worksheet = ws
-
         r0 = ws._current_row + 1  # first data row
 
         for r, row in enumerate(table.data, r0):
@@ -302,13 +321,14 @@ class XlsxWriter:
             self.merge_duplicate_rows(table.data, r0, nrows)
 
         if self.bottomrule and not table.totals:
-            set_block_style(self.worksheet[f'A{r+1}:{ncols + 64:c}{r+1}'],
+            set_block_style(ws[f'A{r+1}:{ncols + 64:c}{r+1}'],
                             border=Border(top=self.rule2))
 
         if path:
-            self.workbook.save(path)
+            workbook.save(path)
+            self.logger.success('Workbook saved at {!s}', path)
 
-        return self.workbook
+        return workbook
 
     def append(self, data, **style):
         if data is None:
@@ -372,6 +392,7 @@ class XlsxWriter:
         )
 
         if 'headers' in self.merge_unduplicate:
+            # for i, header in enumerate(headers, r + 1):
             self.merge_duplicate_cells(headers, r + 1)
 
     def make_header_row(self, data, merge_duplicate_cells=2, **style):
@@ -389,6 +410,53 @@ class XlsxWriter:
         # set style
         set_block_style(sheet[f'A{r}:{len(data) + 64:c}{r}'],
                         **{**self.style['headers'], **style})
+
+    def merge_duplicate_cells(self, data, row_index, trigger=2):
+
+        data = np.atleast_2d(data)
+        logger.debug('data = {}', data)
+
+        nrows, _ = data.shape
+        r0 = row_index
+        merged = defaultdict(set)
+        for r in range(nrows):
+            r1 = r0 + r
+            row = data[r]
+
+            unique = {}
+            duplicate = dict(duplicates(row))
+            duplicate.pop('', '')
+            if nrows > 1:
+                unique = zip(set(range(len(row))) - set(sum(duplicate.values(), [])))
+
+            to_merge = []
+            for idx in (*duplicate.values(), *unique):
+                if idx := (set(idx) - set(merged[r])):
+                    to_merge.append(idx)
+
+            logger.debug('Row {}: to_merge {}', r, to_merge)
+            # select(to_)
+            for idx in to_merge:
+                j, *_, k = duplicate_if_scalar(sorted(idx), raises=False)
+                logger.debug('{}', data[r + 1:, j:k + 1])
+                extend_down = np.all(data[r + 1:, j:k + 1] == '')
+                s = (nrows - r - 1) * extend_down
+
+                # logger.debug('{}', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
+                if ((k - j + 1 >= trigger) | s > 0):
+                    cells = f'{j+65:c}{r1}:{k+65:c}{r1 + s}'
+                    logger.debug('merge: {}', cells)
+                    self.worksheet.merge_cells(cells)
+
+                    for t in range(s + 1):
+                        merged[r + t] |= idx
+
+        # logger.debug(row, self.should_double_height(row, merged))
+        # if self.should_double_height(data, merged):
+        #     # style.setdefault('alignment', self.align_center_wrap)
+        #     sheet.row_dimensions[sheet._current_row].height = 10 * 3
+
+        return merged
 
     def merge_duplicate_rows(self, data, r0, trigger=2, **style):
         for i, col in enumerate(data.T):
@@ -411,46 +479,3 @@ class XlsxWriter:
                 cell0, cell1 = (f'{(c:=i+65):c}{j + r0}', f'{c:c}{k + r0}')
                 set_style(self.worksheet[cell0], **col_style)
                 self.worksheet.merge_cells(f'{cell0}:{cell1}')
-
-    def merge_duplicate_cells(self, data, row_index, trigger=2):
-
-        data = np.atleast_2d(data)
-        logger.debug('data = {}', data)
-
-        nrows, _ = data.shape
-        r0 = row_index
-        merged = defaultdict(set)
-        for r in range(nrows):
-            r1 = r0 + r
-            row = data[r]
-            duplicate = where_duplicate(row)
-            unique = {}
-            if nrows > 1:
-                unique = zip(set(range(len(row))) - set(sum(duplicate, [])))
-            to_merge = []
-            for idx in (*duplicate, *unique):
-                if idx := (set(idx) - set(merged[r])):
-                    to_merge.append(idx)
-
-            logger.debug('Row {}: to_merge {}', r, to_merge)
-            for idx in to_merge:
-                j, *_, k = duplicate_if_scalar(sorted(idx), raises=False)
-                # print(j, k, row[j:k+1])
-                below = data[r + 1:, j:k + 1]
-
-                s = next(where(np.any(below != '', 1)), nrows - r - 1)
-                for t in range(s + 1):
-                    merged[r + t] |= (idx)
-
-                # logger.debug('{}', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
-                if ((k - j + 1 >= trigger) | s > 0):
-                    cells = f'{j+65:c}{r1}:{k+65:c}{r1 + s}'
-                    logger.debug('merge: {}', cells)
-                    self.worksheet.merge_cells(cells)
-
-        # logger.debug(row, self.should_double_height(row, merged))
-        # if self.should_double_height(data, merged):
-        #     # style.setdefault('alignment', self.align_center_wrap)
-        #     sheet.row_dimensions[sheet._current_row].height = 10 * 3
-
-        return merged
