@@ -2,20 +2,24 @@
 Functions that extract and time all import statements from python source code
 """
 
+# std
 import ast
 import sys
 import math
 import warnings
 
-from recipes.io import read_file_slice
-from motley.profiling.core import LineProfiler
-from motley.profiling.printers import ReportDynamicFunction
+# local
+from recipes.io import read_lines
+
+# relative
+from .core import LineProfiler
+from .printers import ReportDynamicFunction
 
 
 def get_block(filename, up_to_line):
     """"""
     # lines = read_file_slice(filename, None)
-    lines = read_file_slice(filename, up_to_line)
+    lines = read_lines(filename, up_to_line)
     # NOTE: partial code blocks lead to `SyntaxError: unexpected EOF while parsing`
     # might be better to advance until the next
 
@@ -34,7 +38,7 @@ def no_future(lines):
     newlines = []
     for line in lines:
         if '__future__' in line:
-            warnings.warn("Cannot profile 'from __future__' imports. Removing.")
+            warnings.warn('Cannot profile "from __future__" imports. Removing.')
         else:
             newlines.append(line)
     return newlines
@@ -42,7 +46,8 @@ def no_future(lines):
 
 def extractor(filename, up_to_line=None):
     """
-    Tokenizer that extracts all the import statements from python source code file
+    Tokenizer that extracts all the import statements from python source code
+    file.
 
     Parameters
     ----------

@@ -1,12 +1,20 @@
 """
-Tools for recognising and stripping ANSI codes
+Tools for recognising and stripping ANSI codes.
 """
 
+# std
 import re
 from collections import namedtuple
-from recipes.functionals import echo
+
+# third-party
 import more_itertools as mit
 
+# local
+from recipes.functionals import echo
+
+
+__all__ = ['has_ansi', 'strip', 'pull', 'parse', 'split', 'length', 
+           'length_codes', 'length_seen']
 
 # REGEX_ANSI = re.compile(r'''(?x)
 #     (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
@@ -37,7 +45,7 @@ REGEX_ANSI_OPEN = r'''
 # REGEX_ANSI_NOT_RESET = re.compile(REGEX_ANSI_OPEN, re.X)
 
 # matches any
-REGEX_ANSI_FULL = re.compile(fr'''(?x)
+REGEX_ANSI_ENCODED = re.compile(fr'''(?x)
     (?P<code>{REGEX_ANSI_OPEN})     # the ANSI code
     (?P<text>.*?)                   # the string to which the code applies
     (?P<end>{REGEX_ANSI_CLOSE})     # the ANSI reset code
@@ -83,7 +91,7 @@ def parse(s, named=False):
         attributes of the returned objects.
 
     Yields
-    -------
+    ------
     Yields successive 5-tuples of str
         (csi, params, final_byte, string, END) where
         csi :        Control sequence introducer, eg:            '\x1b['
@@ -103,7 +111,7 @@ def parse(s, named=False):
     wrapper = AnsiEncodedString if named else echo
 
     idx = 0
-    for mo in REGEX_ANSI_FULL.finditer(s):
+    for mo in REGEX_ANSI_ENCODED.finditer(s):
         start = mo.start()
         if start != idx:
             yield wrapper('', '', '', s[idx:start], '')
@@ -163,16 +171,22 @@ def split(s):
 #     pattern2 = r'(\x1b\[[\d;]*[a-zA-Z])*(.*)(\x1b\[0m)'
 
 
-def length(s, raw=True):
-    """Length of the string, either raw, or as it would be displayed."""
-    if raw:
-        return len(s)
-    return length_seen(s)
+def length(s, raw=False):
+    """
+    Character length of the string, either raw, or as it would be displayed when
+    printed in console, ie. with ANSI styling code points resolved. Note that
+    with `raw=True` this function returns the same result as the builtin `len`.
+    """
+    return len(s) if raw else length_seen(s)
 
 
 def length_codes(s):
     """length of the ANSI codes in the str"""
     return sum((sum(map(len, part)) for part in pull(s)))
+
+
+# alias
+length_ansi = len_ansi = len_codes = length_codes
 
 
 def length_seen(s):
@@ -183,4 +197,4 @@ def length_seen(s):
     return len(strip(s))
 
 
-display_width = length_seen
+len_seen = len_raw = length_raw = display_width = length_seen

@@ -16,16 +16,17 @@ import more_itertools as mit
 from recipes.dicts import ManyToOneMap
 
 # relative
-from ..ansi import parse
 from ..colors import CSS_TO_RGB
 from ._codes import *
+from .utils import parse
+from .exceptions import InvalidStyle
 
 
 # ---------------------------------------------------------------------------- #
 # Escape sequence
 ESC = '\033'  # All sequences start with this character # equivalent to '\x1b'
-CSI = ESC + '['  # Control Sequence Initiator
-END = CSI + '0m'
+CSI = f'{ESC}['  # Control Sequence Initiator
+END = f'{CSI}0m'
 
 # rgb string matcher
 RGX_RGB = re.compile(r'''(?x)
@@ -44,26 +45,26 @@ class KeywordResolver(ManyToOneMap):
     """
     Resolve all the various ways in which colours or effects can be specified.
     """
-    template = ('{key:r} is not a valid description for a text or '
-                'background effect.')
+    template = ('{key!r} is not a valid description for a text (fg) or '
+                'background (bg) effect.')
 
     def __missing__(self, key):
         try:
             return super().__missing__(key)
         except KeyError:
-            raise KeyError(self.template.format(key)) from None
+            raise KeyError(self.template.format(key=key)) from None
 
 
 class CodeResolver(KeywordResolver):
     """
     Resolve all the various names for colours or effects into ansi codes.
     """
-    template = '{key:r} is not a valid colour or effect.'
+    template = '{key!r} is not a valid colour or effect.'
 
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
         # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
-        self.add_mapping(colorAliasMap)
+        self.add_mapping(color_alias_map)
         # add a layer that maps to lower case: 'REd' --> 'red'
         self.add_func(str.lower)
         # add light -> bright translation
@@ -77,7 +78,7 @@ class CodeResolver(KeywordResolver):
 # additional shorthands for bold / italic text
 BG_CODES = CodeResolver(BG_CODES)
 FG_CODES = CodeResolver(FG_CODES)
-FG_CODES.add_mapping(effectAliasMap)
+FG_CODES.add_mapping(style_alias_map)
 
 
 # Keyword Translator
@@ -96,20 +97,6 @@ FORMAT_24BIT = KeywordResolver(fg='38;2;{:d};{:d};{:d}',
 COLOR_FORMATTERS = {8:  FORMAT_8BIT,
                     24: FORMAT_24BIT}
 
-# ---------------------------------------------------------------------------- #
-
-
-class InvalidEffect(Exception):
-    """
-    Raised when a user input object cannot be resolved to a code for colour or
-    effect.
-    """
-
-    def __init__(self, obj, fg_or_bg):
-        super().__init__(
-            (f'Could not interpret object {obj!r} of type {type(obj)!r} as a '
-             f'valid {fg_or_bg!r} colour or effect.')
-        )
 
 # ---------------------------------------------------------------------------- #
 # Dispatch functions for translating user input to ANSI codes
@@ -118,7 +105,7 @@ class InvalidEffect(Exception):
 @ftl.singledispatch
 def resolve(obj, fg_or_bg='fg'):
     """default dispatch func for resolving ANSI codes from user input"""
-    raise InvalidEffect(obj, fg_or_bg)
+    raise InvalidStyle(obj, fg_or_bg)
 
 
 @resolve.register(type(None))
@@ -138,25 +125,21 @@ def _(obj, fg_or_bg='fg'):
         return
 
     # try resolve as a named color / effect
-    value = CODES[fg_or_bg].get(obj, None)
-    if value:
+    if value := CODES[fg_or_bg].get(obj, None):
         yield value
         return
 
-    # try resolve as a named CSS color
-    value = CSS_TO_RGB.get(obj, None)
-    if value:
+    if value := CSS_TO_RGB.get(obj, None):
         yield FORMAT_24BIT[fg_or_bg].format(*value)
         return
 
     # try resolve RGB string: '[123,1,99]'
-    rgb = RGX_RGB.fullmatch(obj.strip())
-    if rgb:
+    if rgb := RGX_RGB.fullmatch(obj.strip()):
         rgb = rgb.groupdict()
         yield from resolve(tuple(map(int, map(rgb.get, 'rgb'))), fg_or_bg)
         return
 
-    raise InvalidEffect(obj, fg_or_bg)
+    raise InvalidStyle(obj, fg_or_bg)
 
 
 @resolve.register(numbers.Integral)
@@ -193,10 +176,7 @@ def is_24bit(obj):
         return False
 
     types, *bad = set(map(type, obj))
-    if bad:
-        return False
-
-    return issubclass(types, numbers.Real)
+    return False if bad else issubclass(types, numbers.Real)
 
 
 def to_24bit(triplet):
@@ -205,28 +185,27 @@ def to_24bit(triplet):
                          'bit Colours are represented by a sequence of 3 '
                          'integers in range (0, 256), or 3 floats in range (0, '
                          '1).')
-    
+
     triplet = list(triplet)
     for i, val in enumerate(triplet):
         if isinstance(val, numbers.Integral):
             if not (0 <= val < 256):
                 raise ValueError(
                     f'RGB colour value integer {val!r} outside range (0, 256).'
-        )
+                )
         elif isinstance(val, numbers.Real):
             if (0 <= val <= 1):
                 triplet[i] = int(val * 256)
             else:
                 raise ValueError(
                     f'RGB colour value float {val!r} outside range (0, 1).'
-        )
+                )
         else:
             raise TypeError(
                 f'Could not interpret key {triplet!r} as a 24 bit colour.'
             )
     return triplet
 
-    
 
 # to_rgb = to_24bit
 
@@ -248,7 +227,7 @@ def _iter_codes(*effects, **kws):
     kws
 
     Yields
-    -------
+    ------
     code: int
     """
 
@@ -310,24 +289,23 @@ def apply(s, *effects, **kws):
 
     # get code bits eg: '34;48;5;22'
     new_codes = get_code_str(*effects, **kws)
-    if not new_codes:
-        return s
 
     # In order to get the correct representation of the string, we strip and
     # ANSI codes that are in place and stack the new codes This means previous
     # colours are replaced, but effects like 'bold' or 'italic' will stack for
-    # recursive invocations of this function.  This also means we get the
-    # shortest possible representation of the string given the parameters which
-    # is nice and efficient. If we were to apply blindly our string would be
-    # longer than needed by a few (non-display) characters. This might seem
+    # recursive invocations of this function.  As a bonus we then also get the
+    # shortest possible representation of the string given the requested style
+    # which is nice and efficient. If we were to apply blindly our string would
+    # be longer than needed by a few (non-display) characters. This might seem
     # innocuous but becomes important once you start doing more complicated
     # effects on longer strings.
 
     # NOTE: final byte 'm' only valid for SGR (Select Graphic Rendition) and not
     # other codes, but this is all we support for now
-
-    return ''.join(f'{CSI}{params};{new_codes}m{w}{END}'
-                   for _, params, _, w, _ in parse(s))
+    return (''.join(f'{CSI}{params};{new_codes}m{w}{END}'
+                    for _, params, _, w, _ in parse(s))
+            if new_codes
+            else s)
 
 
 def apply_naive(s, *effects, **kws):
@@ -338,7 +316,4 @@ def apply_naive(s, *effects, **kws):
 
     # get code string eg: '34;48;5;22'
     code = get(*effects, **kws)
-    if not code:
-        return s
-
-    return ''.join((code, s, END))
+    return ''.join((code, s, END)) if code else s
