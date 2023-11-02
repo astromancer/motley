@@ -29,7 +29,7 @@ def test_resolve():
     codes.get('blue', 'italic')
     codes.get(31, 'italic', bg='y')
     codes.get((55, 55, 55), 'italic', bg=(255, 1, 1))
-    codes.get(text=('light magenta',), highlight='light gray')
+    codes.get(text=('magenta',), bg='gray')
     codes.get(dict(fg=((55, 55, 55), 'bold', 'italic'), bg='r'))
 
 
@@ -46,7 +46,7 @@ def test_apply():
     print(codes.apply(test_str, 'blue', 'italic'))
     print(codes.apply(test_str, 31, 'italic', bg='y'))
     print(codes.apply(test_str, (55, 55, 55), 'italic', bg=(255, 1, 1)))
-    print(codes.apply(test_str, text=('light magenta',), highlight='light gray'))
+    print(codes.apply(test_str, text=('magenta',), bg='gray'))
     print(codes.apply(test_str, dict(fg=((55, 55, 55), 'bold', 'italic'), bg='r')))
 
 

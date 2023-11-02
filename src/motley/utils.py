@@ -6,14 +6,12 @@ Utility functions and classes.
 # std
 import os
 import numbers
-import unicodedata
 import functools as ftl
 from collections import abc
 
-from wcwidth import wcswidth
-
 # third-party
 import numpy as np
+from wcwidth import wcswidth
 
 # local
 from recipes import op, string
@@ -23,8 +21,8 @@ from recipes.oo.singleton import Singleton
 
 # relative
 from . import codes, formatter
-
 from .codes import utils as ansi
+
 
 ALIGNMENT_MAP = {'r': '>',
                  'l': '<',

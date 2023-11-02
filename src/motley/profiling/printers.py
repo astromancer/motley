@@ -18,7 +18,7 @@ import more_itertools as mit
 
 # local
 from recipes import pprint
-from recipes.iter import where_false, where_true
+from recipes.lists import where
 from recipes.introspect import get_defining_class
 
 # relative
@@ -40,12 +40,12 @@ def func2str(func):
 
     if (cls := get_defining_class(func)) is not None:
         return '.'.join((cls.__name__, func.__name__))
-    
+
     if isinstance(func, ftl.partial):
         func = func.func
         argstr = str(func.args).strip(')') + f', {cdot})'
         return f'partial({func2str(func.func)}{argstr})'
-    
+
     return func.__name__
 
 
@@ -370,15 +370,13 @@ class ReportStatsTable(ReportStats):
                 ignore.extend(line_nrs_doc)
 
         if self.strip_comments:
-            line_nrs_comment = where_true(source_lines,
-                                          self.commentMatcher.match)
+            line_nrs_comment = where(source_lines, self.commentMatcher.match)
             ignore.extend(np.add(line_nrs_comment, start))
 
         if self.strip_blanks:
-            line_nrs_blank = where_true(source_lines,
-                                        str.isspace)  # only whitespace
+            line_nrs_blank = where(source_lines, str.isspace)  # only whitespace
             ignore.extend(np.add(line_nrs_blank, start))
-            line_nrs_empty = where_false(source_lines)  # empty lines
+            line_nrs_empty = where(source_lines, '')  # empty lines
             ignore.extend(np.add(line_nrs_empty, start))
 
         if self.strip_zeros:
@@ -409,8 +407,10 @@ class ReportStatsTable(ReportStats):
             wms, = np.where(~singleSkip)
             splitBlockIx = np.split(ignore, wms + 1)
             skipBlockSize = np.array(list(map(len, splitBlockIx)))  #
-            ix = np.take(splitBlockIx, np.where(skipBlockSize == 1))
+
+            ix = [splitBlockIx[i] for i in np.where(skipBlockSize == 1)[0]]
             ignore = list(set(ignore) - set(mit.collapse(ix)))
+
             # ignore now contains only indices of continuous multi-line code
             # blocks to skip when printing
 
