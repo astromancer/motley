@@ -1,10 +1,12 @@
 import motley
-from motley import ansi, codes
+from motley import codes
 import more_itertools as mit
+
+from motley.codes import utils
 
 
 def test_split():
-    ansi.split('\033[32m green \033[0m')
+    utils.split('\033[32m green \033[0m')
     (['\033[32m', ' green ', '\033[0m'])
 
 
@@ -60,7 +62,7 @@ def test_rainbow():
              {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '},
              {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': 'y'}],
             dtype=object)
-    print(ansi.rainbow(h, flags))
+    print(utils.rainbow(h, flags))
 
 
 test_apply()

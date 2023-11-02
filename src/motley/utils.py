@@ -1,390 +1,457 @@
 """
-Utility functions and classes
+Utility functions and classes.
 """
-import numbers
+
+
+# std
 import os
-
-import numpy as np
-from recipes.misc import get_terminal_size
-
-from . import codes
-from . import ansi
-
-import itertools as itt
+import numbers
+import unicodedata
 import functools as ftl
+from collections import abc
+
+from wcwidth import wcswidth
+
+# third-party
+import numpy as np
+
+# local
+from recipes import op, string
+from recipes.dicts import invert
+from recipes.misc import get_terminal_size
+from recipes.oo.singleton import Singleton
+
+# relative
+from . import codes, formatter
+
+from .codes import utils as ansi
 
 ALIGNMENT_MAP = {'r': '>',
                  'l': '<',
                  'c': '^'}
+ALIGNMENT_MAP_INV = invert(ALIGNMENT_MAP)
 
 
-def get_alignment(align):
+def resolve_alignment(align):
+    # resolve_align  # alignment.resolve() # alignment[align]
     align = ALIGNMENT_MAP.get(align.lower()[0], align)
-    if align not in '<^>':
-        raise ValueError('Unrecognised alignment {!r}'.format(align))
+    if align not in '<^>.':
+        raise ValueError(f'Unrecognised alignment {align!r}.')
     return align
 
 
-def hstack(tables, spacing=0, offset=()):
+@ftl.lru_cache()
+def resolve_width(width):
+    return get_terminal_size()[0] if width is None else int(width)
+
+
+# @ftl.lru_cache()
+def get_width(text, raw=False):
     """
-    Stick two or more tables (or multi-line strings) together horizontally
+    For string `text` get the maximal line width (number of characters in
+    longest line).
+
+    Parameters
+    ----------
+    text: str
+        String, possibly multi-line, possibly containing non-display characters
+        such as ANSI colour codes.
+    raw: bool
+        Whether to count the "hidden" non-display characters such as ANSI escape
+        codes.  If True, this function returns the same result as you would get
+        from `len(text)`. If False, the length of the string as it would appear
+        on screen when printed is returned.
+
+    Returns
+    -------
+    int
+    """
+    # length = ftl.partial(ansi.length, raw=count_hidden)
+    # length = ansi.length_raw if raw else ansi.length_seen
+    # length = ftl.partial(, length_func=length)
+    text = str(text)
+    if raw:
+        return max(map(len,  text.split(os.linesep)))
+
+    # get longest line for cell elements that contain newlines
+    # deal with unicode combining, double width, emoji's etc..
+    return max(map(wcswidth, ansi.strip(text).split(os.linesep)))
+
+
+# alias
+get_text_width = get_width
+
+
+def hstack(tables, spacing=0, offsets=0):
+    """
+    Stick two or more tables (or multi-line strings) together horizontally.
 
     Parameters
     ----------
     tables
-    spacing
-    offset
+    spacing : int
+        Number of horizontal spaces to be added as a column between the string
+        blocks.
+    offset : Sequence of int
+        Vertical offsets in number of rows between string blocks.
 
-    Returns
-    -------
-
-    """
-
-    assert len(tables), 'tables must be non-empty sequence'
-
-    from motley.table import Table
-
-    #
-    if isinstance(offset, numbers.Integral):
-        offset = [0] + [offset] * (len(tables) - 1)
-
-    #
-    widths = []
-    lines_list = []
-    max_length = 0
-    for i, (tbl, off) in enumerate(
-            itt.zip_longest(tables, offset, fillvalue=None)):
-        if off is None:
-            nl = tbl.n_head_lines if isinstance(tbl, Table) else 0
-            if i == 0:
-                nl0 = nl
-            off = nl0 - nl
-
-        lines = ([''] * off) + str(tbl).splitlines()
-        lines_list.append(lines)
-        max_length = max(len(lines), max_length)
-        widths.append(ansi.length_seen(lines[0]))
-        if spacing:
-            lines_list.append([])
-            widths.append(spacing)
-
-    #
-    for i, lines in enumerate(lines_list):
-        fill = ' ' * (widths[i])
-        m = max_length - len(lines)
-        lines_list[i].extend([fill] * m)
-
-    return '\n'.join(map(''.join, zip(*lines_list)))
-
-
-def vstack(tables, strip_titles=True, strip_headers=True, spacing=1):
-    """
-    Vertically stack tables while aligning column widths
-
-    Parameters
-    ----------
-    tables: list of motley.table.Table
-        Tables to stack
-    strip_titles: bool
-        Strip titles from all but the first table in the sequence
-    strip_headers: bool
-        Strip column group headings and column headings from all but the first
-        table in the sequence
 
     Returns
     -------
     str
+        Horizontally stacked string
     """
-    # check that all tables have same number of columns
-    ncols = [tbl.shape[1] for tbl in tables]
-    if len(set(ncols)) != 1:
-        raise ValueError(
-            f'Cannot stack tables with unequal number of columns: {ncols}')
+    tables = list(filter(None, tables))
+    assert tables, '`tables` must be non-empty sequence'
 
-    w = np.max([tbl.col_widths for tbl in tables], 0)
-    vspace = '\n' * (spacing + 1)
-    s = ''
-    nnl = 0
-    for i, tbl in enumerate(tables):
-        tbl.col_widths = w  # set all column widths equal
-        if i and strip_headers:
-            nnl = (tbl.frame + tbl.has_title + tbl.n_head_rows)
-        *head, r = str(tbl).split('\n', nnl)
-        keep = []
-        if head:
-            if not strip_titles:
-                keep += head[tbl.frame:(-tbl.n_head_rows or None)]
-            if not strip_headers:
-                keep += head[(tbl.frame + tbl.has_title):]
+    if len(tables) == 1:
+        return str(tables[0])
 
-        s += '\n'.join((vspace, *keep, r))
+    if offsets == ():
+        n0, *n_header_lines = op.AttrVector('n_head_lines', default=0)(tables)
+        offsets = [n0, *np.subtract(n0, n_header_lines)]
 
-    return s.lstrip('\n')
-
-
-def vstack_compact(tables):
-    # figure out which columns can be compactified
-    # note. the same thing can probs be accomplished with table groups ...
-    assert len(tables)
-    varies = set()
-    ok_size = tables[0].data.shape[1]
-    for i, tbl in enumerate(tables):
-        size = tbl.data.shape[1]
-        if size != ok_size:
-            raise ValueError('Table %d has %d columns while the preceding %d '
-                             'tables have %d columns.'
-                             % (i, size, i - 1, ok_size))
-        # check compactable
-        varies |= set(tbl.compactable())
-
-    return varies
-
-
-def overlay(text, background='', align='^', width=None):
-    """overlay text on background using given alignment."""
-
-    if not (background or width):  # nothing to align on
-        return text
-
-    if not background:
-        background = ' ' * width  # align on clear background
-    elif not width:
-        width = ansi.length_seen(background)
-
-    if ansi.length_seen(background) < ansi.length_seen(text):
-        # alignment is pointless
-        return text
-
-    # do alignment
-    align = get_alignment(align)
-    if ansi.has_ansi(background):
-        raise NotImplementedError(
-            '# fixme: will not work if background has coded strings')
-
-    if align == '<':  # left aligned
-        overlaid = text + background[ansi.length_seen(text):]
-
-    elif align == '>':  # right aligned
-        overlaid = background[:-ansi.length_seen(text)] + text
-
-    elif align == '^':  # center aligned
-        div, mod = divmod(ansi.length_seen(text), 2)
-        half_width = width // 2
-        # start and end indices of the text in the center of the background
-        idx = half_width - div, half_width + (div + mod)
-        # center text on background
-        overlaid = background[:idx[0]] + text + background[idx[1]:]
-
-    return overlaid
-
-
-def wideness(s, raw=False):  # rename width ??
-    """
-    For multi-line string `s` get the character width of the widest line.
-
-    Parameters
-    ----------
-    s
-    raw
-
-    Returns
-    -------
-
-    """
-    length = ftl.partial(ansi.length, raw=raw)
-    # deal with cell elements that contain newlines
-    return max(map(length, s.split(os.linesep)))
-
-
-def banner(obj, width=None, swoosh='=', align='<', **props):
-    """print pretty banner"""
-    if width is None:
-        width = get_terminal_size()[0]
-
-    swoosh = swoosh * width
-    # s = pprint.pformat(obj, width=width)
-    s = str(obj)
-    # fill whitespace (so background props reflect for entire block of banner)
-    s = '{0:{2}{1:d}}'.format(s, width, align)
-    info = '\n'.join([swoosh, s, swoosh])
-    info = codes.apply(info, **props)
-    return info
-
-
-def rainbow(words, effects=(), **kws):
-    # try:
-    # embed()
-
-    propIter = _prop_dict_gen(*effects, **kws)
-    propList = list(propIter)
-    nprops = len(propList)
-
-    if len(words) < nprops:
-        pairIter = itt.zip_longest(words, propList, fillvalue='default')
+    if isinstance(offsets, numbers.Integral):
+        offsets = [0] + [offsets] * (len(tables) - 1)
     else:
-        pairIter = zip(words, propList)
+        offsets = list(offsets)
 
-    try:
-        out = list(itt.starmap(codes.apply, pairIter))
-    except:
-        print('rainbow_' * 25)
-        from IPython import embed
-        embed()
-    #     raise SystemExit
-    # out = []
-    # for i, (word, props) in enumerate(pairIter):
-    #     word = codes.apply(word, **props)
-    #     out.append(word)
-
-    if isinstance(words, str):
-        return ''.join(out)
-
-    return out
+    return string.hstack(tables, spacing, offsets, _width_first)
 
 
-# def _echo(_):
-#     return _
-#
-#  NOTE: single dispatch not a good option here due to formatting subtleties
-#   might be useful at some point tho...
-# @ftl.singledispatch
-# def formatter(obj, precision=None, short=False, **kws):
-#     """default multiple dispatch func for formatting"""
-#     if hasattr(obj, 'pprint'):
-#         return obj.pprint()
-#     return pprint.PrettyPrinter(precision=precision,
-#                                 minimalist=short,
-#                                 **kws).pformat
-#
-#
-# @formatter.register(str)
-# @formatter.register(np.str_)
-# def _(obj, **kws):
-#     return _echo
-#
-#
-# # numbers.Integral
-# @formatter.register(int)
-# @formatter.register(np.int_)
-# def _(obj, precision=0, short=True, **kws):
-#     # FIXME: this code path is sub optimal for ints
-#     # if any(precision, right_pad, left_pad):
-#     return ftl.partial(pprint.decimal,
-#                        precision=precision,
-#                        short=short,
-#                        **kws)
-#
-#
-# # numbers.Real
-# @formatter.register(float)
-# @formatter.register(np.float_)
-# def _(obj, precision=None, short=False, **kws):
-#     return ftl.partial(pprint.decimal,
-#                        precision=precision,
-#                        short=short,
-#                        **kws)
-#
-#
-# def format(obj, precision=None, minimalist=False, align='<', **kws):
-#     """
-#     Dispatch formatter based on type of object and then format to str by
-#     calling  formatter on object.
-#     """
-#     return formatter(obj, precision, minimalist, align, **kws)(obj)
+def _width_first(lines):
+    return ansi.length(lines[0])
 
 
-class ConditionalFormatter(object):
+class _vstack(Singleton):  # NOTE this could just be a module...
     """
-    A str formatter that applies ANSI codes conditionally
+    Singleton helper class for vertical text stacking.
     """
 
-    def __init__(self, properties, test, test_args, formatter=None, **kws):
+    def __call__(self, tables, strip_titles=True, strip_headers=True, spacing=1,
+                 **kws):
         """
+        Vertically stack tables while aligning column widths.
 
         Parameters
         ----------
-        properties: str, tuple
-
-        test: callable
-            If True, apply `properties` after formatting with `formatter`
-        test_args: tuple, object
-            Arguments passed to the test function
-        formatter: callable, optional
-            The formatter to use to format the object before applying properties
-        kws:
-            Keywords passed to formatter
-        """
-        self.test = test
-        if not isinstance(test_args, tuple):
-            test_args = test_args,
-        self.args = test_args
-        self.properties = properties
-        self._kws = kws
-        self.formatter = formatter or format
-
-    def __call__(self, obj):
-        """
-        Format the object and apply the colour / properties
-
-        Parameters
-        ----------
-        obj: object
-            The object to be formatted
+        tables: list of motley.table.Table
+            Tables to stack vertically.
+        strip_titles: bool
+            Strip titles from all but the first table in the sequence.
+        strip_headers: bool
+            Strip column group headings and column headings from all but the
+            first table in the sequence.
 
         Returns
         -------
-
+        str
         """
-        out = self.formatter(obj, **self._kws)
-        if self.test(obj, *self.args):
-            return codes.apply(out, self.properties)
-        return out
+        return self.stack(tables, strip_titles, strip_headers, spacing)
 
-# def _prop_dict_gen(*effects, **kws):
-#     # if isinstance()
-#
-#     # from IPython import embed
+    def stack(self, tables, strip_titles=True, strip_headers=True, spacing=1, **kws):
+
+        # check that all tables have same number of columns
+        ncols = [tbl.n_cols + tbl.n_head_col for tbl in tables]
+        if len(set(ncols)) != 1:
+            raise ValueError(f'Cannot stack tables with unequal number of '
+                             f'columns: {ncols}.')
+
+        col_widths = np.max([tbl.col_widths for tbl in tables], 0)
+        return ('\n' * (spacing + 1)).join(
+            self._istack(tables, col_widths, strip_headers, strip_titles)
+        ).lstrip('\n')
+
+    def _istack(self, tables, col_widths, strip_headers, strip_titles):
+        for i, table in enumerate(tables):
+            yield '\n'.join(
+                self.__istack(i, table, col_widths, strip_headers, strip_titles)
+            )
+
+    def __istack(self, i, table, col_widths, strip_headers, strip_titles):
+        table.col_widths = col_widths  # set all column widths equal
+        nnl = table.n_head_lines * bool(i and strip_headers)
+
+        *head, r = str(table).split('\n', nnl)
+        if head:
+            if not strip_titles:
+                yield from head[table.frame:(-table.n_head_rows or None)]
+            if not strip_headers:
+                yield from head[(table.frame + table.has_title):]
+
+        yield r
+
+    @staticmethod
+    def compact(tables):
+        # figure out which columns can be compactified
+        # note. the same thing can probs be accomplished with table groups ...
+        assert tables
+        varies = set()
+        ok_size = tables[0].data.shape[1]
+        for i, tbl in enumerate(tables):
+            if (size := tbl.data.shape[1]) != ok_size:
+                raise ValueError(f'Table {i:d} has {size:d} columns while the '
+                                 f'preceding {i-1:d} tables have {ok_size:d} '
+                                 f'columns.')
+            # check compactable
+            varies |= set(tbl.compactable())
+
+        return varies
+
+    def from_dict(self, groups, strip_titles=False, strip_headers=True,
+                  braces=False, vspace=1):
+        """
+        Pretty print dict of table objects.
+
+        Parameters
+        ----------
+        groups : dict
+            Values are `motley.table.Table`. Keys will be used to make the
+            title.
+        strip_titles : bool
+            Whether to strip each table's title.
+        braces : bool, optional
+            Whether to use curly braces to mark the groups by their keys, by
+            default False.
+        vspace : int, optional
+            Vertical space between tables in number of newlines, by default 1.
+
+        Returns
+        -------
+        str
+            The formatted stack of tables.
+        """
+
+        # ΤΟDO: could accomplish the same effect by colour coding...
+        groups = dict(groups)
+        ordered_keys = list(groups.keys())  # key=sort
+        stack = [groups[key] for key in ordered_keys]
+
+        if not braces:
+            return self.stack(stack, strip_titles, strip_headers, vspace)
+
+        braces = ''
+        for i, gid in enumerate(ordered_keys):
+            tbl = groups[gid]
+            braces += ('\n' * bool(i) +
+                       vbrace(tbl.data.shape[0], gid) +
+                       '\n' * (tbl.has_totals + vspace))
+
+        # vertical offset
+        offsets = stack[0].n_head_lines
+        return string.hstack([self.stack(stack, strip_titles, strip_headers, vspace),
+                              braces],
+                             spacing=1, offsets=offsets)
+
+
+# singleton
+vstack = _vstack()
+
+
+def justify(text, align='<', width=None):
+    return string.justify(text, align, width, ansi.length, formatter.format)
+
+
+def make_group_title(keys):
+    if isinstance(keys, str):
+        return keys
+
+    try:
+        return "; ".join(map(str, keys))
+    except Exception:
+        return str(keys)
+
+
+def vbrace(size, name=''):
+    """
+    Create a multi-line right brace.
+
+    Parameters
+    ----------
+    size : int
+        Number of lines to span.
+    name : str, optional
+        Text to place on the right and vertically in center, by default ''.
+
+    Examples
+    --------
+    >>> vbrace(5, 'Text!')
+    '⎫\n'
+    '⎪\n'
+    '⎬ Text!\n'
+    '⎪\n'
+    '⎭\n'
+
+    Returns
+    -------
+    str
+        [description]
+
+
+    """
+    # TODO: recipes.strings.unicode.long_brace ???
+    # Various other brace styles
+
+    if size == 1:
+        return '} ' + str(name)
+
+    if size == 2:
+        return ('⎱\n'       # Upper right or lower left curly bracket section
+                '⎰')        # Upper left or lower right curly bracket section
+
+    d, r = divmod(int(size) - 3, 2)
+    return '\n'.join((r'⎫',             # 23AB: Right curly bracket upper hook
+                      *'⎪' * d,         # 23AA Curly bracket extension
+                      f'⎬ {name}',      # 23AC Right curly bracket middle piece
+                      *'⎪' * (d + r),
+                      r'⎭'))            # 23AD Right curly bracket lower hook
+
+
+def overlay(text, background='', align='^', width=None):
+    """
+    Overlay `text` on `background` string using given alignment at a given
+    width.
+
+    Parameters
+    ----------
+    text : [type]
+        [description]
+    background : str, optional
+        [description], by default ''
+    align : str, optional
+        [description], by default '^'
+    width : [type], optional
+        [description], by default None
+
+    Examples
+    --------
+    >>> 
+
+    Returns
+    -------
+    [type]
+        [description]
+
+    Raises
+    ------
+    NotImplementedError
+        [description]
+    """
+
+    # TODO: can you acheive this with some clever use of fstrings?
+    # {line!s: {align}{width}}
+
+    if not (background or width):
+        # nothing to align on
+        return text
+
+    text_size = ansi.length(text)
+    bg_size = ansi.length(background)
+    if not background:
+        # align on clear background
+        background = ' ' * width
+    elif not width:
+        # keep width of background text
+        width = bg_size
+
+    if bg_size < text_size:
+        # background will be clobbered. Alignment is pointless.
+        return text
+
+    if ansi.has_ansi(background):
+        raise NotImplementedError(
+            '# FIXME: will not work if background has coded strings')
+
+    # resolve alignment character
+    align = resolve_alignment(align)
+
+    # center aligned
+    if align == '^':
+        div, mod = divmod(text_size, 2)
+        half_width = width // 2
+        # start and end indices of the text in the center of the background
+        # center text on background
+        return ''.join((background[:(half_width - div)],
+                        text,
+                        background[(half_width + div + mod):]))
+
+    # left aligned
+    if align == '<':
+        return text + background[text_size:]
+
+     # right aligned
+    if align == '>':
+        return background[:-text_size] + text
+
+
+def banner(text, width=None, align='^', fg=None, bg=None, **kws):
+    """
+    print pretty banner
+
+    Parameters
+    ----------
+    obj : [type]
+        [description]
+    width : [type], optional
+        [description], by default None
+    swoosh : str, optional
+        [description], by default '='
+    middle : str, optional
+        [description], by default ''
+    align : str, optional
+        [description], by default '<'
+
+    Examples
+    --------
+    >>> 
+
+    Returns
+    -------
+    [type]
+        [description]
+    """
+
+    from .textbox import textbox
+
+    if width is None:
+        width = get_terminal_size()[0]
+    width = int(width)
+
+    # fill whitespace (so background props reflect for entire block of banner)
+    # title = f'{text: {align}{width - 2 * len(side)}}'
+    width = resolve_width(width)
+    # TextBox()
+    return textbox(text, fg, bg, width=width, align=align,
+                   **{**dict(linestyle='_', sides=False),
+                      **kws})
+    # return codes.apply(banner,  **props)
+
+
+# def rainbow(words, effects=(), **kws):
+#     # try:
 #     # embed()
-#
-#     # deal with `effects' being list of dicts
-#     props = defaultdict(list)
-#     for effect in effects:
-#         print('effect', effect)
-#         if isinstance(effect, dict):
-#             for k in ('txt', 'bg'):
-#                 v = effect.get(k, None)
-#                 props[k].append(v)
-#         else:
-#             props['txt'].append(effect)
-#             props['bg'].append('default')
-#
-#     # deal with kws having iterable values
-#     for k, v in kws.items():
-#         if len(props[k]):
-#             warnings.warning('Ambiguous: keyword %r. ignoring' % k)
-#         else:
-#             props[k].extend(v)
-#
-#     # generate prop dicts
-#     propIter = itt.zip_longest(*props.values(), fillvalue='default')
-#     for p in propIter:
-#         d = dict(zip(props.keys(), p))
-#         yield d
-#
-#
-# def get_state_dicts(states, *effects, **kws):
+
 #     propIter = _prop_dict_gen(*effects, **kws)
 #     propList = list(propIter)
 #     nprops = len(propList)
-#     nstates = states.max()  # ptp??
-#     istart = int(nstates - nprops + 1)
-#     return ([{}] * istart) + propList
 
+#     if len(words) < nprops:
+#         pairIter = itt.zip_longest(words, propList, fillvalue='default')
+#     else:
+#         pairIter = zip(words, propList)
 
-# def iter_props(colours, background):
-#     for txt, bg in itt.zip_longest(colours, background, fillvalue='default'):
-# codes.get_code_str(txt, bg=bg)
-# yield tuple(codes._gen_codes(txt, bg=bg))
+#     out = list(itt.starmap(codes.apply, pairIter))
+
+#     #     raise SystemExit
+#     # out = []
+#     # for i, (word, props) in enumerate(pairIter):
+#     #     word = codes.apply(word, **props)
+#     #     out.append(word)
+
+#     if isinstance(words, str):
+#         return ''.join(out)
+
+#     return out
 
 
 class Filler:
@@ -405,20 +472,29 @@ class Filler:
 
 class GroupTitle:
     width = None
-    # formater = 'group {}'
+    template = 'group {}: '
 
-    def __init__(self, i, keys, props):
-        self.g = f'group {i}:'
-        self.s = self.format_key(keys)
-        # self.s = "; ".join(map('{:s} = {:s}'.format, *zip(*info.items())))
-        self.props = props
+    def __init__(self, i, keys, props, align='^'):
+        self.g = self.template.format(i)
+        self.s = codes.apply(self.format_key(keys), props)
+        # self.props = props
 
-    # @staticmethod
-    def format_key(self, keys):
+        self.align = resolve_alignment(align)
+
+    @staticmethod
+    def format_key(keys):
         if isinstance(keys, str):
             return keys
-        return "; ".join(map(str, keys))
+
+        if isinstance(keys, abc.Collection):
+            return "; ".join(map(str, keys))
+
+        return str(keys)
 
     def __str__(self):
-        return '\n' + overlay(codes.apply(self.s, self.props),
-                              self.g.ljust(self.width))
+        if self.align == '<':
+            return (self.g + self.s).ljust(self.width)
+
+        return '\n' + overlay(self.s,
+                              self.g.ljust(self.width),
+                              self.align)

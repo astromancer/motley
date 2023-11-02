@@ -158,7 +158,7 @@ class LineProfiler(lp.LineProfiler):
 # Decorator classes
 # ****************************************************************************************************
 
-class profile(object):
+class profile:
     """
     Decorator for printing results from multiple profiled functions in
     various output formats
@@ -166,6 +166,7 @@ class profile(object):
 
     # singleton profiler.  All functions will be added to this one.
     profiler = LineProfiler()
+    
 
     def __init__(self, follow=(), report=None, **kws):
         # decorator for profiling

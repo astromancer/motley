@@ -1,4 +1,4 @@
-# motley: {long_name}
+# motley
 
 > Rocking terminal colours. Just like in the 80s. 🏳️‍🌈🤘🏽🎸
 
@@ -17,24 +17,37 @@ A python library for playing with colourful string representations using ANSI es
 # Install
 
 ```shell
-pip install motley
+pip install https://github.com/astromancer/motley
 ```
 
 # Use
 
-## Example
-```python
+<!-- ## Examples -->
 
+## Colouring and Styling Text
+
+### Stylization via extended format directives
+ 
+```python
+>>> motley.format('This text is {:|g}!'.format('green')
 ```
 
+```python
+>>> motley.format('{:{:|g} {:|bB_}!<13}'.format('Hello', 'World')
+```
+
+### Convenience functions
+```python
+>>> motley.green_on_white(':)')
+```
 
 <!-- ![Example Image](https://github.com/astromancer/motley/blob/master/tests/images/example_0.png "Example Image") -->
 
 
-For more examples see [Documentation]()
+<!-- For more examples see [Documentation]() -->
 
-# Documentation
-
+<!-- # Documentation
+TODO -->
 
 # Test
 

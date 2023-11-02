@@ -86,6 +86,6 @@ from .core import *
         #     from decor.profiler import HLineProfiler
         #     profiler = HLineProfiler()
         #
-        #     for name, method in inspect.getmembers(DragMachinery, predicate=inspect.isfunction):
+        #     for name, method in inspect.getmembers(MotionManager, predicate=inspect.isfunction):
         #         profiler.add_function(method)
         #     profiler.enable_by_count()

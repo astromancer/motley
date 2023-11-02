@@ -4,6 +4,7 @@ dev/
 src/motley/styles.py
 src/motley/mprog.py
 src/motley/unicode.py
+src/motley/progress.py
 
 #########################################
 # Editor temporary/working/backup files #
@@ -89,3 +90,4 @@ lib/z.lib
 #################
 .ipynb_checkpoints/
 
+tests/debug_formatter.py

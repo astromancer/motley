@@ -3,6 +3,7 @@ Printers for displaying profiled source code
 """
 
 # builtin libs
+# std
 import re
 import ast
 import sys
@@ -11,20 +12,20 @@ import textwrap
 import functools as ftl
 from io import StringIO
 
-# third-party libs
+# third-party
 import numpy as np
 import more_itertools as mit
 
-# local libs
-from recipes.iter import where_true, where_false
-from recipes.introspect import get_class_that_defined_method
+# local
 from recipes import pprint
+from recipes.iter import where_false, where_true
+from recipes.introspect import get_defining_class
 
 # relative
 from .. import codes
-from ..ansi import length
 from ..table import Table
-from ..utils import ConditionalFormatter
+from ..codes.utils import length
+
 
 # FIXME: line stripping still buggy
 
@@ -36,15 +37,16 @@ cdot = u'\u00B7'  # '·'
 
 
 def func2str(func):
-    cls = get_class_that_defined_method(func)
-    if cls is None:
-        if isinstance(func, ftl.partial):
-            func = func.func
-            argstr = str(func.args).strip(')') + ', %s)' % cdot
-            return 'partial(%s%s)' % (func2str(func.func), argstr)
-        return func.__name__
-    else:
+
+    if (cls := get_defining_class(func)) is not None:
         return '.'.join((cls.__name__, func.__name__))
+    
+    if isinstance(func, ftl.partial):
+        func = func.func
+        argstr = str(func.args).strip(')') + f', {cdot})'
+        return f'partial({func2str(func.func)}{argstr})'
+    
+    return func.__name__
 
 
 def truncate_block_gen(block, width, dots='...'):
@@ -52,7 +54,7 @@ def truncate_block_gen(block, width, dots='...'):
     Truncate a block of text at given *width* adding ellipsis to indicate missing
     text
     """
-    le = length(dots, raw=False)
+    le = length(dots)
     for line in block:
         if len(line) > width:  # need to truncate
             yield line[:(width - le)] + dots
@@ -65,8 +67,7 @@ def truncate_block(block, width, dots='...'):
 
 
 def make_bar(line, fraction, line_width, colour):
-    l = int(np.round(fraction * line_width))
-    if l:
+    if l := int(np.round(fraction * line_width)):
         bar = codes.apply(line[:l], bg=colour)
         return bar + line[l:]
     return line
@@ -142,7 +143,7 @@ def _ast_func_index(source):
 
 
 # ****************************************************************************************************
-class ReportStats(object):
+class ReportStats:
     """
     Helper class that prints profiling results for a single function when called.
     This base class is essentially an OO (and therefore extensible) version of
@@ -337,8 +338,7 @@ class ReportStatsTable(ReportStats):
                 self.smallest = float(s.strip('<'))
                 unhandled.remove(s)
         if len(unhandled):
-            raise ValueError('Unknown option(s) for strip keyword: %s'
-                             % tuple(unhandled))
+            raise ValueError(f'Unknown option(s) for strip keyword: {tuple(unhandled)}')
 
         self.max_line_width = kws.get('max_line_width')  # maxLineWidth
         self.where_gaps = []
@@ -353,12 +353,12 @@ class ReportStatsTable(ReportStats):
         """pre-process the raw source code lines for display"""
         ignore = []
         source_lines = self.sourceCodeLines
-        source = '\n'.join(source_lines)
         start, end = start_line_nr, end_line_nr
 
         # FIXME: not stripping correct lines......
 
         if self.strip_docstring:
+            source = '\n'.join(source_lines)
             # identify various parts of the function in the source code
             line_nr_def, line_nr_doc, line_nr_doc_end, line_nr_body \
                 = _ast_func_index(source)
@@ -527,9 +527,9 @@ class ReportStatsTable(ReportStats):
         self._table = Table(table,
                             title=title,
                             title_align='left',
-                            title_props=dict(text='bold', bg='dark gray'),
+                            title_style=dict(text='bold', bg='dark gray'),
                             col_headers=colhead,
-                            col_head_props=dict(text=('bold', 'w'), bg='b'),
+                            col_head_style=dict(text=('bold', 'w'), bg='b'),
                             hlines=where_row_borders,
                             align=align,
                             # width=range(1000),

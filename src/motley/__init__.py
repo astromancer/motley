@@ -2,28 +2,48 @@
 Rocking colours. Just like in the 80s...
 """
 
-import textwrap
+# pylint: disable=redefined-builtin
 
+# std
+import sys
+import textwrap
+import itertools as itt
+
+# third-party
+from loguru import logger
+
+# relative
 from . import codes
 from .utils import *
-from .ansi import *
+from .string import Str
+from .formatter import format, format_partial, stylize
 
-hue = codes.apply
+
+# ---------------------------------------------------------------------------- #
+logger.disable('motley')
 
 
-class ConvenienceFunction(object):
+# aliases
+apply = hue = codes.apply
+# ---------------------------------------------------------------------------- #
+
+
+class ConvenienceFunction:
+    """
+    API function for applying ANSI codes to strings
+    """
+
+    # pylint: disable=trailing-whitespace
     _doc_tmp = textwrap.dedent(
-            """
-            %s
-            
-            Calling this function on a str `s` is equivalent to running:
-            >>> codes.apply(s, fg={0!r}, bg={1!r})
-            """)
+        """
+        %s
+        
+        Calling this function on a str `s` is equivalent to running:
+        >>> codes.apply(s, fg={0!r}, bg={1!r})
+        """
+    )
 
     def __init__(self, fg, bg=None):
-        """
-        API function for applying ANSI codes to strings
-        """
 
         # postfix = 'bg'
         # will postfix all functions referring to the background with '_bg'.
@@ -35,10 +55,10 @@ class ConvenienceFunction(object):
         if bg:
             if fg:
                 doc0 += '{0!r} with'
-                name = '%s_on_%s' % (fg, bg)
+                name = f'{fg}_on_{bg}'
             else:
                 action = 'Give'
-                name = '%s_bg' % bg
+                name = f'{bg}_bg'
             doc0 += ' a {1!r} background.'
         elif fg:
             doc0 += '{0!r}.'
@@ -60,28 +80,47 @@ class ConvenienceFunction(object):
         #
 
     def __call__(self, s):
+        # temptation here would be to pre-resolve codes, however this prevents
+        # stacking effects appropriately
         return codes.apply(s, fg=self.fg, bg=self.bg)
 
 
-# can also dynamically generate combination fg, bg colour functions
-_colours = ('black', 'red', 'green', 'yellow', 'blue', 'magenta', 'cyan',
-            'gray', 'white', None)
-_effects = ('bold', 'dim', 'italic', 'underline', 'blink_slow', 'blink_fast',
-            'invert', 'hide', 'strike')
+def _eq(pair):
+    # filter `red_on_red` etc `bold_bold` etc.
+    return (object.__eq__(*pair) is not True)
 
-for fg, bg in itt.chain(
-        itt.product(_colours, _colours),
-        itt.product(_effects, (None,)),
-        itt.product(itt.product(('bold', 'italic'), _colours + ('italic',)),
-                    (None,))):
 
-    if fg == bg:
-        # something like red on red is pointless
-        continue
+def _product(*items):
+    yield from filter(_eq, itt.product(*items))
 
-    func = ConvenienceFunction(fg, bg)
-    # TODO: 'y_on_g'
-    exec(f'{func.__name__} = func')
+# def _sanitize_names(names):
+#     for _ in names:
+#         yield _.replace(' ', '_')
 
-# remove from module namespace
-del func
+
+def _combos():
+    # can also dynamically generate combination fg, bg colour functions
+
+    _fgc = [None, *codes._codes._fg_colours]
+    _bgc = [None, *codes.BG_CODES]
+    _shorts = [None, *codes.color_alias_map.keys()]
+    yield from itt.chain(
+        # simple text effects eg: `underline`, `red` ...
+        _product(codes.FG_CODES, [None]),
+        # `red_on_green` etc
+        _product(_fgc, _bgc),
+        # `r_on_g` etc
+        _product(_shorts, _shorts),
+        # `italic_blue`, `bold_red` ...
+        itt.zip_longest(_product(('bold', 'italic'), (*_fgc, 'italic')), ())
+    )
+
+
+def _make_funcs():
+    for fg, bg in _combos():
+        func = ConvenienceFunction(fg, bg)
+        setattr(sys.modules[__name__], func.__name__, func)
+
+
+# create convenience functions
+_make_funcs()  # this keeps the namespace clean of "fg", "bg", "func"

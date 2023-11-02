@@ -1,9 +1,5 @@
-recipes.egg
-more_itertools
 numpy
-matplotlib.egg
-decor
-ipython
+matplotlib
+more_itertools
 line_profiler
-openpyxl
 git+https://github.com/astromancer/recipes
