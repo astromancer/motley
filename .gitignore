@@ -5,9 +5,11 @@ src/motley/styles.py
 src/motley/mprog.py
 src/motley/unicode.py
 src/motley/progress.py
+tests/debug_formatter.py
 
-#########################################
+
 # Editor temporary/working/backup files #
+#########################################
 .#*
 [#]*#
 *~
@@ -62,13 +64,10 @@ ehthumbs.db
 Icon?
 Thumbs.db
 
-
-
 # Documentation generated files #
 #################################
 # sphinx build directory
 doc/_build
-
 
 # Pytest/Nose generated files #
 ###############################
@@ -79,6 +78,7 @@ doc/_build
 *.py,cover
 cover/
 .noseids
+.hypothesis/
 
 # Conda files #
 ###############
@@ -90,4 +90,6 @@ lib/z.lib
 #################
 .ipynb_checkpoints/
 
-tests/debug_formatter.py
+# Linters #
+###########
+*.trunk
