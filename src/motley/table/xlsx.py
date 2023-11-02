@@ -11,7 +11,6 @@ from collections import defaultdict
 # third-party
 import numpy as np
 import more_itertools as mit
-from loguru import logger
 from openpyxl.cell import Cell
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Border, Font, Side
@@ -22,11 +21,12 @@ from recipes.string import sub
 from recipes.dicts import AttrDict
 from recipes.logging import LoggingMixin
 from recipes.iter import cofilter, duplicates
-from recipes.utils import duplicate_if_scalar
 from recipes.lists import unique, where_duplicate
 from recipes.string.brackets import BracketParser
+from recipes.utils import duplicate_if_scalar, ensure
 
 
+# ---------------------------------------------------------------------------- #
 ALIGNMENT_MAP = {'>': 'right',
                  '<': 'left',
                  '^': 'center'}
@@ -241,9 +241,11 @@ class XlsxWriter(LoggingMixin):
             if sheet:
                 ws.title = sheet
 
+        #
         self.worksheet = ws
 
-        self.logger.debug('Begin writing to workbook {!s}::{}', path or '', sheet)
+        self.logger.debug('Begin writing to spreadsheet {!s}::{}',
+                          (path or ''), sheet)
 
         table = self.table
         nrows, ncols = table.data.shape
@@ -317,8 +319,13 @@ class XlsxWriter(LoggingMixin):
             # if val in self.merge_unduplicate:
             #     self.merge_duplicate_rows( )
 
-        if 'data' in self.merge_unduplicate:
-            self.merge_duplicate_rows(table.data, r0, nrows)
+        if how := (ensure(set, self.merge_unduplicate) - {'headers'}):
+            if 'data' in how:
+                self.merge_duplicate_rows(table.data, r0, trigger=nrows)
+            else:
+                for h in how:
+                    indices = table.resolve_columns(h, table.n_cols, 'merge region')
+                    self.merge_duplicate_rows(table.data, r0, indices, nrows)
 
         if self.bottomrule and not table.totals:
             set_block_style(ws[f'A{r+1}:{ncols + 64:c}{r+1}'],
@@ -326,7 +333,8 @@ class XlsxWriter(LoggingMixin):
 
         if path:
             workbook.save(path)
-            self.logger.success('Workbook saved at {!s}', path)
+            self.logger.success('Spreadsheet saved at {!s}{}',
+                                path, (f'::{sheet}' if sheet else ''))
 
         return workbook
 
@@ -368,9 +376,18 @@ class XlsxWriter(LoggingMixin):
 
         # headers
         # headers = table.get_headers()
-        col_headers = list(map(self.header_formatter, table.col_headers))
-        # col group headers
-        headers = [*table.col_groups, col_headers]
+        cgroups = table.col_groups
+        if isinstance(table, AttrDict):
+            col_headers = list(map(self.header_formatter, table.col_headers))
+            if cgroups and len(col_headers) < len(cgroups[0]):
+                col_headers = ['', *col_headers]
+            # col group headers
+            headers = [*cgroups, col_headers]
+        else:
+            headers = [*cgroups, table.pre_table[0]]
+            # _, headers = table.get_header_blocks(
+            #     table.row_headers, table.has_row_nrs, table.col_headers)
+
         if table.units:
             headers.append(table.units)
 
@@ -387,7 +404,7 @@ class XlsxWriter(LoggingMixin):
         q = self.worksheet._current_row
         set_block_style(
             self.worksheet[f'A{q}:{64 + ncols:c}{q}'],
-            **self.style['units' if table.units or table.col_groups else 'headers'],
+            **self.style['units' if table.units or cgroups else 'headers'],
             border=Border(bottom=self.rule2)
         )
 
@@ -414,7 +431,7 @@ class XlsxWriter(LoggingMixin):
     def merge_duplicate_cells(self, data, row_index, trigger=2):
 
         data = np.atleast_2d(data)
-        logger.debug('data = {}', data)
+        # logger.debug('data = {}', data)
 
         nrows, _ = data.shape
         r0 = row_index
@@ -434,18 +451,18 @@ class XlsxWriter(LoggingMixin):
                 if idx := (set(idx) - set(merged[r])):
                     to_merge.append(idx)
 
-            logger.debug('Row {}: to_merge {}', r, to_merge)
+            # logger.debug('Row {}: to_merge {}', r, to_merge)
             # select(to_)
             for idx in to_merge:
                 j, *_, k = duplicate_if_scalar(sorted(idx), raises=False)
-                logger.debug('{}', data[r + 1:, j:k + 1])
+                # logger.debug('{}', data[r + 1:, j:k + 1])
                 extend_down = np.all(data[r + 1:, j:k + 1] == '')
                 s = (nrows - r - 1) * extend_down
 
                 # logger.debug('{}', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
                 if ((k - j + 1 >= trigger) | s > 0):
                     cells = f'{j+65:c}{r1}:{k+65:c}{r1 + s}'
-                    logger.debug('merge: {}', cells)
+                    # logger.debug('merge: {}', cells)
                     self.worksheet.merge_cells(cells)
 
                     for t in range(s + 1):
@@ -458,8 +475,12 @@ class XlsxWriter(LoggingMixin):
 
         return merged
 
-    def merge_duplicate_rows(self, data, r0, trigger=2, **style):
+    def merge_duplicate_rows(self, data, r0, columns=(), trigger=2, **style):
+        columns = columns or range(data.shape[1])
         for i, col in enumerate(data.T):
+            if i not in columns:
+                continue
+
             col_style = dict(style)
             if (align := self.alignments.get(i)):
                 col_style.update(alignment=align)
