@@ -1,5 +1,8 @@
 numpy
+loguru
+wcwidth
+openpyxl
 matplotlib
-more_itertools
 line_profiler
+more_itertools
 git+https://github.com/astromancer/recipes
