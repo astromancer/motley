@@ -5,6 +5,5 @@ matplotlib.egg
 decor
 ipython
 line_profiler
-lll
-matplotlib
-recipes
+openpyxl
+git+https://github.com/astromancer/recipes
