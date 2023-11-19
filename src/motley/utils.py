@@ -321,10 +321,6 @@ def overlay(text, background='', align='^', width=None):
     width : [type], optional
         [description], by default None
 
-    Examples
-    --------
-    >>> 
-
     Returns
     -------
     [type]
@@ -336,50 +332,13 @@ def overlay(text, background='', align='^', width=None):
         [description]
     """
 
-    # TODO: can you acheive this with some clever use of fstrings?
-    # {line!s: {align}{width}}
-
-    if not (background or width):
-        # nothing to align on
-        return text
-
-    text_size = ansi.length(text)
-    bg_size = ansi.length(background)
-    if not background:
-        # align on clear background
-        background = ' ' * width
-    elif not width:
-        # keep width of background text
-        width = bg_size
-
-    if bg_size < text_size:
-        # background will be clobbered. Alignment is pointless.
-        return text
-
     if ansi.has_ansi(background):
         raise NotImplementedError(
             '# FIXME: will not work if background has coded strings')
 
-    # resolve alignment character
     align = resolve_alignment(align)
 
-    # center aligned
-    if align == '^':
-        div, mod = divmod(text_size, 2)
-        half_width = width // 2
-        # start and end indices of the text in the center of the background
-        # center text on background
-        return ''.join((background[:(half_width - div)],
-                        text,
-                        background[(half_width + div + mod):]))
-
-    # left aligned
-    if align == '<':
-        return text + background[text_size:]
-
-     # right aligned
-    if align == '>':
-        return background[:-text_size] + text
+    return string.overlay(text, background, align, width)
 
 
 def banner(text, width=None, align='^', fg=None, bg=None, **kws):
