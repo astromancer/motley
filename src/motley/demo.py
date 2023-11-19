@@ -1,5 +1,8 @@
-from . import codes
+# third-party
 import more_itertools as mit
+
+# relative
+from . import codes
 
 
 # # Demo 256 colours

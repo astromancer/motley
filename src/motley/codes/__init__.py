@@ -2,9 +2,9 @@
 Handel resolution of named colors and effects
 """
 
-from .resolve import *
+from . import bg, fg
 from .utils import *
-from . import fg, bg
+from .resolve import *
 
 
 def _make_named_codes(fg_or_bg):

@@ -10,7 +10,7 @@ import functools as ftl
 import numpy as np
 import more_itertools as mit
 from loguru import logger
-from matplotlib.pyplot import get_cmap
+from matplotlib import colormaps
 from matplotlib.colors import Normalize
 
 # local
@@ -430,7 +430,7 @@ class AnsiImage(TextImageBase):
 
     def __init__(self, data, cmap=None, orient=0, frame=True):
         # colour map
-        self.cmap = get_cmap(cmap)
+        self.cmap = colormaps.get_cmap(cmap)
         # init base
         TextImageBase.__init__(self, data, orient, frame)
         self.needs_edge = []

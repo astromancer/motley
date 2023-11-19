@@ -1,5 +1,9 @@
-from motley.table import Table
+
+# third-party
 import numpy as np
+
+# local
+from motley.table import Table
 
 
 def random_words(word_size, n_words, ord_range=(97, 122)):

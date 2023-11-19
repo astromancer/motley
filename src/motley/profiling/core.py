@@ -1,10 +1,13 @@
-import functools
+# std
 import logging
 import inspect
+import functools as ftl
 
+# third-party
 import numpy as np
 import line_profiler as lp
 
+# relative
 from .. import codes
 from .printers import ReportStats, ReportStatsTable
 
@@ -195,7 +198,7 @@ class profile:
         logging.debug('calling %s with %s', self, func.__name__)
 
         # ----------------------------------------------------------------------------------------------------
-        @functools.wraps(func)
+        @ftl.wraps(func)
         def profiled_func(*args, **kwargs):
             # print(func, args, kwargs)
             try:

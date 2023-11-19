@@ -27,8 +27,6 @@ def foo():
 from .core import *
 
 
-
-
 # profile = ReportStats
 # bars = DisplayStatsWithBars
 # all = profileAll
@@ -43,7 +41,6 @@ from .core import *
 #
 # Foo().methodA()
 # profiler.print_stats()
-
 
 
 # ****************************************************************************************************

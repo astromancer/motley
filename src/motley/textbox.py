@@ -16,7 +16,7 @@ from recipes.string import backspaced, justify
 
 # relative
 from . import apply, format, underline
-from .codes import utils as ansi
+from .codes import utils
 from .utils import get_width, resolve_width
 
 

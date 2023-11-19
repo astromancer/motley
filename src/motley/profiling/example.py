@@ -1,5 +1,9 @@
-from decor.profile import profile
+
+# std
 import time
+
+# third-party
+from decor.profile import profile
 
 profiler = profile()
 

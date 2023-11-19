@@ -8,11 +8,10 @@ from collections import abc, defaultdict
 import numpy as np
 
 # local
-from pyxides.grouping import Groups
-from pyxides.vectorize import AttrTabulate
 from recipes.dicts import AttrDict
 from recipes.sets import OrderedSet
-from recipes.string.brackets import BracketParser
+from pyxides.grouping import Groups
+from pyxides.vectorize import AttrTabulate
 
 # relative
 from ..utils import make_group_title, resolve_alignment

@@ -1,19 +1,21 @@
 """
-Tools for recognising and stripping ANSI codes.
+Tools for recognising and manipulating strings containing ANSI codes.
 """
 
 # std
 import re
-from collections import namedtuple
 
 # third-party
 import more_itertools as mit
 
 # local
+from recipes import op
 from recipes.functionals import echo
+from recipes.oo.slots import SlotHelper
 
 
-__all__ = ['has_ansi', 'strip', 'pull', 'parse', 'split', 'length', 
+# ---------------------------------------------------------------------------- #
+__all__ = ['has_ansi', 'strip', 'pull', 'parse', 'split', 'length',
            'length_codes', 'length_seen']
 
 # REGEX_ANSI = re.compile(r'''(?x)

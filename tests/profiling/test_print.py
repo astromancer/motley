@@ -1,8 +1,12 @@
-from motley.profiling.printers import _ast_func_index
-from motley.profiling import profile
-
-from more_itertools import pairwise
+# std
 import time
+
+# third-party
+from more_itertools import pairwise
+
+# local
+from motley.profiling import profile
+from motley.profiling.printers import _ast_func_index
 
 
 @profile(report='bars')
@@ -24,7 +28,6 @@ def foo():
 
 
 foo()
-
 
 
 def show_func_parts(source):

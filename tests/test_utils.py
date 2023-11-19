@@ -1,7 +1,9 @@
-import motley
-from motley import codes
-import more_itertools as mit
 
+# third-party
+import codes
+
+# local
+import motley
 from motley.codes import utils
 
 

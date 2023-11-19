@@ -2,14 +2,17 @@
 Radial pixel sweep / Moore's neighbour trace.
 """
 
+# std
 import itertools as itt
 
+# third-party
 import numpy as np
 
+
 # pixel edge vectors for neighbour positions
-EDGES = {(-1, 0): (0, 1),
-         (0, 1): (1, 0),
-         (1, 0): (0, -1),
+EDGES = {(-1, 0): (0,  1),
+         (0,  1): (1,  0),
+         (1,  0): (0, -1),
          (0, -1): (-1, 0)}
 
 # get Moore neighbour positions, anti-clockwise from bottom middle.
