@@ -60,9 +60,21 @@ REGEX_ANSI_ENCODED = re.compile(fr'''(?x)
 #  in order to make missing parameters useful.[18]:F.4.2 Bytes other than
 #  digits and semicolon seem to not be used."
 
-AnsiEncodedString = namedtuple('AnsiEncodedString',
-                               ('csi', 'params', 'final_byte', 'text', 'end'))
 
+# ---------------------------------------------------------------------------- #
+
+class AnsiEncodedString(SlotHelper):
+
+    __slots__ = ('csi', 'params', 'final_byte', 'text', 'end')
+
+    @property
+    def code(self):
+        return self.csi + self.params + self.final_byte
+
+    def __str__(self):
+        return ''.join(op.attrgetter(*self.__slots__)(self))
+    
+# ---------------------------------------------------------------------------- #
 
 def has_ansi(s):
     return REGEX_ANSI.search(s) is not None
