@@ -785,7 +785,7 @@ class Table(LoggingMixin):
 
         # from recipes import pprint
         # pprint.mapping(locals(), ignore=['self'])
-        # logger.debug('SUMMARY {!r}', summary)
+        # logger.debug('SUMMARY {!r}.', summary)
 
         # special case: dict
         if isinstance(data, dict):
@@ -1373,7 +1373,7 @@ class Table(LoggingMixin):
                 self._format_column_footnote(i, flag, flag_info)
 
             if used_flags:
-                self.logger.debug('Columns {} used flags: {}', self.col_headers[i],
+                self.logger.debug('Columns {} used flags: {}.', self.col_headers[i],
                                   used_flags)
 
         # finally set masked str for entire table

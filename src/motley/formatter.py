@@ -315,7 +315,7 @@ def _apply_style(string, **style):
             # error was legit
             raise
 
-        logger.debug('`motley.codes.apply` failed. Retrying with args = {},'
+        logger.debug('`motley.codes.apply` failed. Retrying with args = {},.'
                      ' kws = {} on string:\n{!r}',
                      tuple(maybe_short_spec), style, string)
         try:
@@ -437,7 +437,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         braces = self.parser.findall(string, condition=(level == 0))
         while i < len(braces):
             match = braces[i]
-            # self.logger.debug('MATCH {}, pos = {}\n{!r}', i, pos, match)
+            # self.logger.debug('MATCH {}, pos = {}\n{!r}.', i, pos, match)
             if match.is_open():
                 # open brace
                 if i == len(braces) - 1:
@@ -473,7 +473,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                 yield '}', None, None, None
             else:
                 # closed single
-                self.logger.debug('Found braced group at position {.start}', match)
+                self.logger.debug('Found braced group at position {.start}.', match)
                 yield string[pos:match.start], *self.parse_brace_group(match.enclosed)
 
             pos = match.end + 1
@@ -481,7 +481,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
         # case no braces
         if match is None:
-            self.logger.debug('No braced expressions in: {!r}', string)
+            self.logger.debug('No braced expressions in: {!r}.', string)
             yield string, None, None, None
 
         # Final part of string
@@ -554,7 +554,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         return field, spec, convert
 
     def _parse_spec(self, value, spec):
-        self.logger.debug('Received value={!r}, spec={!r}', value, spec)
+        self.logger.debug('Received value={!r}, spec={!r}.', value, spec)
 
         # get the part that `builtins.format` understands
         spec_match, spec, style = self._parse_spec_style(spec)
@@ -579,7 +579,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                                          getattr(rgb, 'brackets', None))
 
         #
-        self.logger.debug('parsed value={!r}, spec={!r}, style={!r}',
+        self.logger.debug('parsed value={!r}, spec={!r}, style={!r}.',
                           value, spec, style)
 
         return value, spec, style
@@ -611,7 +611,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         return spec_match, spec, style
 
     def _should_adjust_width(self, spec, value, spec_match):
-        # self.logger.debug('Checking {!r}', value)
+        # self.logger.debug('Checking {!r}.', value)
         return (self.adjust_widths and spec_match and spec_match['width']
                 and isinstance(value, STRING_CLASSES) and ansi.has_ansi(value))
         # self.logger.opt(lazy=True).debug(
@@ -649,7 +649,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
         if self.parser.match(field_name):
             # brace expression in field name!
-            self.logger.debug('Found braced expression in field name. Recursing'
+            self.logger.debug('Found braced expression in field name. Recursing.'
                               ' on {!r}', field_name)
 
             # restore previous _wrap_field state after recursing
@@ -694,11 +694,11 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         motley.codes.exceptions.InvalidStyle
             If the colour / style directives could not be resolved.
         """
-        self.logger.debug('Formatting {!r} with {!r} at parent', value, spec)
+        self.logger.debug('Formatting {!r} with {!r} at parent.', value, spec)
         value, spec, style = self._parse_spec(value, spec)
 
         # delegate formatting
-        # self.logger.debug('Formatting {!r} with {!r} at parent', value, spec)
+        # self.logger.debug('Formatting {!r} with {!r} at parent.', value, spec)
         return _apply_style(
             super().format_field(value, spec),      # calls  builtins.format
             **style
@@ -715,7 +715,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         return super().convert_field(value, conversion)
 
     def format_partial(self, format_string, *args, **kws):
-        self.logger.debug('Received format string:{}> {!r}',
+        self.logger.debug('Received format string:{}> {!r}.',
                           '\n' * (len(format_string) > 40), format_string)
         return PartialFormatter().format(format_string, *args, **kws)
 
@@ -762,7 +762,7 @@ class PartialFormatter(Formatter):
         if self.parser.match(field_name):
             # self._wrap_field = True
             # brace expression in field name!
-            self.logger.debug('Found braced expression in field name, recursing'
+            self.logger.debug('Found braced expression in field name, recursing.'
                               ' on {!r}', field_name)
             # restore previous _wrap_field state after recursing
             # with temporarily(self, _wrap_field=self._wrap_field):
@@ -791,7 +791,7 @@ class PartialFormatter(Formatter):
                 # for empty field names. We have to undo that to obtain the
                 # original field specifier which may have been empty.
                 result = ('' if self._empty_field_name else field_name, None)
-                self.logger.debug('Formatter.get_field failed with\n    {!r}'
+                self.logger.debug('Formatter.get_field failed with\n    {!r}.'
                                   '\n  Returning: value = {!r}, key = {!r}',
                                   err, *result)
             else:
@@ -808,7 +808,7 @@ class PartialFormatter(Formatter):
         return result
 
     def format_field(self, value, spec):
-        self.logger.debug('value = {!r}, spec = {!r}', value, spec)
+        self.logger.debug('value = {!r}, spec = {!r}.', value, spec)
 
         # convert str necessary to measure field width in _parse_spec
         value, spec, style = self._parse_spec(str(value), spec)
@@ -816,18 +816,18 @@ class PartialFormatter(Formatter):
         # Should we wrap the field in braces again?
         no_wrap = not spec and any(style.values()) and self.parser.match(value)
         if self._wrap_field and not no_wrap:  # and really_wrap:
-            self.logger.debug('Wrapping: value = {!r}, spec = {!r}', value, spec)
+            self.logger.debug('Wrapping: value = {!r}, spec = {!r}.', value, spec)
             value = '{'f'{value}{f":{spec}" if spec else ""}''}'
             # value = ':'.join((value, spec)).join('{}')
             return _apply_style(value, **style)
 
-        self.logger.debug('Not wrapping; {!r}', value)
+        self.logger.debug('Not wrapping; {!r}.', value)
         if spec:
-            self.logger.debug('Passing up for formatting: value = {!r}, spec = {!r}',
+            self.logger.debug('Passing up for formatting: value = {!r}, spec = {!r}.',
                               value, spec)
             value = BuiltinFormatter.format_field(self, value, spec)
 
-        # self.logger.debug('Formatted field:\n{}', ff)
+        # self.logger.debug('Formatted field:\n{}.', ff)
         return _apply_style(value, **style)
 
     def convert_field(self, value, conversion):
@@ -836,7 +836,8 @@ class PartialFormatter(Formatter):
             return f'{value}!{conversion}'
 
         if conversion:
-            self.logger.debug('Passing to Formatter for {} convert: {}', conversion, value)
+            self.logger.debug('Passing to Formatter for {} convert: {}.', 
+                              conversion, value)
         return super().convert_field(value, conversion)
 
     def _should_adjust_width(self, spec, value, spec_match):
@@ -849,7 +850,7 @@ class PartialFormatter(Formatter):
         # will then be adjusted. We therefore leave it unaltered here to avoid
         # adjusting the spec width twice.
 
-        # self.logger.debug('Checking {!s}', value)
+        # self.logger.debug('Checking {!s}.', value)
         # self.logger.debug(f'{self.parser.match(value) = } '
         #              f'{super()._should_adjust_width(spec, value, spec_match) = }')
         return (

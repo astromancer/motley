@@ -244,7 +244,7 @@ class XlsxWriter(LoggingMixin):
         #
         self.worksheet = ws
 
-        self.logger.debug('Begin writing to spreadsheet {!s}::{}',
+        self.logger.debug('Begin writing to spreadsheet {!s}::{}.',
                           (path or ''), sheet)
 
         table = self.table
@@ -333,7 +333,7 @@ class XlsxWriter(LoggingMixin):
 
         if path:
             workbook.save(path)
-            self.logger.success('Spreadsheet saved at {!s}{}',
+            self.logger.success('Spreadsheet saved at {!s}{}.',
                                 path, (f'::{sheet}' if sheet else ''))
 
         return workbook
@@ -431,7 +431,7 @@ class XlsxWriter(LoggingMixin):
     def merge_duplicate_cells(self, data, row_index, trigger=2):
 
         data = np.atleast_2d(data)
-        # logger.debug('data = {}', data)
+        # logger.debug('data = {}.', data)
 
         nrows, _ = data.shape
         r0 = row_index
@@ -451,18 +451,18 @@ class XlsxWriter(LoggingMixin):
                 if idx := (set(idx) - set(merged[r])):
                     to_merge.append(idx)
 
-            # logger.debug('Row {}: to_merge {}', r, to_merge)
+            # logger.debug('Row {}: to_merge {}.', r, to_merge)
             # select(to_)
             for idx in to_merge:
                 j, *_, k = duplicate_if_scalar(sorted(idx), raises=False)
-                # logger.debug('{}', data[r + 1:, j:k + 1])
+                # logger.debug('{}.', data[r + 1:, j:k + 1])
                 extend_down = np.all(data[r + 1:, j:k + 1] == '')
                 s = (nrows - r - 1) * extend_down
 
-                # logger.debug('{}', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
+                # logger.debug('{}.', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
                 if ((k - j + 1 >= trigger) | s > 0):
                     cells = f'{j+65:c}{r1}:{k+65:c}{r1 + s}'
-                    # logger.debug('merge: {}', cells)
+                    # logger.debug('merge: {}.', cells)
                     self.worksheet.merge_cells(cells)
 
                     for t in range(s + 1):

@@ -52,7 +52,7 @@ def resolve(summary, table):
         return -1, 0, (), {}
 
     # logger.debug(f'{pos = } {summary = } {keep = }')
-    # logger.debug('`summary` resolved as {}. Not removing columns: {}',
+    # logger.debug('`summary` resolved as {}. Not removing columns: {}.',
     #              summary, keep)
     return _resolve(summary)  # pos, summary, kee
 
@@ -175,7 +175,7 @@ class SummaryTable(LoggingMixin):
         -------
 
         """
-        # logger.debug('{}')
+        # logger.debug('{}.')
         self.table = table
         self.ncols = ncols
         self.fmt = fmt
