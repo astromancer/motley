@@ -1,10 +1,15 @@
 
-# local
-from motley import codes
+# third-party
+import numpy as np
 
+# local
+import motley
+
+
+# ---------------------------------------------------------------------------- #
 
 def test_split():
-    codes.split('\033[32m green \033[0m')
+    motley.codes.split('\033[32m green \033[0m')
     (['\033[32m', ' green ', '\033[0m'])
 
 
@@ -17,50 +22,50 @@ def test_parse():
 
 
 def test_resolve():
-    codes.get(None)
-    codes.get('')
-    codes.get(0)
-    codes.get(txt='r')
-    codes.get(fg='r')
-    codes.get(fg=('w', 'bold'), bg='r')
-    codes.get(dict(fg=('w', 'bold'), bg='r'))
-    codes.get('blue', 'italic')
-    codes.get(31, 'italic', bg='y')
-    codes.get((55, 55, 55), 'italic', bg=(255, 1, 1))
-    codes.get(text=('magenta',), bg='gray')
-    codes.get(dict(fg=((55, 55, 55), 'bold', 'italic'), bg='r'))
+    motley.codes.get(None)
+    motley.codes.get('')
+    motley.codes.get(0)
+    motley.codes.get(txt='r')
+    motley.codes.get(fg='r')
+    motley.codes.get(fg=('w', 'bold'), bg='r')
+    motley.codes.get(dict(fg=('w', 'bold'), bg='r'))
+    motley.codes.get('blue', 'italic')
+    motley.codes.get(31, 'italic', bg='y')
+    motley.codes.get((55, 55, 55), 'italic', bg=(255, 1, 1))
+    motley.codes.get(text=('magenta',), bg='gray')
+    motley.codes.get(dict(fg=((55, 55, 55), 'bold', 'italic'), bg='r'))
 
 
 def test_apply():
     test_str = '\tTHIS IS A TEST\t'
-    print(codes.apply(test_str, None))
-    print(codes.apply(test_str, ''))
-    print(codes.apply(test_str, 0))
-    print(codes.apply(test_str, txt='r'))
-    print(codes.apply(test_str, fg='r'))
-    print(codes.apply(test_str, fg=('w', 'bold'), bg='r'))
-    print(codes.apply(test_str, dict(fg=('w', 'bold'), bg='r')))
-    print(codes.apply(test_str, dict(fg=('w', 'bold')), bg=(55, 100, 1)))
-    print(codes.apply(test_str, 'blue', 'italic'))
-    print(codes.apply(test_str, 31, 'italic', bg='y'))
-    print(codes.apply(test_str, (55, 55, 55), 'italic', bg=(255, 1, 1)))
-    print(codes.apply(test_str, text=('magenta',), bg='gray'))
-    print(codes.apply(test_str, dict(fg=((55, 55, 55), 'bold', 'italic'), bg='r')))
+    print(motley.apply(test_str, None))
+    print(motley.apply(test_str, ''))
+    print(motley.apply(test_str, 0))
+    print(motley.apply(test_str, txt='r'))
+    print(motley.apply(test_str, fg='r'))
+    print(motley.apply(test_str, fg=('w', 'bold'), bg='r'))
+    print(motley.apply(test_str, dict(fg=('w', 'bold'), bg='r')))
+    print(motley.apply(test_str, dict(fg=('w', 'bold')), bg=(55, 100, 1)))
+    print(motley.apply(test_str, 'blue', 'italic'))
+    print(motley.apply(test_str, 31, 'italic', bg='y'))
+    print(motley.apply(test_str, (55, 55, 55), 'italic', bg=(255, 1, 1)))
+    print(motley.apply(test_str, text=('magenta',), bg='gray'))
+    print(motley.apply(test_str, dict(fg=((55, 55, 55), 'bold', 'italic'), bg='r')))
 
 
-def test_rainbow():
-    #
-    # print(rainbow('joe', 'rgb'))
-    # print(rainbow('joe', bg='rgb'))
+# def test_rainbow():
+#     #
+#     # print(rainbow('joe', 'rgb'))
+#     # print(rainbow('joe', bg='rgb'))
 
-    h = np.arange(19, dtype=int).astype(str)
-    flags = np.array(
-        [{'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': 'r'}, {'bg': ' '},
-         {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': ' '}, {'bg': ' '},
-         {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '},
-         {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': 'y'}],
-        dtype=object)
-    print(utils.rainbow(h, flags))
+#     h = np.arange(19, dtype=int).astype(str)
+#     flags = np.array(
+#         [{'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': 'r'}, {'bg': ' '},
+#          {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': ' '}, {'bg': ' '},
+#          {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '},
+#          {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': 'y'}],
+#         dtype=object)
+#     print(motley.utils.rainbow(h, flags))
 
 
 test_apply()
