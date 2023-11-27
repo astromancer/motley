@@ -2,8 +2,3 @@
 # the documentation) but not necessarily required for _using_ it.
 pytest
 scipy
-decorator
-numpydoc
-docsplice
-stdlib_list
-git+https://github.com/astromancer/recipes
