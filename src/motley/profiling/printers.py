@@ -482,7 +482,8 @@ class ReportStatsTable(ReportStats):
 
         # add timing unit to header
         colhead = list(self.column_headers)
-        tu = {1e-6: 'μs'}[self.unit]
+        tu = {1e-6: 'μs',
+              1e-9: 'ns'}[self.unit]
         colhead[2] = '%s (%s)' % (colhead[2], tu)
 
         # right align numbered columns

@@ -232,7 +232,7 @@ test_extended_format = exp({
         # Nested with alignment spec
         mock.format('{{name:s|g}:{line:d|orange}: <21}', name='xyz', line=666):
             '\x1b[;32mxyz\x1b[0m:\x1b[;38;2;255;165;0m666\x1b[0m              ',
-            
+
         mock.format('{{now:|B,darkgreen}:<{width:}}|', now='now', width=20):
             '\x1b[;1;38;2;0;100;0mnow\x1b[0m                 |',
 
@@ -423,8 +423,8 @@ test_stylize = exp({
 
     mock.stylize(' {0:<{width}|b}={1:<{width}}', width=10):
         ' \x1b[;34m{0:<10}\x1b[0m={1:<10}',
-        
-    mock.stylize("{0:-<{width}}{foo}", '', width=50): #FIXME
+
+    mock.stylize("{0:-<{width}}{foo}", '', width=50):  # FIXME
         '--------------------------------------------------{foo}',
 
     mock.stylize('{{{name}.{function}:|green}:{line:d|orange}: <52}|'):
@@ -445,23 +445,24 @@ test_stylize = exp({
 
 
 class TestFormatSpec:
+
     @pytest.mark.parametrize(
         'spec, expected',
         {' ^+12_.4f|cB/k':
             {'fill': ' ',
-            'align': '^',
-            'sign': '+',
-            'alt': '',
-            'width': '12',
-            'grouping': '_',
-            'precision': '.4',
-            'type': 'f'}
-        }.items())
+             'align': '^',
+             'sign': '+',
+             'alt': '',
+             'width': '12',
+             'grouping': '_',
+             'precision': '.4',
+             'type': 'f'}
+         }.items())
     def test_match(self, spec, expected):
         groups = FormatSpec.regex.match(spec).groupdict()
         print(groups)
 
-    def test_formatspec():
+    def test_formatspec(self):
         # spec = FormatSpec.from_string(' ^12.4f')
 
         espec = ExtendedFormatSpec.from_string(' ^+12_.4f|cB/k')

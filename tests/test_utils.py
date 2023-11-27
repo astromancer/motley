@@ -1,14 +1,10 @@
 
-# third-party
-import codes
-
 # local
-import motley
-from motley.codes import utils
+from motley import codes
 
 
 def test_split():
-    utils.split('\033[32m green \033[0m')
+    codes.split('\033[32m green \033[0m')
     (['\033[32m', ' green ', '\033[0m'])
 
 
@@ -59,11 +55,11 @@ def test_rainbow():
 
     h = np.arange(19, dtype=int).astype(str)
     flags = np.array(
-            [{'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': 'r'}, {'bg': ' '},
-             {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': ' '}, {'bg': ' '},
-             {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '},
-             {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': 'y'}],
-            dtype=object)
+        [{'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': 'r'}, {'bg': ' '},
+         {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': ' '}, {'bg': ' '},
+         {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '}, {'bg': ' '},
+         {'bg': ' '}, {'bg': ' '}, {'bg': 'y'}, {'bg': 'y'}],
+        dtype=object)
     print(utils.rainbow(h, flags))
 
 
