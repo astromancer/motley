@@ -122,7 +122,6 @@ class LineProfiler(lp.LineProfiler):
         from recipes.lists import cosort
 
         from motley.table import Table
-        # from recipes.misc import get_terminal_size
 
         lstats = self.get_stats()
         totals = {}
@@ -138,7 +137,7 @@ class LineProfiler(lp.LineProfiler):
         frac = np.divide(totals, max(totals))
 
         # format totals with space as thousands separator for readability
-        fmtr = lambda s: '{:,}'.format(s).replace(',', ' ')
+        def fmtr(s): return '{:,}'.format(s).replace(',', ' ')
         # totals = list(map(fmtr, totals))
         col_headers = ('Function', u'Time (\u00B5s)')
         table = Table(list(zip(names, totals)),
@@ -169,7 +168,6 @@ class profile:
 
     # singleton profiler.  All functions will be added to this one.
     profiler = LineProfiler()
-    
 
     def __init__(self, follow=(), report=None, **kws):
         # decorator for profiling
@@ -213,5 +211,3 @@ class profile:
 
         # ----------------------------------------------------------------------------------------------------
         return profiled_func
-
-

@@ -16,7 +16,7 @@ from wcwidth import wcswidth
 # local
 from recipes import op, string
 from recipes.dicts import invert
-from recipes.misc import get_terminal_size
+from recipes.shell import terminal
 from recipes.oo.singleton import Singleton
 
 # relative
@@ -40,7 +40,7 @@ def resolve_alignment(align):
 
 @ftl.lru_cache()
 def resolve_width(width):
-    return get_terminal_size()[0] if width is None else int(width)
+    return terminal.get_size()[0] if width is None else int(width)
 
 
 # @ftl.lru_cache()
@@ -371,7 +371,7 @@ def banner(text, width=None, align='^', fg=None, bg=None, **kws):
     from .textbox import textbox
 
     if width is None:
-        width = get_terminal_size()[0]
+        width = terminal.get_size()[0]
     width = int(width)
 
     # fill whitespace (so background props reflect for entire block of banner)
