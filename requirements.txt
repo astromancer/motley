@@ -1,1 +1,2 @@
 -e file:///home/hannes/work/recipes#egg=recipes
+-e file:///home/hannes/work/scrawl#egg=scrawl

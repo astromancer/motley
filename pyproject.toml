@@ -23,10 +23,12 @@ dependencies = [
     "decorator",
     "more_itertools",
 
-    "line_profiler",
-    "matplotlib",
+    "line_profiler",    # FIXME: optional
+    "matplotlib",       # FIXME: drop
 
-    "recipes"
+    "recipes",
+    "scrawl"            # FIXME: drop
+
 ]
 
 [project.urls]
