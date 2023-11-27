@@ -1,8 +1,4 @@
 
-# third-party
-import codes
-
-# local
 import motley
 from motley.codes import utils
 
