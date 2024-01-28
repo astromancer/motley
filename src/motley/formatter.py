@@ -56,16 +56,14 @@ from string import Formatter as BuiltinFormatter
 from loguru import logger
 
 # local
-from recipes.regex import unflag
+from recipes import regex
 from recipes.iter import cofilter
-from recipes.string import indent
 from recipes.oo.slots import SlotRepr
 from recipes.oo.temp import temporarily
 from recipes.functionals import not_none
 from recipes.logging import LoggingMixin
 from recipes.oo.property import ForwardProperty
-from recipes.string.brackets import (BracketParser, UnpairedBracketError,
-                                     csplit, level)
+from recipes.string import indent, delimited as delim
 
 # relative
 from . import codes
@@ -195,7 +193,7 @@ class ExtendedFormatSpec(FormatSpec):
     pattern = dedent(rf'''
         (?x)
         (?P<spec>
-            {indent(unflag(FormatSpec.pattern).strip(), 4)}
+            {indent(regex.unflag(FormatSpec.pattern).strip(), 4)}
         )
         # Colour / style format directives
         (?P<style>
@@ -283,7 +281,7 @@ class Formattable(SlotHelper):
 
 
 # def get_fmt_regex(fg_mark=DEFAULT_FG_MARK, bg_mark=DEFAULT_BG_MARK):
-#     spec_rgx = unflag(get_spec_regex(fg_mark, bg_mark).pattern).lstrip('\n')
+#     spec_rgx = regex.unflag(get_spec_regex(fg_mark, bg_mark).pattern).lstrip('\n')
 #     return re.compile(rf'''(?x) # RGX_FORMAT_DIRECTIVE =
 #         (?P<text>)
 #         \{{
@@ -406,8 +404,8 @@ class Formatter(BuiltinFormatter, LoggingMixin):
     """
     Implements a formatting syntax for string colouring and styling.
     """
-    parser = BracketParser('{}')
-    _rgb_parser = BracketParser('()')
+    parser = delim.Parser('{}')
+    _rgb_parser = delim.Parser('()')
     # supporting [] is more complicated because of ansi codes containing these:
     #    eg: '\x1b[;1;34m'
 
@@ -434,7 +432,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         i = 0
         pos = 0
         match = None
-        braces = self.parser.findall(string, condition=(level == 0))
+        braces = self.parser.findall(string, condition=(delim.level == 0))
         while i < len(braces):
             match = braces[i]
             # self.logger.debug('MATCH {}, pos = {}\n{!r}.', i, pos, match)
@@ -457,7 +455,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                 else:
                     # open single. throw
                     j = match.indices.index(None)
-                    raise UnpairedBracketError(string,
+                    raise delim.UnpairedDelimiterError(string,
                                                ('opening', 'closing')[j],
                                                {'}{'[j]: [match.indices[not bool(j)]]})
 
@@ -575,7 +573,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
 
             if ',' in val:
                 rgb = self._rgb_parser.match(val, must_close=True)
-                style[fg_or_bg] = csplit(style[fg_or_bg],
+                style[fg_or_bg] = delim.csplit(style[fg_or_bg],
                                          getattr(rgb, 'brackets', None))
 
         #

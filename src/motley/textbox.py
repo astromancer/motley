@@ -8,9 +8,10 @@ from collections.abc import Collection
 import more_itertools as mit
 
 # local
-from recipes import api, iter as itr
+from recipes import api
 from recipes.functionals import echo0
 from recipes.dicts import AttrReadItem
+from recipes.oo.utils import subclasses
 from recipes.utils import duplicate_if_scalar
 from recipes.string import backspaced, justify
 
@@ -442,7 +443,7 @@ class TextBox:
 
     @classmethod
     def for_style(cls, style):
-        return next((kls for kls in itr.subclasses(cls)
+        return next((kls for kls in subclasses(cls)
                      if style in kls._supported_linestyles),
                     TextBox)
 

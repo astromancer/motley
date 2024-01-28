@@ -10,8 +10,8 @@ import numpy as np
 
 # local
 from recipes import api
+from recipes.string import delim
 from recipes.logging import LoggingMixin
-from recipes.string.brackets import BracketParser, braces
 
 # relative
 from ..formatter import format
@@ -31,7 +31,7 @@ KNOWN_SUMMARY_STRINGS = {'header', 'footer', 'drop'}
 #'ncols', 'n_cols',
 # 'borders'
 
-parse_fmt_opt = BracketParser('¿?')
+parse_fmt_opt = delim.Parser('¿?')
 
 null = object()
 
@@ -116,9 +116,9 @@ def _resolve(summary):
 
 def format_special(fmt, *args, **kws):
     for opt in parse_fmt_opt.iterate(fmt):
-        key = braces.match(opt.enclosed).enclosed
+        key = delim.braces.match(opt.enclosed).enclosed
         if kws.pop(key, '') != '':
-            fmt = fmt.replace(opt.full, '')
+            fmt = fmt.replace(str(opt), '')
 
     return format(fmt, *args, **kws)
 

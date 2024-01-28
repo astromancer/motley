@@ -9,7 +9,7 @@ from loguru import logger
 # local
 from motley.formatter import (ExtendedFormatSpec, FormatSpec, Formattable,
                               Formatter, formatter)
-from recipes.string.brackets import UnpairedBracketError
+from recipes.string.delimited import UnpairedDelimiterError
 from recipes.testing import Expected, Throws, expected, mock
 
 
@@ -339,7 +339,7 @@ test_extended_format = exp({
        },
 
     # unmatched braces
-    **{mock.format(b * i, ''): Throws(UnpairedBracketError)
+    **{mock.format(b * i, ''): Throws(UnpairedDelimiterError)
        for b in '{}' for i in range(1, 7, 2)}
 })
 

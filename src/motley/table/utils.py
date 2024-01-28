@@ -20,30 +20,35 @@ from ..utils import get_width, resolve_alignment
 from .column import resolve_columns
 
 
-__all__ = ('str2tup',
-           'null',
-           'apportion',
-           'justify_widths',
-           'align_at',
-           'measure_column_widths',
-           'resolve_width',
-           'ensure_dict',
-           'resolve_input',
-           'resolve_converters',
-           'highlight',
-           'truncate',
-           'is_astropy_table',
-           'convert_astropy_table',
-           '_underline')
+__all__ = (
+    'str2tup',
+    'null',
+    'apportion',
+    'justify_widths',
+    'align_at',
+    'measure_column_widths',
+    'resolve_width',
+    'ensure_dict',
+    'resolve_input',
+    'resolve_converters',
+    'highlight',
+    'truncate',
+    'is_astropy_table',
+    'convert_astropy_table',
+    '_underline'
+)
 
 # ---------------------------------------------------------------------------- #
+# Module Constants
+
 DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
 
 COL_ALIGN_FUNCS = {'<': np.char.ljust,
                    '>': np.char.rjust}
 
-# ---------------------------------------------------------------------------- #
 
+# Utils
+# ---------------------------------------------------------------------------- #
 
 def str2tup(keys):
     if isinstance(keys, str):
@@ -52,7 +57,6 @@ def str2tup(keys):
 
 
 # ---------------------------------------------------------------------------- #
-
 
 def apportion(width, n):
     # divide space as equally as possible between `n` columns

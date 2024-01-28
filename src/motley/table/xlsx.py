@@ -22,7 +22,7 @@ from recipes.dicts import AttrDict
 from recipes.logging import LoggingMixin
 from recipes.iter import cofilter, duplicates
 from recipes.lists import unique, where_duplicate
-from recipes.string.brackets import BracketParser
+from recipes.string.delimited import square_brackets
 from recipes.utils import duplicate_if_scalar, ensure
 
 
@@ -30,7 +30,6 @@ from recipes.utils import duplicate_if_scalar, ensure
 ALIGNMENT_MAP = {'>': 'right',
                  '<': 'left',
                  '^': 'center'}
-square_brackets = BracketParser('[]')
 _xl_fmt_nondisplay = {'"': '', '@': ''}
 
 
