@@ -13,7 +13,7 @@ import itertools as itt
 from loguru import logger
 
 # relative
-from . import codes
+from . import codes, colors
 from .utils import *
 from .string import Str
 from .formatter import format, format_partial, stylize
@@ -30,7 +30,7 @@ apply = hue = codes.apply
 
 class ConvenienceFunction:
     """
-    API function for applying ANSI codes to strings
+    API function for applying ANSI codes to strings.
     """
 
     # pylint: disable=trailing-whitespace
@@ -50,7 +50,7 @@ class ConvenienceFunction:
         # eg: `red_bg`
 
         # get function name / docstring
-        doc0 = '%s the string `s` '
+        doc0 = '%s the text `s` '
         action = 'Make'
         if bg:
             if fg:
@@ -93,10 +93,6 @@ def _eq(pair):
 def _product(*items):
     yield from filter(_eq, itt.product(*items))
 
-# def _sanitize_names(names):
-#     for _ in names:
-#         yield _.replace(' ', '_')
-
 
 def _combos():
     # can also dynamically generate combination fg, bg colour functions
@@ -112,7 +108,9 @@ def _combos():
         # `r_on_g` etc
         _product(_shorts, _shorts),
         # `italic_blue`, `bold_red` ...
-        itt.zip_longest(_product(('bold', 'italic'), (*_fgc, 'italic')), ())
+        itt.zip_longest(_product(('bold', 'italic'), (*_fgc, 'italic')), ()),
+        # CSS foreground colours
+        _product(colors.CSS_TO_RGB, [None]),
     )
 
 

@@ -149,4 +149,3 @@ CSS_TO_RGB = {
  'yellow'              : (255, 255, 0),
  'yellowgreen'         : (154, 205, 50)
 }
-
