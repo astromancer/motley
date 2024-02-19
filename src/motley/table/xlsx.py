@@ -32,6 +32,20 @@ ALIGNMENT_MAP = {'>': 'right',
                  '^': 'center'}
 _xl_fmt_nondisplay = {'"': '', '@': ''}
 
+# ---------------------------------------------------------------------------- #
+
+
+def cell_index(i, j=''):
+    n, i = divmod(i, 26)
+    cell = f'{i + 65:c}{str(j)}'
+    if n:
+        return f'{n + 64:c}{cell}'
+    return cell
+
+
+def cell_range(j, r, k, s):
+    return ':'.join(map(cell_index, (j, k), (r, s)))
+
 
 # class hyperlink:
 #     template = '=HYPERLINK("{}", "{}")'
@@ -248,7 +262,6 @@ class XlsxWriter(LoggingMixin):
 
         table = self.table
         nrows, ncols = table.data.shape
-        j = ncols + 65  # column index: ord(65) == 'A'
 
         # -------------------------------------------------------------------- #
         # headers
@@ -269,10 +282,10 @@ class XlsxWriter(LoggingMixin):
         # HACK
         if isinstance(table, AttrDict):
             for i in table.totals:
-                totals[i] = f'=SUM({(c:=i+65):c}{r0}:{c:c}{r})'
+                totals[i] = f'=SUM({cell_range(i, r0, i, r)})'
         elif table.totals:
             for t, i in zip(*cofilter(None, table.totals, range(ncols))):
-                totals[i] = f'=SUM({(c:=i+65):c}{r0}:{c:c}{r})'
+                totals[i] = f'=SUM({cell_range(i, r0, i, r)})'
 
         if any(totals):
             #           data    row style
@@ -286,21 +299,20 @@ class XlsxWriter(LoggingMixin):
 
         for idx, fmt in formats.items():
             if isinstance(fmt, str):
-                col = chr(idx + 65)
                 # logger.debug(col, fmt)
-                set_block_style(ws[f'{col}{r0}:{col}{r}'],
+                set_block_style(ws[cell_range(idx, r0, idx, r)],
                                 number_format=fmt)
 
         # style for "data" cells
-        set_block_style(ws[f'A{r0}:{j-1:c}{r}'], **self.style['data'])
+
+        set_block_style(ws[cell_range(1, r0, ncols - 1, r)], **self.style['data'])
 
         # set col widths
         # double_rows = defaultdict(bool)
         # z = bool(table.title) + 1
         for idx, width in enumerate(self.col_widths):
             # logger.debug(idx, table.col_headers[idx], width)
-
-            ws.column_dimensions[chr(idx + 65)].width = width
+            ws.column_dimensions[cell_index(idx)].width = width
             # double_rows[z] |= ('\n' in table.col_headers[idx])
             # double_rows[z + 1] |= ('\n' in table.col_groups[idx])
 
@@ -311,8 +323,7 @@ class XlsxWriter(LoggingMixin):
         # borders
         if table.col_groups:
             for val, (*_, index) in unique(table.col_groups[0]).items():
-                col = chr(index + 65)
-                set_block_style(ws[f'{col}1:{col}{r}'],
+                set_block_style(ws[cell_range(index, 1, index, r)],
                                 border=Border(right=self.rule2))
 
             # if val in self.merge_unduplicate:
@@ -327,7 +338,8 @@ class XlsxWriter(LoggingMixin):
                     self.merge_duplicate_rows(table.data, r0, indices, nrows)
 
         if self.bottomrule and not table.totals:
-            set_block_style(ws[f'A{r+1}:{ncols + 64:c}{r+1}'],
+
+            set_block_style(ws[cell_range(1, r + 1, ncols - 1, r + 1)],
                             border=Border(top=self.rule2))
 
         if path:
@@ -344,7 +356,7 @@ class XlsxWriter(LoggingMixin):
         sheet = self.worksheet
         sheet.append(list(data))
         r = sheet._current_row
-        cells = sheet[f'A{r}:{len(data) + 64:c}{r}'][0]
+        cells = sheet[cell_range(1, r, len(data) - 1, r)][0]
 
         # if self.alignments:
         for i, cell in enumerate(cells):
@@ -402,7 +414,8 @@ class XlsxWriter(LoggingMixin):
         # header borders
         q = self.worksheet._current_row
         set_block_style(
-            self.worksheet[f'A{q}:{64 + ncols:c}{q}'],
+
+            self.worksheet[cell_range(1, q, ncols - 1, q)],
             **self.style['units' if table.units or cgroups else 'headers'],
             border=Border(bottom=self.rule2)
         )
@@ -424,7 +437,7 @@ class XlsxWriter(LoggingMixin):
             self.merge_duplicate_cells(data, r, merge_duplicate_cells)
 
         # set style
-        set_block_style(sheet[f'A{r}:{len(data) + 64:c}{r}'],
+        set_block_style(sheet[cell_range(1, r, len(data) - 1, r)],
                         **{**self.style['headers'], **style})
 
     def merge_duplicate_cells(self, data, row_index, trigger=2):
@@ -453,14 +466,14 @@ class XlsxWriter(LoggingMixin):
             # logger.debug('Row {}: to_merge {}.', r, to_merge)
             # select(to_)
             for idx in to_merge:
-                j, *_, k = duplicate_if_scalar(sorted(idx), raises=False)
+                j, *_, k = duplicate_if_scalar(sorted(idx), emit=False)
                 # logger.debug('{}.', data[r + 1:, j:k + 1])
                 extend_down = np.all(data[r + 1:, j:k + 1] == '')
                 s = (nrows - r - 1) * extend_down
 
                 # logger.debug('{}.', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
                 if ((k - j + 1 >= trigger) | s > 0):
-                    cells = f'{j+65:c}{r1}:{k+65:c}{r1 + s}'
+                    cells = cell_range(j, r1, k, r1 + s)
                     # logger.debug('merge: {}.', cells)
                     self.worksheet.merge_cells(cells)
 
@@ -496,6 +509,7 @@ class XlsxWriter(LoggingMixin):
 
                 # logger.debug(i, j, k, r0)
                 # logger.debug(f'merging {i:c}{j + r0}:{i:c}{k + r0}')
-                cell0, cell1 = (f'{(c:=i+65):c}{j + r0}', f'{c:c}{k + r0}')
+                cell0 = cell_index(i, j + r0)
+                cell1 = cell_index(i, k + r0)
                 set_style(self.worksheet[cell0], **col_style)
                 self.worksheet.merge_cells(f'{cell0}:{cell1}')
