@@ -197,14 +197,14 @@ class profile:
 
         # ----------------------------------------------------------------------------------------------------
         @ftl.wraps(func)
-        def profiled_func(*args, **kwargs):
-            # print(func, args, kwargs)
+        def profiled_func(*args, **kws):
+            # print(func, args, kws)
             try:
                 self.profiler.add_function(func)
                 for f in self.follow:
                     self.profiler.add_function(f)
                 self.profiler.enable_by_count()
-                return func(*args, **kwargs)
+                return func(*args, **kws)
             finally:
                 # report line timings for each profiled function
                 self.printer(self.profiler.get_stats())

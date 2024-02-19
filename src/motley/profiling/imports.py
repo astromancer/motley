@@ -113,8 +113,8 @@ def _construct_importer(filename, up_to_line, name='importer'):
 
 class DynamicFunctionProfiler(LineProfiler):
 
-    def __init__(self, *args, **kwargs):
-        LineProfiler.__init__(self, *args, **kwargs)
+    def __init__(self, *args, **kws):
+        LineProfiler.__init__(self, *args, **kws)
         self._source_lib = {}
 
     def print_stats(self, **kws):
