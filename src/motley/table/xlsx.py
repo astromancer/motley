@@ -20,10 +20,10 @@ from recipes import op
 from recipes.string import sub
 from recipes.dicts import AttrDict
 from recipes.logging import LoggingMixin
-from recipes.iter import cofilter, duplicates
-from recipes.lists import unique, where_duplicate
 from recipes.string.delimited import square_brackets
 from recipes.utils import duplicate_if_scalar, ensure
+from recipes.lists import split, unique, where_duplicate
+from recipes.iter import cofilter, duplicates, first_false_index
 
 
 # ---------------------------------------------------------------------------- #
@@ -45,6 +45,26 @@ def cell_index(i, j=''):
 
 def cell_range(j, r, k, s):
     return ':'.join(map(cell_index, (j, k), (r, s)))
+
+
+# ---------------------------------------------------------------------------- #
+def _hyperlink(path, target):
+    if path.exists():
+        return (f'=HYPERLINK("{path}", "{target}")')
+    return '--'
+
+
+def hyperlink_name(path):
+    return _hyperlink(path, path.name)
+
+
+def hyperlink_ext(path):
+    return hyperlink_exts(path, 1)
+
+
+def hyperlink_exts(path, tail=0, strip=''):
+    ext = ''.join(path.suffixes[-tail:]).lstrip(strip) if path.exists() else ''
+    return _hyperlink(path, ext)
 
 
 # class hyperlink:
@@ -76,6 +96,7 @@ def cell_range(j, r, k, s):
 #         )
 #         raise
 
+# ---------------------------------------------------------------------------- #
 
 def set_style(cell, **kws):
     # stack borders
@@ -98,7 +119,7 @@ def set_block_style(cells, **kws):
         # for key, val in kws.items():
         #     setattr(cell, key, val)
 
-
+# ---------------------------------------------------------------------------- #
 # def get_col_widths(table, requested=(), fallback=4, minimum=3):
 
 #     # headers = table.col_headers
@@ -305,7 +326,7 @@ class XlsxWriter(LoggingMixin):
 
         # style for "data" cells
 
-        set_block_style(ws[cell_range(1, r0, ncols - 1, r)], **self.style['data'])
+        set_block_style(ws[cell_range(0, r0, ncols - 1, r)], **self.style['data'])
 
         # set col widths
         # double_rows = defaultdict(bool)
@@ -338,8 +359,7 @@ class XlsxWriter(LoggingMixin):
                     self.merge_duplicate_rows(table.data, r0, indices, nrows)
 
         if self.bottomrule and not table.totals:
-
-            set_block_style(ws[cell_range(1, r + 1, ncols - 1, r + 1)],
+            set_block_style(ws[cell_range(0, r + 1, ncols - 1, r + 1)],
                             border=Border(top=self.rule2))
 
         if path:
@@ -356,7 +376,7 @@ class XlsxWriter(LoggingMixin):
         sheet = self.worksheet
         sheet.append(list(data))
         r = sheet._current_row
-        cells = sheet[cell_range(1, r, len(data) - 1, r)][0]
+        cells = sheet[cell_range(0, r, len(data) - 1, r)][0]
 
         # if self.alignments:
         for i, cell in enumerate(cells):
@@ -382,7 +402,8 @@ class XlsxWriter(LoggingMixin):
         ncols = table.data.shape[1]
 
         # title
-        self.make_header_row([table.title] * ncols, **self.style['title'])
+        merge = bool(self.merge_duplicate_cells)
+        self.make_header_row([table.title] * ncols, merge, **self.style['title'])
         r = self.worksheet._current_row
 
         # headers
@@ -415,8 +436,8 @@ class XlsxWriter(LoggingMixin):
         q = self.worksheet._current_row
         set_block_style(
 
-            self.worksheet[cell_range(1, q, ncols - 1, q)],
-            **self.style['units' if table.units or cgroups else 'headers'],
+            self.worksheet[cell_range(0, q, ncols - 1, q)],
+            **self.style['units' if (table.units or cgroups) else 'headers'],
             border=Border(bottom=self.rule2)
         )
 
@@ -437,14 +458,14 @@ class XlsxWriter(LoggingMixin):
             self.merge_duplicate_cells(data, r, merge_duplicate_cells)
 
         # set style
-        set_block_style(sheet[cell_range(1, r, len(data) - 1, r)],
+        set_block_style(sheet[cell_range(0, r, len(data) - 1, r)],
                         **{**self.style['headers'], **style})
 
     def merge_duplicate_cells(self, data, row_index, trigger=2):
 
         data = np.atleast_2d(data)
-        # logger.debug('data = {}.', data)
 
+        # logger.debug('data = {}.', data)
         nrows, _ = data.shape
         r0 = row_index
         merged = defaultdict(set)
@@ -460,25 +481,31 @@ class XlsxWriter(LoggingMixin):
 
             to_merge = []
             for idx in (*duplicate.values(), *unique):
-                if idx := (set(idx) - set(merged[r])):
-                    to_merge.append(idx)
+                if idx := sorted(set(idx) - set(merged[r])):
+                    # check skipped cells
+                    idx = split(idx, np.where(np.diff(idx) > 1)[0] + 1)
+                    to_merge.extend(idx)
 
-            # logger.debug('Row {}: to_merge {}.', r, to_merge)
+            # break
+            self.logger.debug('Row {}: to_merge {}.', r, to_merge)
             # select(to_)
+
             for idx in to_merge:
-                j, *_, k = duplicate_if_scalar(sorted(idx), emit=False)
-                # logger.debug('{}.', data[r + 1:, j:k + 1])
-                extend_down = np.all(data[r + 1:, j:k + 1] == '')
-                s = (nrows - r - 1) * extend_down
+                # allow single cells since we may merge rows down
+                j, *_, k = duplicate_if_scalar(idx, emit=False)
+
+                # self.logger.info('{}.', data[r + 1:, j:k + 1])
+                empty = np.all(data[r + 1:, j:k + 1] == '', 1)
+                s = first_false_index(empty) or 0
 
                 # logger.debug('{}.', ( ((k - j >= trigger) | s > 0), j, k, trigger, s))
                 if ((k - j + 1 >= trigger) | s > 0):
                     cells = cell_range(j, r1, k, r1 + s)
-                    # logger.debug('merge: {}.', cells)
+                    # self.logger.info('merge: {}.', cells)
                     self.worksheet.merge_cells(cells)
 
                     for t in range(s + 1):
-                        merged[r + t] |= idx
+                        merged[r + t] |= set(idx)
 
         # logger.debug(row, self.should_double_height(row, merged))
         # if self.should_double_height(data, merged):
