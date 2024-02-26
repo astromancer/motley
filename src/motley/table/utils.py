@@ -10,7 +10,7 @@ import numpy as np
 from loguru import logger
 
 # local
-from recipes.utils import is_null
+from recipes.containers import is_null
 from recipes import duplicate_if_scalar, pprint as ppr
 from recipes.functionals import always, echo0, raises as bork
 
@@ -355,7 +355,7 @@ def truncate(item, width, dots=DOTS):
     # TODO: if DOTS more than 1 chr long
     cw = 0  # cumulative width
     s = ''
-    for parts in codes.parse(str(item), named=True):
+    for parts in codes.parse(str(item)):
         *pre, text, end = parts
         cw += len(text)
         if cw > width:

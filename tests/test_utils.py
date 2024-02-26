@@ -1,8 +1,4 @@
 
-# third-party
-import numpy as np
-
-# local
 import motley
 
 

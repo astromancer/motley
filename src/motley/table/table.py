@@ -21,21 +21,20 @@ import more_itertools as mit
 # local
 from recipes.logging import LoggingMixin
 from recipes import api, dicts, flow, op, pprint as ppr
-from recipes.lists import cosort, where, where_duplicate
 from recipes.functionals import always, echo0, raises as bork
-from recipes.utils import EnsureWrapped, is_null, is_scalar, not_null
+from recipes.containers import ensure, is_null, is_scalar, not_null
+from recipes.containers.lists import cosort, where, where_duplicate
 
 # relative
 from .. import codes
 from ..utils import get_width, resolve_alignment
 from ..formatter import Formattable, format as mformat
 from . import summary as sm
-from .utils import *
 from .xlsx import XlsxWriter
 from .column import resolve_columns
-
-
-# from .utils import _underline
+from .utils import (_underline, apportion, convert_astropy_table,
+                    is_astropy_table, justify_widths, measure_column_widths,
+                    null, resolve_converters, resolve_input, truncate)
 
 
 # from pydantic.dataclasses import dataclass # for validation!
@@ -61,9 +60,8 @@ CONTINUED = ' (continued)'
 # defines vectorized length
 lengths = np.vectorize(len, [int])
 
-ensure_list = EnsureWrapped(list)
-ensure_tuple = EnsureWrapped(tuple)
-ensure_set = EnsureWrapped(typing.Set[str])
+# 
+ensure_set = ensure.Ensure(typing.Set[str])
 
 # ---------------------------------------------------------------------------- #
 
@@ -179,7 +177,7 @@ def _split_columns(key, column, split_nested_types):
         return
 
     # Ensure each nested object is iterable
-    preprocess = EnsureWrapped(list, is_scalar=tuple({str} - split_nested_types))
+    preprocess = ensure.EnsureWrapped(list, is_scalar=tuple({str} - split_nested_types))
     for column in itt.zip_longest(*map(preprocess, column), fillvalue=''):
         yield (*key, _AutoKey()), column
 
@@ -211,7 +209,7 @@ def _get_columns(data, ignore_keys, convert_key, split_nested_types, group,
 
         if is_scalar(obj):
             # Reach data level. Get / create column
-            columns[ensure_tuple(convert_key(key))].append(obj)
+            columns[ensure.tuple(convert_key(key))].append(obj)
             continue
 
         # Dict indicates group of columns
@@ -1140,7 +1138,7 @@ class Table(LoggingMixin):
 
     def _set_headers(self, headers, which):
         w = which[:3]
-        if not_null(headers) and (headers := ensure_list(headers, str)):
+        if not_null(headers) and (headers := ensure.list(headers, str)):
             if (n := len(headers)) != (m := getattr(self, f'n{w}s')):
                 if n != m + 1:
                     raise ValueError(f'Incorrect number of {which} headers {n} '
@@ -1210,6 +1208,7 @@ class Table(LoggingMixin):
 
         assert (nrows := self.nrows) == other.nrows
 
+        tables = (self, other)
         stack_attrs = ('col_groups', 'col_headers', 'units', 'align', 'data')
         stacked = {attr: _hstack(op.AttrVector(attr)(tables))
                    for attr in stack_attrs}
@@ -1238,7 +1237,7 @@ class Table(LoggingMixin):
         # FIXME: too wide col_groups should truncate
         excess = n - n_cols
         return list(itt.zip_longest(
-            *(ensure_list(g, str)
+            *(ensure.list(g, str)
               for g in itt.chain(itt.repeat('', self.n_head_col - excess), col_groups)),
             fillvalue=''
         ))
@@ -1927,7 +1926,7 @@ class Table(LoggingMixin):
         width -= sum(map(len, borders))
 
         if not isinstance(style, dict):
-            style = ensure_list(style)
+            style = ensure.list(style)
 
         lines = text.split(os.linesep)
 

@@ -15,9 +15,9 @@ from wcwidth import wcswidth
 
 # local
 from recipes import op, string
-from recipes.dicts import invert
 from recipes.shell import terminal
 from recipes.oo.singleton import Singleton
+from recipes.containers.dicts import invert
 
 # relative
 from . import codes, formatter

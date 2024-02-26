@@ -10,10 +10,10 @@ import more_itertools as mit
 # local
 from recipes import api
 from recipes.functionals import echo0
-from recipes.dicts import AttrReadItem
 from recipes.oo.utils import subclasses
-from recipes.utils import duplicate_if_scalar
 from recipes.string import backspaced, justify
+from recipes.containers.dicts import AttrReadItem
+from recipes.containers import duplicate_if_scalar
 
 # relative
 from . import apply, format, underline

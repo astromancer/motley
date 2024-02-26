@@ -9,10 +9,10 @@ import contextlib as ctx
 import numpy as np
 
 # local
-from recipes.lists import where
 from recipes import pprint as ppr
 from recipes.functionals import echo0
 from recipes.logging import LoggingMixin
+from recipes.containers.lists import where
 
 # relative
 from ..utils import resolve_alignment

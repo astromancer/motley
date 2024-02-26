@@ -13,13 +13,13 @@ import numpy as np
 import more_itertools as mit
 
 # local
-from recipes.dicts import ManyToOneMap
+from recipes.containers.dicts import ManyToOneMap
 
 # relative
 from ..colors import CSS_TO_RGB
-from ._codes import *
 from .utils import parse
 from .exceptions import InvalidStyle
+from ._codes import BG_CODES, FG_CODES, color_alias_map, style_alias_map
 
 
 # ---------------------------------------------------------------------------- #

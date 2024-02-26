@@ -23,7 +23,7 @@ def _make_named_codes(fg_or_bg):
 
 def _make_module(fg_or_bg):
     from pathlib import Path
-    from recipes.dicts import pformat
+    from recipes.containers.dicts import pformat
 
     (Path(__file__).parent / f'./{fg_or_bg}.py').write_text(
         pformat(_make_named_codes(fg_or_bg),

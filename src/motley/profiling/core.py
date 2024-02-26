@@ -119,7 +119,7 @@ class LineProfiler(lp.LineProfiler):
         from shutil import get_terminal_size
 
         import numpy as np
-        from recipes.lists import cosort
+        from recipes.containers.lists import cosort
 
         from motley.table import Table
 

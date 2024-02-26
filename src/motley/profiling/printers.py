@@ -18,7 +18,7 @@ import more_itertools as mit
 
 # local
 from recipes import pprint
-from recipes.lists import where
+from recipes.containers.lists import where
 from recipes.introspect import get_defining_class
 
 # relative

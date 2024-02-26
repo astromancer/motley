@@ -18,12 +18,13 @@ from openpyxl.styles import Alignment, Border, Font, Side
 # local
 from recipes import op
 from recipes.string import sub
-from recipes.dicts import AttrDict
 from recipes.logging import LoggingMixin
+from recipes.containers.ensure import ensure
+from recipes.containers.dicts import AttrDict
+from recipes.containers import duplicate_if_scalar
 from recipes.string.delimited import square_brackets
-from recipes.utils import duplicate_if_scalar, ensure
-from recipes.lists import split, unique, where_duplicate
 from recipes.iter import cofilter, duplicates, first_false_index
+from recipes.containers.lists import split, unique, where_duplicate
 
 
 # ---------------------------------------------------------------------------- #
