@@ -124,11 +124,13 @@ def _(obj, fg_or_bg='fg'):
         yield hex_to_rgb(obj)
         return
 
-    # number strings eg: '4' are interpreted as ansi codes
-    if obj.isdigit():
+    # number strings eg: '4' or code sequences eg: '38;2;12;33;0'
+    # are interpreted as ansi codes and passed through
+
+    if all(map(str.isdigit, obj.split(';'))):
         yield obj
-        
-    
+        return
+
     # try resolve as a named color / effect
     if value := CODES[fg_or_bg].get(obj, None):
         yield value

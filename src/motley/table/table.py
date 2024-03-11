@@ -125,6 +125,10 @@ class Title(Formattable):
 
 # ---------------------------------------------------------------------------- #
 
+def is_underlined(style):
+    return '4' in codes.resolve(style)
+
+
 def _hstack(items, fill=''):
     ok = [not_null(item) for item in items]
     if any(ok):
@@ -1938,12 +1942,12 @@ class Table(LoggingMixin):
             style = ensure.list(style)
 
         lines = text.split(os.linesep)
-
-        if ('underline' in style):
-            # only underline last line for multi-line element
-            style.remove('underline')
-            styles = itt.chain(itt.repeat(style, len(lines) - 1),
-                               [(*style, 'underline')])
+        
+        # only underline last line for multi-line element
+        if '4' in (ansi_codes := list(codes.resolve(style))):
+            ansi_codes.remove('4')
+            styles = itt.chain(itt.repeat(ansi_codes, len(lines) - 1),
+                              [ansi_codes + ['4']])
         else:
             styles = itt.repeat(style, len(lines))
 
