@@ -1681,11 +1681,17 @@ class Table(LoggingMixin):
         # location of current split
         first = True
         splix = self.n_head_col
+
+        ctcw = np.cumsum(widths)
+        if (w := ctcw[-1] + rhw) > max_width:
+            nsplit = (w // max_width) + 1
+            z = w // nsplit
+
         while splix != self._idx_shown[-1]:
             # cumulative total column width
-            ctcw = np.cumsum(widths[splix:])
+            # ctcw = np.cumsum(widths[splix:])
             # indices of columns beyond max allowed width
-            ix, = np.where(ctcw + rhw > max_width)
+            ix, = np.where(ctcw[splix:] + rhw > z)
             # idx_shown = self._idx_shown[splix:ix[0]]
 
             if len(ix):  # need to split
@@ -1704,8 +1710,10 @@ class Table(LoggingMixin):
                 '\n'.join(map(str, self._build(idx_show, not first and bool(splix))))
             )
 
+            break
             if endix is None:
                 break
+
             splix = endix
             first = False
 
@@ -1792,7 +1800,9 @@ class Table(LoggingMixin):
 
         # last bit
         if group_width:
-            line += f'{lbl: {self.col_groups_align}{group_width - 1}}{self.RIGHT_BORDER}'
+            line += mformat('{: {}{}}{}',
+                            lbl, self.col_groups_align, group_width - 1,
+                            self.RIGHT_BORDER)
 
         return line
 
