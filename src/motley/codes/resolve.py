@@ -13,13 +13,13 @@ import numpy as np
 import more_itertools as mit
 
 # local
-from recipes.containers.dicts import ManyToOneMap
+from recipes.containers.dicts import TranslatorMap
 
 # relative
 from ..colors import CSS_TO_RGB
 from .utils import parse
 from .exceptions import InvalidStyle
-from ._codes import BG_CODES, FG_CODES, color_alias_map, style_alias_map
+from ._codes import BG_CODES, FG_CODES, COLOR_ALIASES, STYLE_ALIASES
 
 
 # ---------------------------------------------------------------------------- #
@@ -33,7 +33,7 @@ RGX_RGB = re.compile(r'''(?x)
     (?:(\[)|(\())
     (?P<r>\d{1,3})\s*,\s*
     (?P<g>\d{1,3})\s*,\s*
-    (?P<b>\d{1,3})
+    (?P<b>\d{1,3})\s*
     ((?(1)\])(?(2)\))$)
 ''')
 
@@ -41,12 +41,12 @@ RGX_RGB = re.compile(r'''(?x)
 # ---------------------------------------------------------------------------- #
 
 
-class KeywordResolver(ManyToOneMap):
+class KeywordResolver(TranslatorMap):
     """
     Resolve all the various ways in which colours or effects can be specified.
     """
-    template = ('{key!r} is not a valid description for a text (fg) or '
-                'background (bg) effect.')
+    template = ("{key!r} is not a valid description for a text ('fg') or "
+                "background ('bg') effect.")
 
     def __missing__(self, key):
         try:
@@ -64,7 +64,7 @@ class CodeResolver(KeywordResolver):
     def __init__(self, dic=None, **kws):
         super().__init__(dic, **kws)
         # add mappings for matplotlib color names eg: 'r' --> 'red' etc..
-        self.add_mapping(color_alias_map)
+        self.add_mapping(COLOR_ALIASES)
         # add a layer that maps to lower case: 'REd' --> 'red'
         self.add_func(str.lower)
         # add light -> bright translation
@@ -78,7 +78,7 @@ class CodeResolver(KeywordResolver):
 # additional shorthands for bold / italic text
 BG_CODES = CodeResolver(BG_CODES)
 FG_CODES = CodeResolver(FG_CODES)
-FG_CODES.add_mapping(style_alias_map)
+FG_CODES.add_mapping(STYLE_ALIASES)
 
 
 # Keyword Translator
@@ -124,6 +124,11 @@ def _(obj, fg_or_bg='fg'):
         yield hex_to_rgb(obj)
         return
 
+    # number strings eg: '4' are interpreted as ansi codes
+    if obj.isdigit():
+        yield obj
+        
+    
     # try resolve as a named color / effect
     if value := CODES[fg_or_bg].get(obj, None):
         yield value
@@ -180,11 +185,12 @@ def is_24bit(obj):
 
 
 def to_24bit(triplet):
+    # check we have 3-tuple
     if len(triplet) != 3:
-        raise ValueError(f'{triplet!r} has incorrect size for 24bit colour. 24 '
-                         'bit Colours are represented by a sequence of 3 '
-                         'integers in range (0, 256), or 3 floats in range (0, '
-                         '1).')
+        raise ValueError(
+            f'{triplet!r} has incorrect size for 24bit colour. 24 bit Colours'
+            ' are represented by a sequence of 3 integers in range (0, 256), or'
+            ' 3 floats in range (0, 1).')
 
     triplet = list(triplet)
     for i, val in enumerate(triplet):
@@ -270,7 +276,7 @@ def from_list(fg=None, bg=None):
         return [get(bg=_) for _ in bg]
 
 
-def apply(s, *effects, **kws):
+def apply(text, *effects, **kws):
     """
     Apply the ANSI codes mapped to by `effects` and `kws` to the string `s`
 
@@ -288,7 +294,7 @@ def apply(s, *effects, **kws):
     # string = str(s)
 
     # get code bits eg: '34;48;5;22'
-    new_codes = get_code_str(*effects, **kws)
+    codes = get_code_str(*effects, **kws)
 
     # In order to get the correct representation of the string, we strip and
     # ANSI codes that are in place and stack the new codes This means previous
@@ -302,13 +308,13 @@ def apply(s, *effects, **kws):
 
     # NOTE: final byte 'm' only valid for SGR (Select Graphic Rendition) and not
     # other codes, but this is all we support for now
-    return (''.join(f'{CSI}{params};{new_codes}m{w}{END}'
-                    for _, params, _, w, _ in parse(s))
-            if new_codes
-            else s)
+    return (''.join(f'{CSI}{params};{codes}m{txt}{END}'
+                    for _, params, _, txt, _ in parse(text))
+            if codes
+            else text)
 
 
-def apply_naive(s, *effects, **kws):
+def apply_naive(text, *effects, **kws):
     """
     Initial naive implementation of `apply` that blindly wraps the string with
     the ANSI codes.  Use `apply` instead of this function.
@@ -316,4 +322,4 @@ def apply_naive(s, *effects, **kws):
 
     # get code string eg: '34;48;5;22'
     code = get(*effects, **kws)
-    return ''.join((code, s, END)) if code else s
+    return ''.join((code, text, END)) if code else text

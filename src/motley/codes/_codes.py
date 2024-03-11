@@ -9,7 +9,7 @@ see:  https://en.wikipedia.org/wiki/ANSI_escape_code
 # ---------------------------------------------------------------------------- #
 # ANSI Codes for Text effects and colours  FG_CODES BG_CODE
 #
-_fg_effects = {
+FG_EFFECTS = {
     'bold':             1,
     'dim':              2,  # faint
     'italic':           3,
@@ -41,7 +41,7 @@ _fg_effects = {
     # 54:                   Not framed or encircled
     # 55:                   Not overlined
 }
-_fg_colours =  {
+FG_COLORS =  {
     'black':            30,
     'red':              31,
     'green':            32,
@@ -51,10 +51,9 @@ _fg_colours =  {
     'cyan':             36,
     'bright gray':      37,
     # 38
-    # Reserved for extended set foreground color typical supported next
-    # arguments are 5;n where {\displaystyle n}￼ is color index (0..255) or
-    # 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and blue color
-    # channels (out of 255)
+    # Reserved for extended set foreground color eg:
+    #   38;5;n where {n} is color index (0..255) or
+    #   38;2;r;g;b where {r,g,b}￼are red, green and blue color channels (out of 255)
     'default':          39,  # Default text color (foreground)
 
     # ------------------------------------------------------------------------ #
@@ -68,7 +67,7 @@ _fg_colours =  {
     'bright cyan':      96,
     'white':            97,
 }
-FG_CODES = {**_fg_effects, **_fg_colours}
+FG_CODES = {**FG_EFFECTS, **FG_COLORS}
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Background Colours
@@ -84,9 +83,9 @@ BG_CODES = {
     # ------------------------------------------------------------------------ #
     # 48
     # Reserved for extended set background color.
-    # Typical supported next arguments are 5;n where {\displaystyle n} is color
-    # index (0..255) or 2;r;g;b where {\displaystyle r,g,b}￼ are red, green and
-    # blue color channels (out of 255)
+    # Typical supported next arguments are
+    #   48;2;r;g;b where {r,g,b}￼ are red, green and blue color channels (out of 255)
+    #   48;5;n where {n} is color index (0..255) or
     'default':          49,
     # 49:Default background color:implementation defined (according to standard)
     # 50:Reserved
@@ -115,7 +114,7 @@ BG_CODES = {
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-style_alias_map = {
+STYLE_ALIASES = {
     'B':                'bold',
     'I':                'italic',
     'i':                'italic',
@@ -128,15 +127,15 @@ style_alias_map = {
     '-':                'strike',
     'strikethrough':    'strike',
     'unbold':           'dim',
+    'faint':            'dim',
     'blink':            'blink_slow',
-    'hide':             'hidden',
-    'faint':            'dim'
+    'hide':             'hidden'
 }
 # volcab is translated before keyword mappings in Many2One, so the uppercase
 # here works
 
 # Short colour descriptions
-color_alias_map = {
+COLOR_ALIASES = {
     'r':                'red',
     'b':                'blue',
     'g':                'green',

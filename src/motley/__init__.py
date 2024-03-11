@@ -14,9 +14,10 @@ from loguru import logger
 
 # relative
 from . import codes, colors
-from .utils import *
 from .string import Str
 from .formatter import format, format_partial, stylize
+from .utils import (banner, get_width, hstack, justify, make_group_title,
+                    overlay, resolve_alignment, resolve_width)
 
 
 # ---------------------------------------------------------------------------- #
@@ -24,9 +25,11 @@ logger.disable('motley')
 
 
 # aliases
+ansi = codes
 apply = hue = codes.apply
-# ---------------------------------------------------------------------------- #
 
+
+# ---------------------------------------------------------------------------- #
 
 class ConvenienceFunction:
     """
@@ -96,29 +99,29 @@ def _product(*items):
 
 def _combos():
     # can also dynamically generate combination fg, bg colour functions
-
-    _fgc = [None, *codes._codes._fg_colours]
-    _bgc = [None, *codes.BG_CODES]
-    _shorts = [None, *codes.color_alias_map.keys()]
+    fg = [None, *codes._codes.FG_COLORS]
+    bg = [None, *codes.BG_CODES]
+    aliases = [None, *codes.COLOR_ALIASES.keys()]
     yield from itt.chain(
         # simple text effects eg: `underline`, `red` ...
         _product(codes.FG_CODES, [None]),
         # `red_on_green` etc
-        _product(_fgc, _bgc),
+        _product(fg, bg),
         # `r_on_g` etc
-        _product(_shorts, _shorts),
+        _product(aliases, aliases),
         # `italic_blue`, `bold_red` ...
-        itt.zip_longest(_product(('bold', 'italic'), (*_fgc, 'italic')), ()),
+        itt.zip_longest(_product(('bold', 'italic'), (*fg, 'italic')), ()),
         # CSS foreground colours
         _product(colors.CSS_TO_RGB, [None]),
     )
 
 
-def _make_funcs():
+def populate_namespace():
+    # dynamically set module attributes
     for fg, bg in _combos():
         func = ConvenienceFunction(fg, bg)
         setattr(sys.modules[__name__], func.__name__, func)
 
 
 # create convenience functions
-_make_funcs()  # this keeps the namespace clean of "fg", "bg", "func"
+populate_namespace()  # this keeps the namespace clean of "fg", "bg", "func"

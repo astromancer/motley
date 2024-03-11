@@ -14,35 +14,58 @@ from recipes.functionals import echo
 from recipes.oo.slots import SlotHelper
 
 
+__all__ = [
+    'has_ansi', 'strip', 'pull', 'parse', 'split', 'length', 'length_codes',
+    'length_seen'
+]
+
 # ---------------------------------------------------------------------------- #
-__all__ = ['has_ansi', 'strip', 'pull', 'parse', 'split', 'length',
-           'length_codes', 'length_seen']
+# Regexes for parsing
 
-# REGEX_ANSI = re.compile(r'''(?x)
-#     (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
-#     (?P<params>
-#         (?P<end>(?:0))
-#         [\d;]*)          # Parameters                    eg: '31;1;43'
-#     (?P<final_byte>[a-zA-Z])    # Final byte in code            eg: 'm'
-# ''')
+# REGEXES = ConfigNode(
+#     # Any valid ANSI code pattern
+#     ansi=re.compile(r'''(?x)
+#         (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
+#         (?P<params>[\d;]*)          # Parameters                    eg: '31;1;43'
+#         (?P<final_byte>[a-zA-Z])    # Final byte in code            eg: 'm'
+#     '''),
 
+#     # Any ANSI code pattern that is not the RESET code
+#     ansi_open=(opn := r'''
+#         (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
+#         (?P<params>[^0][\d;]*)      # Parameters                    eg: '31;1;43'
+#         (?P<final_byte>[a-zA-Z])    # Final byte in code            eg: 'm'
+#     '''),
 
-# the ANSI reset pattern
+#     ansi_close=(close := r'\x1b\[0?m'),
+#     # this one will not match the reset code
+#     # REGEX_ANSI_NOT_RESET = re.compile(REGEX_ANSI_OPEN, re.X)
+
+#     # matches any
+#     encoded=re.compile(fr'''(?x)
+#         (?P<code>{opn})     # the ANSI code
+#         (?P<text>.*?)                   # the string to which the code applies
+#         (?P<end>{close})     # the ANSI reset code
+#     ''')
+# )
+
+# ANSI reset pattern
 REGEX_ANSI_CLOSE = r'\x1b\[0?m'
 
-# matches any valid ANSI code pattern
+# Any valid ANSI code pattern
 REGEX_ANSI = re.compile(r'''(?x)
     (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
     (?P<params>[\d;]*)          # Parameters                    eg: '31;1;43'
     (?P<final_byte>[a-zA-Z])    # Final byte in code            eg: 'm'
 ''')
 
-# matches any ANSI code pattern that is not the RESET code
+# Any ANSI code pattern that is not the RESET code
 REGEX_ANSI_OPEN = r'''
     (?P<csi>\x1b\[)             # Control Sequence Introducer   eg: '\x1b['
     (?P<params>[^0][\d;]*)      # Parameters                    eg: '31;1;43'
     (?P<final_byte>[a-zA-Z])    # Final byte in code            eg: 'm'
 '''
+
 # this one will not match the reset code
 # REGEX_ANSI_NOT_RESET = re.compile(REGEX_ANSI_OPEN, re.X)
 
@@ -52,6 +75,10 @@ REGEX_ANSI_ENCODED = re.compile(fr'''(?x)
     (?P<text>.*?)                   # the string to which the code applies
     (?P<end>{REGEX_ANSI_CLOSE})     # the ANSI reset code
 ''')
+
+# 
+REGEX_8BIT = re.compile(r'[34]8;5;(\d+)')
+REGEX_24BIT = re.compile(r'[34]8;2;(\d+);(\d+);(\d+)')
 
 # "All common sequences just use the parameters as a series of
 #  semicolon-separated numbers such as 1;2;3. Missing numbers are treated as
@@ -73,24 +100,25 @@ class AnsiEncodedString(SlotHelper):
 
     def __str__(self):
         return ''.join(op.attrgetter(*self.__slots__)(self))
-    
+
+
 # ---------------------------------------------------------------------------- #
 
-def has_ansi(s):
-    return REGEX_ANSI.search(s) is not None
+def has_ansi(string):
+    return REGEX_ANSI.search(string) is not None
 
 
-def strip(s):
+def strip(string):
     """strip ANSI codes from str"""
-    return REGEX_ANSI.sub('', s)
+    return REGEX_ANSI.sub('', string)
 
 
-def pull(s):
+def pull(string):
     """extract ANSI codes from str"""
-    return REGEX_ANSI.findall(s)
+    return REGEX_ANSI.findall(string)
 
 
-def parse(s, named=False):
+def parse(string, named=False):
     """
     A generator that parses the string `s` to separate the ANSI code bits
     from the regular string parts.
@@ -125,51 +153,51 @@ def parse(s, named=False):
     wrapper = AnsiEncodedString if named else echo
 
     idx = 0
-    for mo in REGEX_ANSI_ENCODED.finditer(s):
+    for mo in REGEX_ANSI_ENCODED.finditer(string):
         start = mo.start()
         if start != idx:
-            yield wrapper('', '', '', s[idx:start], '')
+            yield wrapper('', '', '', string[idx:start], '')
 
         yield wrapper(*mo.group('csi', 'params', 'final_byte', 'text', 'end'))
         idx = mo.end()
 
-    size = len(s)
+    size = len(string)
     if (size == 0) or (size != idx):
         # last part of str
-        yield wrapper('', '', '', s[idx:], '')
+        yield wrapper('', '', '', string[idx:], '')
 
 
-def _gen_index_csi(s):
+def _gen_index_csi(string):
     match = None
-    for match in REGEX_ANSI.finditer(s):
+    for match in REGEX_ANSI.finditer(string):
         yield match.start()
         yield match.end()
 
-    if (match is None) or (match.end() != len(s)):
+    if (match is None) or (match.end() != len(string)):
         yield None
 
 
-def _gen_index_split(s):
+def _gen_index_split(string):
     yield 0
-    itr = _gen_index_csi(s)
+    itr = _gen_index_csi(string)
     i0 = next(itr)
     if i0 != 0:
         yield i0
     yield from itr
 
 
-def split_iter(s):
-    for i0, i1 in mit.pairwise(_gen_index_split(s)):
-        yield s[i0:i1]
+def split_iter(string):
+    for i0, i1 in mit.pairwise(_gen_index_split(string)):
+        yield string[i0:i1]
 
 
-def get_split_idx(s):
-    return list(_gen_index_split(s))
+def get_split_idx(string):
+    return list(_gen_index_split(string))
 
 
-def split(s):
+def split(string):
     """Blindly split the str `s` at positions ANSI code locations"""
-    return list(split_iter(s))
+    return list(split_iter(string))
 
 
 # def shortest(s):
@@ -199,7 +227,7 @@ def length_codes(s):
     return sum((sum(map(len, part)) for part in pull(s)))
 
 
-# alias
+# aliases
 length_ansi = len_ansi = len_codes = length_codes
 
 
@@ -211,4 +239,5 @@ def length_seen(s):
     return len(strip(s))
 
 
+# aliases
 len_seen = len_raw = length_raw = display_width = length_seen

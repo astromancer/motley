@@ -60,7 +60,7 @@ CONTINUED = ' (continued)'
 # defines vectorized length
 lengths = np.vectorize(len, [int])
 
-# 
+#
 ensure_set = ensure.Ensure(typing.Set[str])
 
 # ---------------------------------------------------------------------------- #
@@ -79,7 +79,6 @@ ensure_set = ensure.Ensure(typing.Set[str])
 
 # TODO: check out wcwidth lib
 
-# TODO: subtitle
 
 # FIXME: alignment not nice when mixed negative positive....
 #  or mixed float decimal (minimalist)
@@ -1672,6 +1671,9 @@ class Table(LoggingMixin):
         widths = self.col_widths[self._idx_shown] + self.lcb[self._idx_shown]
         rhw = widths[:self.n_head_col].sum()  # row header width
 
+        # from IPython import embed
+        # embed(header="Embedded interpreter at 'src/motley/table/table.py':1675")
+
         # location of current split
         first = True
         splix = self.n_head_col
@@ -1743,38 +1745,12 @@ class Table(LoggingMixin):
 
         yield from self._get_group_heading_lines(idx)
 
-    def _get_group_heading_lines(self, idx):
+    def _get_group_heading_lines(self, indices):
         # column groups
         # see :  xslx.merge_duplicate_cells
         for groups in self.col_groups:
-            line = self.LEFT_BORDER if self.frame else ''
-            lbl = groups[idx[0]]  # name of current group
-            gw = 0  # width of current column group header
-
-            # FIXME: this code below in `format cell??`
-            for i, j in enumerate(idx):
-                name = groups[j]
-                w = self.col_widths[j] + self.lcb[j]  # + (j-i)  #
-                if (name == lbl):  # and (self._merge_repeat_groups or gw == 0)
-                    # still within the same group
-                    gw += w
-                else:
-                    # reached a new group. write previous group
-                    if len(lbl) >= gw:
-                        lbl = truncate(lbl, gw - 1)
-
-                    # part = f'{lbl: {self.col_groups_align}{gw - 1}}{self.borders[j]}'
-                    line += mformat('{: {}{}}{}',
-                                    lbl, self.col_groups_align, gw - 1,
-                                    self.borders[j])
-
-                    gw = w
-                    lbl = name
-
-            # last bit
-            if gw:
-                line += f'{lbl: {self.col_groups_align}{gw - 1}}{self.RIGHT_BORDER}'
             #
+            line = self._heading_line(groups, indices)
             line = codes.apply(line, self.col_head_style)
 
             if self.hlines:
@@ -1782,6 +1758,39 @@ class Table(LoggingMixin):
                 line = _underline(line)
 
             yield line
+
+    def _heading_line(self, data, indices):
+
+        line = self.LEFT_BORDER if self.frame else ''
+        lbl = data[indices[0]]  # name of current group
+        group_width = 0  # width of current column group header
+
+        # FIXME: this code below in `format cell??`
+        for i, j in enumerate(indices):
+            name = data[j]
+            width = self.col_widths[j] + self.lcb[j]  # + (j-i)  #
+            if (name == lbl):
+                # and (self._merge_repeat_groups or group_width == 0)
+                # still within the same group
+                group_width += width
+            else:
+                # reached a new group. write previous group
+                if codes.length(lbl) >= group_width:
+                    lbl = truncate(lbl, group_width - 1)
+
+                # part = f'{lbl: {self.col_groups_align}{group_width - 1}}{self.borders[j]}'
+                line += mformat('{: {}{}}{}',
+                                lbl, self.col_groups_align, group_width - 1,
+                                self.borders[j])
+
+                group_width = width
+                lbl = name
+
+        # last bit
+        if group_width:
+            line += f'{lbl: {self.col_groups_align}{group_width - 1}}{self.RIGHT_BORDER}'
+
+        return line
 
     def _build(self, column_indices=None, continued=False):
         """
