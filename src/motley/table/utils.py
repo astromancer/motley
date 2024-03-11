@@ -352,16 +352,17 @@ def highlight(array, condition, props, formatter=ppr.numeric, **kws):
 
 
 def truncate(item, width, dots=DOTS):
-    # TODO: if DOTS more than 1 chr long
-    cw = 0  # cumulative width
     s = ''
+    pos = 0
     for parts in codes.parse(str(item)):
         *pre, text, end = parts
-        cw += len(text)
-        if cw > width:
-            s += ''.join((*pre, text[:width - len(dots)], dots, end))
+        n = len(text)
+        space = width - pos - len(dots)
+        if n > space:
+            s += ''.join((*pre, text[:space], dots, end))
             break
 
+        pos += n
         s += ''.join(parts)
     return s
 
