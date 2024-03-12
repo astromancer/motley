@@ -359,7 +359,7 @@ class Table(LoggingMixin):
     unit_fmt = '[{}]'
 
     # foot_fmt = None  # '{flag} : {info}'
-    _merge_repeat_groups = True
+    # _merge_repeat_groups = True
     _nrs_header = '#'
     _headers_header = ''
 
@@ -1670,54 +1670,45 @@ class Table(LoggingMixin):
         # TODO: return Table objects??
 
         max_width = max_width or self.max_width
-        split_tables = []
 
         widths = self.col_widths[self._idx_shown] + self.lcb[self._idx_shown]
         rhw = widths[:self.n_head_col].sum()  # row header width
 
-        # from IPython import embed
-        # embed(header="Embedded interpreter at 'src/motley/table/table.py':1675")
+        # cumulative total column width
+        ctcw = np.cumsum(widths)
+
+        # figure out split
+        require_split, = np.where(np.diff(np.array(ctcw / max_width, int)) == 1)
+    
+        if (many := len(require_split)):
+            if self.col_groups:
+                group_splits = self.get_group_boundaries(-1)
+                splits = np.digitize(require_split, group_splits) - 1
+                splits = np.take(group_splits, splits) + 1
+            else:
+                width = ctcw[-1]
+                nsplit = int(np.ceil(width / max_width))
+                allocation = np.array(ctcw // int(np.ceil(width / nsplit)))
+                splits, = np.where(np.diff(allocation) == 1)
 
         # location of current split
         first = True
-        splix = self.n_head_col
-
-        ctcw = np.cumsum(widths)
-        if (w := ctcw[-1] + rhw) > max_width:
-            nsplit = (w // max_width) + 1
-            z = w // nsplit
-
-        while splix != self._idx_shown[-1]:
-            # cumulative total column width
-            # ctcw = np.cumsum(widths[splix:])
-            # indices of columns beyond max allowed width
-            ix, = np.where(ctcw[splix:] + rhw > z)
-            # idx_shown = self._idx_shown[splix:ix[0]]
-
-            if len(ix):  # need to split
-                # need at least one column to build table
-                endix = splix + max(ix[0], 1)
-                if ix[0] == 0:  # first column + row headers too wide to display
-                    'TODO: truncate'
-            else:
-                endix = None
-
+        split_tables = []
+        for start, end in mit.pairwise((0, *splits, None)):
             # make a table using selection of columns
             idx_show = np.r_[self._idx_shown[:self.n_head_col],
-                             self._idx_shown[splix:endix]]
+                             self._idx_shown[start:end]]
 
-            split_tables.append(
-                '\n'.join(map(str, self._build(idx_show, not first and bool(splix))))
-            )
-
-            break
-            if endix is None:
-                break
-
-            splix = endix
+            lines = map(str, self._build(idx_show, not first and many))
+            split_tables.append('\n'.join(lines))
             first = False
 
         return split_tables
+
+    def get_group_boundaries(self, i):
+        # prefer to split at group boundaries
+        g = self.col_groups[i]
+        return list(map(op.get(-1), where_duplicate(g, consecutive=True)))
 
     def make_title(self, width, continued=False):
         """make title line"""
