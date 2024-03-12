@@ -24,7 +24,7 @@ from recipes.containers.dicts import AttrDict
 from recipes.containers import duplicate_if_scalar
 from recipes.string.delimited import square_brackets
 from recipes.iter import cofilter, duplicates, first_false_index
-from recipes.containers.lists import split, unique, where_duplicate
+from recipes.containers import split, unique, where_duplicate
 
 
 # ---------------------------------------------------------------------------- #

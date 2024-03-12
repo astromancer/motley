@@ -22,8 +22,8 @@ import more_itertools as mit
 from recipes.logging import LoggingMixin
 from recipes import api, dicts, flow, op, pprint as ppr
 from recipes.functionals import always, echo0, raises as bork
-from recipes.containers import ensure, is_null, is_scalar, not_null
-from recipes.containers.lists import cosort, where, where_duplicate
+from recipes.containers import (cosort, duplicates, ensure, is_null, is_scalar,
+                                not_null, where, where_duplicate)
 
 # relative
 from .. import codes

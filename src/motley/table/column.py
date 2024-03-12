@@ -12,7 +12,7 @@ import numpy as np
 from recipes import pprint as ppr
 from recipes.functionals import echo0
 from recipes.logging import LoggingMixin
-from recipes.containers.lists import where
+from recipes.containers import where
 
 # relative
 from ..utils import resolve_alignment
