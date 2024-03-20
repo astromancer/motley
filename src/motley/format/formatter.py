@@ -57,53 +57,36 @@ from loguru import logger
 
 # local
 from recipes import regex
-from recipes.iter import cofilter
-from recipes.oo.slots import SlotRepr
+from recipes.oo import slots
+from recipes.oo.property import Alias
 from recipes.oo.temp import temporarily
-from recipes.functionals import not_none
 from recipes.logging import LoggingMixin
-from recipes.oo.property import ForwardProperty
 from recipes.string import indent, delimited as delim
 
 # relative
-from . import codes
-from .codes import utils as ansi
+from .. import codes
+from ..codes import utils as ansi
 
 
 # FIXME: stylize to raise on invalid formatting...
-
 # ---------------------------------------------------------------------------- #
+# Module constants
 STRING_CLASSES = (str, UserString)
 # classic formatter
 builtin_formatter = BuiltinFormatter()  # oformat
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
+# Utility functions
 
 def escape_braces(string):
     return string.replace('{', '{{').replace('}', '}}')
 
 
 # ---------------------------------------------------------------------------- #
+# Format specification (Object Oriented)
 
-
-class SlotHelper(SlotRepr):
-    """
-    Helper class for obects with slots.
-    """
-
-    __slots__ = ()
-
-    def __init__(self, **kws):
-        # generic init that sets attributes for input keywords
-        for _ in {'self', 'kws', '__class__'}:
-            kws.pop(_, None)
-
-        for key, val in kws.items():
-            setattr(self, key, val)
-
-
-class FormatSpec(SlotHelper):
+class FormatSpec(slots.SlotHelper):
 
     __slots__ = ('fill', 'align', 'sign', 'alt', 'width', 'grouping',
                  'precision', 'type')
@@ -147,31 +130,15 @@ class FormatSpec(SlotHelper):
 
     def __init__(self, fill='', align='', sign='', alt='', width='',
                  grouping='', precision='', type='', **kws):
-        items = locals()
-        items.pop('self')
-        items.pop('kws')
-        for k, v in items.items():
-            setattr(self, k, v)
-
-    # def __str__(self):
-    #     return ''.join(
-    #         # (self.fill if self.align else ''),
-    #         (str(getattr(self, _))  # for b in type(self).__bases__
-    #          for _ in self.__slots__)
-    #     )
-
-    # def __repr__(self):
-    #     return dicts.pformat({_: getattr(self, _)
-    #                           for base in (*type(self).__bases__, type(self))
-    #                           for _ in base.__slots__},
-    #                          type(self).__name__)
+        #
+        super().__init__(slots.sanitize(locals()))
 
     def __call__(self, value):
         # return builtins.format(value, str(self))
         return builtin_formatter.format_field(value, str(self))
 
 
-class Style(SlotHelper):
+class Style(slots.SlotHelper):
 
     __slots__ = ('fg', 'bg')
     FG_MARK = '|'
@@ -214,19 +181,19 @@ class ExtendedFormatSpec(FormatSpec):
     def __call__(self, value):
         return formatter.format_field(value, str(self))
 
-    # @property
-    # def style(self):
-    #     return dict(fg=self.fg, bg=self.bg)
 
+# ---------------------------------------------------------------------------- #
+# Formattable objects
 
-class Formattable(SlotHelper):
+class Formattable(slots.SlotHelper):
 
-    __slots__ = ('pre', 'field', 'convert', 'spec', 'post')
+    __slots__ = ('prefix', 'field', 'convert', 'spec', 'postfix')
 
-    style = ForwardProperty('spec.style')
+    format = Alias('fmt')
+    style = Alias('spec.style')
 
-    @staticmethod
-    def parse(string: str):
+    @classmethod
+    def parse(cls, string: str):
         nspec = 0
         spec = ''
         parts = ['', '']
@@ -240,35 +207,33 @@ class Formattable(SlotHelper):
 
             if nspec > 1:
                 raise ValueError(f'{string!r}: Only 1 formattable field'
-                                 f' allowed per cell.')
+                                 f' allowed for {cls.__name__!r} objects.')
 
         pre, post = parts
         return pre, field, convert, spec, post
 
-    def __init__(self, string: str):
-        self.fmt = string
+    def __init__(self, obj, spec: str):
+        self.data = obj
+        self.fmt = spec
 
     def __str__(self):
-        return (f'{escape_braces(self.pre)}{{'
-                f'{self.field}' +
-                (f'!{self.convert}' if self.convert else '') +
-                (f':{self.spec}' if self.spec else '') +
-                f'}}{escape_braces(self.post)}')
+        return format(self.fmt, self.data)
 
     def __repr__(self):
         return super().__repr__()
 
     @property
     def fmt(self):
-        return stylize(str(self))
+        return stylize(str(f'{escape_braces(self.prefix)}{{'
+                           f'{self.field}' +
+                           (f'!{self.convert}' if self.convert else '') +
+                           (f':{self.spec}' if self.spec else '') +
+                           f'}}{escape_braces(self.postfix)}'))
 
     @fmt.setter
     def fmt(self, fmt):
-        self.pre, self.field, self.convert, spec, self.post = self.parse(fmt)
+        self.prefix, self.field, self.convert, spec, self.postfix = self.parse(fmt)
         self.spec = ExtendedFormatSpec.from_string(spec)
-
-    def __call__(self, value):
-        return format(self.fmt, value)
 
 
 # [[fill]align][sign][#][0][width][grouping_option][.precision][type]
@@ -293,16 +258,19 @@ class Formattable(SlotHelper):
 #     ''')
 
 # ---------------------------------------------------------------------------- #
+# Styling
+
 def _apply_style(string, **style):
 
     if not any(style.values()):
         return string
 
     # apply style
-    logger.opt(lazy=True).debug('{}', lambda: f'Applying {style} to {string!r}')
+    logger.opt(lazy=True).debug('{}', lambda: f'Applying {style} to {string!r}.')
 
     try:
         return codes.apply(string, **style)
+
     except codes.exceptions.InvalidStyle:  # as err:
         # The block above will fail for the short format spec style
         # eg: 'Bk_' to mean 'bold,black,underline' etc
@@ -313,8 +281,8 @@ def _apply_style(string, **style):
             # error was legit
             raise
 
-        logger.debug('`motley.codes.apply` failed. Retrying with args = {},.'
-                     ' kws = {} on string:\n{!r}',
+        logger.debug('`motley.codes.apply` failed. Retrying with args = {},'
+                     ' kws = {} on string:\n{!r}.',
                      tuple(maybe_short_spec), style, string)
         try:
             return codes.apply(string, *maybe_short_spec, **style)
@@ -376,23 +344,6 @@ def _apply_style(string, **style):
 #                        sign=sign,
 #                        thousands=' ')
 
-def _is_adjacent(a, b):
-    indices = cofilter(not_none, a.indices, b.indices, (0, 1))
-    if a.is_open():
-        for i, j, k in zip(*indices):
-            return (i + 1 == j), i, k
-    return False, None, None
-
-    # escaped = True  # FIXME does this ever get run if level == 0 ?????
-    # for i, j, k in zip(*indices):
-    #     if k:
-    #         # swap order of indices since  outer closing preceeds inner
-    #         # closing for closed double pairs
-    #         i, j = j, i
-
-    #     escaped &= (i + 1 == j)
-    # return escaped, i, k
-
 
 # ---------------------------------------------------------------------------- #
 class FormatWarning(UserWarning):
@@ -426,8 +377,10 @@ class Formatter(BuiltinFormatter, LoggingMixin):
         # >>> format('hello {world[0]:-<5s}', world='world')
         # >>> format('{::^11s}', 'x')
 
-        self.logger.opt(lazy=True).debug('Received format string:{0[0]}> {0[1]!r}',
-                                         lambda: ('\n' * (len(string) > 40), string))
+        self.logger.opt(lazy=True).debug(
+            'Received format string:{0[0]}> {0[1]!r}',
+            lambda: ('\n' * (len(string) > 40), string)
+        )
 
         i = 0
         pos = 0
@@ -442,7 +395,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                     # final brace
                     escaped = False
                 else:
-                    escaped, j, k = _is_adjacent(match, (match := braces[i + 1]))
+                    escaped, j, k = delim.is_adjacent(match, (match := braces[i + 1]))
 
                 if escaped:
                     # Open double
@@ -455,9 +408,11 @@ class Formatter(BuiltinFormatter, LoggingMixin):
                 else:
                     # open single. throw
                     j = match.indices.index(None)
-                    raise delim.UnpairedDelimiterError(string,
-                                               ('opening', 'closing')[j],
-                                               {'}{'[j]: [match.indices[not bool(j)]]})
+                    raise delim.UnpairedDelimiterError(
+                        string,
+                        ('opening', 'closing')[j],
+                        {'}{'[j]: [match.indices[not bool(j)]]}
+                    )
 
             # closed braces
             # Check if this is a closed double brace
@@ -574,7 +529,7 @@ class Formatter(BuiltinFormatter, LoggingMixin):
             if ',' in val:
                 rgb = self._rgb_parser.match(val, must_close=True)
                 style[fg_or_bg] = delim.csplit(style[fg_or_bg],
-                                         getattr(rgb, 'brackets', None))
+                                               getattr(rgb, 'brackets', None))
 
         #
         self.logger.debug('parsed value={!r}, spec={!r}, style={!r}.',
@@ -834,7 +789,7 @@ class PartialFormatter(Formatter):
             return f'{value}!{conversion}'
 
         if conversion:
-            self.logger.debug('Passing to Formatter for {} convert: {}.', 
+            self.logger.debug('Passing to Formatter for {} convert: {}.',
                               conversion, value)
         return super().convert_field(value, conversion)
 

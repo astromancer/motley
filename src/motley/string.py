@@ -3,7 +3,7 @@ from collections import UserString
 
 # relative
 from . import codes
-from .formatter import formatter
+from .format.formatter import formatter
 
 
 # f"{String('Hello world'):rBI_/k}"

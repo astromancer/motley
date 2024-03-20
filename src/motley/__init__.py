@@ -15,7 +15,7 @@ from loguru import logger
 # relative
 from . import codes, colors
 from .string import Str
-from .formatter import format, format_partial, stylize
+from .format import formatters, format, format_partial, stylize
 from .utils import (banner, get_width, hstack, justify, make_group_title,
                     overlay, resolve_alignment, resolve_width)
 

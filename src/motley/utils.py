@@ -20,7 +20,8 @@ from recipes.oo.singleton import Singleton
 from recipes.containers.dicts import invert
 
 # relative
-from . import codes, formatter
+from . import codes
+from .format import formatter
 from .codes import utils as ansi
 
 

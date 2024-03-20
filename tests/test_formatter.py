@@ -7,7 +7,7 @@ import pytest
 from loguru import logger
 
 # local
-from motley.formatter import (ExtendedFormatSpec, FormatSpec, Formattable,
+from motley.format.formatter import (ExtendedFormatSpec, FormatSpec, Formattable,
                               Formatter, formatter)
 from recipes.string.delimited import UnpairedDelimiterError
 from recipes.testing import Expected, Throws, expected, mock
