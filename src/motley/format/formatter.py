@@ -75,6 +75,9 @@ STRING_CLASSES = (str, UserString)
 # classic formatter
 builtin_formatter = BuiltinFormatter()  # oformat
 
+# Formatting optional fields
+OPTIONAL_FIELD_PARSER = delim.Parser(('\[', '\]'))
+
 
 # ---------------------------------------------------------------------------- #
 # Utility functions
@@ -83,8 +86,21 @@ def escape_braces(string):
     return string.replace('{', '{{').replace('}', '}}')
 
 
+def format_optional(fmt, *args, parser=OPTIONAL_FIELD_PARSER, **kws):
+    for opt in parser.iterate(fmt):
+        key = delim.braces.match(opt.enclosed).enclosed
+        if kws.pop(key, '') != '':
+            fmt = fmt.replace(str(opt), '')
+
+    return format(fmt, *args, **kws)
+
+
+def is_negative_int_str(i):
+    return i.startswith('-') and i[1:].isdigit()
+
 # ---------------------------------------------------------------------------- #
 # Format specification (Object Oriented)
+
 
 class FormatSpec(slots.SlotHelper):
 
