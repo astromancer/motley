@@ -626,6 +626,22 @@ class Formatter(BuiltinFormatter, LoggingMixin):
             sub = self.format(field_name, *args, **kws)
             return sub, None
 
+        first, rest = formatter_field_name_split(field_name)
+        obj = self.get_value(first, args, kws)
+
+        # loop through the rest of the field_name, doing
+        #  getattr or getitem as needed
+        for is_attr, i in rest:
+            if is_attr:
+                obj = getattr(obj, i)
+            else:
+                # fix to allow negative indexing :)
+                if is_negative_int_str(i):
+                    i = int(i)
+                obj = obj[i]
+
+        return obj, first
+
         return super().get_field(field_name, args, kws)
 
     def format_field(self, value, spec):
