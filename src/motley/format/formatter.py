@@ -44,7 +44,6 @@ substitute all available fields, and leave the rest unaltered instead of borking
 'Give me as much as you {can}'
 """
 
-from _string import formatter_field_name_split
 # std
 import re
 from textwrap import dedent
@@ -53,6 +52,7 @@ from string import Formatter as BuiltinFormatter
 
 # third-party
 from loguru import logger
+from _string import formatter_field_name_split
 
 # local
 from recipes import regex
@@ -77,6 +77,15 @@ builtin_formatter = BuiltinFormatter()  # oformat
 # Formatting optional fields
 OPTIONAL_FIELD_PARSER = delim.Parser(('\[', '\]'))
 
+# CONVERTERS = {
+#     's': str,
+#     'r': repr,
+#     'a': ascii,
+#     'o': ord,
+#     'c': chr,
+#     't': str.title,
+#     'q': lambda _: repr(str(_))
+# }
 
 # ---------------------------------------------------------------------------- #
 # Utility functions
@@ -97,9 +106,9 @@ def format_optional(fmt, *args, parser=OPTIONAL_FIELD_PARSER, **kws):
 def is_negative_int_str(i):
     return i.startswith('-') and i[1:].isdigit()
 
+
 # ---------------------------------------------------------------------------- #
 # Format specification (Object Oriented)
-
 
 class FormatSpec(slots.SlotHelper):
 
@@ -221,6 +230,7 @@ class Formattable(slots.SlotHelper):
                 convert = _convert
 
             if nspec > 1:
+                # FIXME: support tuple data !
                 raise ValueError(f'{string!r}: Only 1 formattable field'
                                  f' allowed for {cls.__name__!r} objects.')
 

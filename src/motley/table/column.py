@@ -9,10 +9,11 @@ import contextlib as ctx
 import numpy as np
 
 # local
+from recipes.flow import Emit
 from recipes import pprint as ppr
-from recipes.functionals import echo0
-from recipes.logging import LoggingMixin
 from recipes.containers import where
+from recipes.functionals import echo
+from recipes.logging import LoggingMixin
 
 # relative
 from ..utils import resolve_alignment
@@ -49,7 +50,7 @@ def letter_to_index(letter):
     return o - 65
 
 
-def resolve_columns(key, headers, ncols, what='column', emit=wrn.warn):
+def index(key, headers, ncols, what='column', emit=wrn.warn):
     """
     Resolve column indices (integers) from arbitrary object input.
 
@@ -73,18 +74,18 @@ def resolve_columns(key, headers, ncols, what='column', emit=wrn.warn):
     list
         Integer indices for columns represented by `key`.
     """
-    return _resolve_columns(key, headers, ncols, what, emit)
+    return _index(key, headers, ncols, what, Emit(emit))
 
 
 @ftl.singledispatch
-def _resolve_columns(key, headers, ncols, what, emit):
+def _index(key, headers, ncols, what, emit):
     # unknown type. warn
     emit(f'Key {key!r} for {what} has invalid type {type(key)} for '
          f'mapping to a column of the table.')
     return key
 
 
-@_resolve_columns.register(numbers.Integral)
+@_index.register(numbers.Integral)
 def _(key, headers, ncols, what, emit):
     # wrap negative indices
     if key < 0:
@@ -93,10 +94,11 @@ def _(key, headers, ncols, what, emit):
     if key > ncols:
         emit(f'Key {key!r} for {what} greater than number of columns '
              f'in table ({ncols}).')
+
     return [key]
 
 
-@_resolve_columns.register(str)
+@_index.register(str)
 def _(key, headers, ncols, what, emit):
     for level in headers:
         if key in level:
@@ -110,41 +112,60 @@ def _(key, headers, ncols, what, emit):
          f'`column_headers` or `column_groups`: {headers}.')
 
 
-@_resolve_columns.register(tuple)
-@_resolve_columns.register(list)
+@_index.register(tuple)
+@_index.register(list)
 def _(key, headers, ncols, what, emit):
     # convert column name headers to index positions
-    return [_resolve_columns(k, headers, ncols, what, emit) for k in key]
+    return [_index(k, headers, ncols, what, emit) for k in key]
 
 
-@_resolve_columns.register(type(...))
+@_index.register(type(...))
 def _(key, headers, ncols, what, emit):
     return list(range(ncols))
 
+
 # ---------------------------------------------------------------------------- #
 
+class Column(LoggingMixin):  # SlotHelper, ListOf(Cell)
 
-class Column(LoggingMixin):
-    # count = itt.count()
+    # width = ForwardProperty('fmt.width')
+    # align = ForwardProperty('fmt.align')
+    # precision = ForwardProperty('fmt.precision')
 
-    def __init__(self, data, title=None, unit=None, fmt=None, align='.',
-                 width=None, total=False, group=None):
+    def __init__(self, data, name=None, title=None, group=None, unit=None,
+                 total=False, fmt=None, align='.', width=None,):
+
         # TODO: fmt = '{:. 14.5?f|gBi_/teal}'
-        self.title = title
-        self.data = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
+
+        self.name = name  # for access
+        self.data = data
         assert self.data.ndim == 1
 
+        self.title = title
+        self.group = group
         self.unit = unit
-        self.width = width
-        self.align = resolve_alignment(align)
         self.total = self.data.sum() if total else None
-        self.dtypes = set(map(type, np.ma.compressed(self.data)))
 
         if fmt is None:
+            # fmt = Formattable(fmt)
             fmt = self.get_default_formatter()
 
         assert callable(fmt)
         self.fmt = fmt
+        self.width = width
+        self.align = resolve_alignment(align)
+
+    @property
+    def data(self):
+        return self._cells
+
+    @data.setter
+    def data(self, data):
+        self._cells = np.atleast_1d(np.asanyarray(data, 'O').squeeze())
+
+    @property
+    def dtypes(self):
+        return set(map(type, np.ma.compressed(self.data)))
 
     # def resolve_formatter(self, fmt):
     #     ''
@@ -175,8 +196,8 @@ class Column(LoggingMixin):
         # NB since it's a set, don't try types_[0]
         type_, = self.dtypes
 
-        if issubclass(type_, str):  # NOTE -  this includes np.str_!
-            return echo0  # this function just passes back the original object
+        if issubclass(type_, str):  # NOTE: this includes `np.str_`
+            return echo  # this function just passes back the original object
 
         # If dtype not a number, convert to str (this uses g formatting)
         if not issubclass(type_, numbers.Real):

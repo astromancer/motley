@@ -3,9 +3,15 @@ Handel resolution of named colors and effects
 """
 
 
+# std
+from pathlib import Path
+
+# local
+from recipes.pprint.mapping import pformat
+
+# relative
 from ..colors import CSS_TO_RGB
-from . import bg, fg
-from .explain import explain
+from . import bg, explain, fg
 from .exceptions import InvalidStyle
 from ._codes import COLOR_ALIASES, STYLE_ALIASES
 from .utils import (AnsiEncodedString, get_split_idx, has_ansi, length,
@@ -13,7 +19,7 @@ from .utils import (AnsiEncodedString, get_split_idx, has_ansi, length,
                     strip)
 from .resolve import (BG_CODES, CODES, FG_CODES, apply, apply_naive, from_list,
                       get, get_code_list, get_code_str, hex_to_rgb, is_24bit,
-                      resolve, to_24bit)
+                      resolve, standardize, to_24bit)
 
 
 def _make_named_codes(fg_or_bg):
@@ -31,10 +37,6 @@ def _make_named_codes(fg_or_bg):
 
 
 def _make_module(fg_or_bg):
-    from pathlib import Path
-    from recipes.containers.dicts import pformat
-
-    #
     (Path(__file__).parent / f'./{fg_or_bg}.py').write_text(
         pformat(_make_named_codes(fg_or_bg),
                 lhs=str, rhs=repr,

@@ -113,9 +113,14 @@ def strip(string):
     return REGEX_ANSI.sub('', string)
 
 
-def pull(string):
+def pull(string, group=None):
     """extract ANSI codes from str"""
-    return REGEX_ANSI.findall(string)
+    if group is None:
+        return REGEX_ANSI.findall(string)
+    
+    return [match[group] for match in REGEX_ANSI.finditer(string)]
+        
+
 
 
 def parse(string, named=False):

@@ -317,22 +317,16 @@ def resolve_converters(converters):
 
 # ---------------------------------------------------------------------------- #
 
-# fallback0 = fallback(0, ValueError)
+def rindex(string, char, default=-1):
+    return idx if (idx := string.rfind(char)) != -1 else default
 
 
-def rindex0(s, char):
-    try:
-        return s.rindex(char)
-    except ValueError as e:
-        return 0
-
-
-def _underline(s):
+def _underline(string):
     """
     Underline last line of multi-line string, or entire string if single line
     """
-    idx = rindex0(s, '\n')
-    return s[:idx] + codes.apply(s[idx:], 'underline')
+    idx = rindex(string, '\n', 0)
+    return string[:idx] + codes.apply(string[idx:], '_')
 
 
 def highlight(array, condition, props, formatter=ppr.numeric, **kws):
