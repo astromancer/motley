@@ -21,10 +21,10 @@ from recipes.string import sub
 from recipes.logging import LoggingMixin
 from recipes.containers.ensure import ensure
 from recipes.containers.dicts import AttrDict
-from recipes.containers import duplicate_if_scalar
+from recipes.iter import cofilter, first_false_index
 from recipes.string.delimited import square_brackets
-from recipes.iter import cofilter, duplicates, first_false_index
-from recipes.containers import split, unique, where_duplicate
+from recipes.containers import (duplicate_if_scalar, duplicates, split, unique,
+                                where_duplicate)
 
 
 # ---------------------------------------------------------------------------- #
@@ -81,21 +81,8 @@ def hyperlink_exts(path, tail=0, strip=''):
 # def stack_cell_attributes(cell, kws):
 #     keys = ('alignment', 'font', 'border', 'fill')
 #     props = op.AttrDict(*keys)(cell)
-#     try:
-#         # TypeError: unhashable type: 'StyleProxy'
-#         op.AttrSetter(*keys)(cell, {**kws, **props})
-#     except Exception as err:
-#         import sys, textwrap
-#         from IPython import embed
-#         from better_exceptions import format_exception
-#         embed(header=textwrap.dedent(
-#                 f"""\
-#                 Caught the following {type(err).__name__} at 'xlsx.py':25:
-#                 %s
-#                 Exception will be re-raised upon exiting this embedded interpreter.
-#                 """) % '\n'.join(format_exception(*sys.exc_info()))
-#         )
-#         raise
+#    # TypeError: unhashable type: 'StyleProxy'
+#    op.AttrSetter(*keys)(cell, {**kws, **props})
 
 # ---------------------------------------------------------------------------- #
 
@@ -242,9 +229,10 @@ class XlsxWriter(LoggingMixin):
                 width = max(map(len, table.data[:, i]))
 
         hwidth = 0
-        if table.col_headers:
-            header = table.col_headers[i]
-            repeats = list(table.col_headers).count(header)
+        if table.has_col_head:
+            headers = list(table.col_headers[-1])
+            header = headers[i - table.n_head_rows]
+            repeats = headers.count(header)
             hwidth = ((len(header) + 3 * padding) / repeats)
         #                        fudge factor for font
         # logger.debug(i, header, hwidth, fwidth, width, minimum)
@@ -305,7 +293,7 @@ class XlsxWriter(LoggingMixin):
         if isinstance(table, AttrDict):
             for i in table.totals:
                 totals[i] = f'=SUM({cell_range(i, r0, i, r)})'
-        elif table.totals:
+        elif table.has_totals:
             for t, i in zip(*cofilter(None, table.totals, range(ncols))):
                 totals[i] = f'=SUM({cell_range(i, r0, i, r)})'
 
@@ -342,9 +330,9 @@ class XlsxWriter(LoggingMixin):
         #     if tf:
         #         ws.row_dimensions[r].height = 10 * 3
 
-        # borders
+        # groups
         if table.col_groups:
-            for val, (*_, index) in unique(table.col_groups[0]).items():
+            for val, (*_, index) in unique(table.col_headers[0]):
                 set_block_style(ws[cell_range(index, 1, index, r)],
                                 border=Border(right=self.rule2))
 
@@ -359,7 +347,7 @@ class XlsxWriter(LoggingMixin):
                     indices = table.resolve_columns(h, table.n_cols, 'merge region')
                     self.merge_duplicate_rows(table.data, r0, indices, nrows)
 
-        if self.bottomrule and not table.totals:
+        if self.bottomrule and not table.has_totals:
             set_block_style(ws[cell_range(0, r + 1, ncols - 1, r + 1)],
                             border=Border(top=self.rule2))
 
@@ -408,23 +396,9 @@ class XlsxWriter(LoggingMixin):
         r = self.worksheet._current_row
 
         # headers
-        # headers = table.get_headers()
-        cgroups = table.col_groups
-        if isinstance(table, AttrDict):
-            col_headers = list(map(self.header_formatter, table.col_headers))
-            if cgroups and len(col_headers) < len(cgroups[0]):
-                col_headers = ['', *col_headers]
-            # col group headers
-            headers = [*cgroups, col_headers]
-        else:
-            headers = [*cgroups, table.pre_table[0]]
-            # _, headers = table.get_header_blocks(
-            #     table.row_headers, table.has_row_nrs, table.col_headers)
+        headers = table.col_header_block
 
-        if table.units:
-            headers.append(table.units)
-
-        # final_style = dict(self.style['headers' if table.units else 'headers'])
+        #
         style = dict(self.style['headers'])
         for i, row in enumerate(headers):
             if i == 1:
@@ -436,9 +410,8 @@ class XlsxWriter(LoggingMixin):
         # header borders
         q = self.worksheet._current_row
         set_block_style(
-
             self.worksheet[cell_range(0, q, ncols - 1, q)],
-            **self.style['units' if (table.units or cgroups) else 'headers'],
+            **self.style['units' if (table.n_head_rows > 1) else 'headers'],
             border=Border(bottom=self.rule2)
         )
 

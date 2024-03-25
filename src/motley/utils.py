@@ -151,12 +151,13 @@ class _vstack(Singleton):  # NOTE this could just be a module...
     def stack(self, tables, strip_titles=True, strip_headers=True, spacing=1, **kws):
 
         # check that all tables have same number of columns
-        ncols = [tbl.n_cols + tbl.n_head_col for tbl in tables]
+        ncols = [tbl.n_cols + tbl.n_head_cols for tbl in tables]
         if len(set(ncols)) != 1:
             raise ValueError(f'Cannot stack tables with unequal number of '
                              f'columns: {ncols}.')
 
         col_widths = np.max([tbl.col_widths for tbl in tables], 0)
+
         return ('\n' * (spacing + 1)).join(
             self._istack(tables, col_widths, strip_headers, strip_titles)
         ).lstrip('\n')
@@ -174,7 +175,7 @@ class _vstack(Singleton):  # NOTE this could just be a module...
         *head, r = str(table).split('\n', nnl)
         if head:
             if not strip_titles:
-                yield from head[table.frame:(-table.n_head_rows or None)]
+                yield from head[:(-table.n_head_rows or None)]
             if not strip_headers:
                 yield from head[(table.frame + table.has_title):]
 
@@ -420,7 +421,7 @@ class Filler:
         self.style = style
 
     def __str__(self):
-        self.table.pre_table[0, 0] = codes.apply(self.text, self.style)
+        self.table._formatted[0, 0] = codes.apply(self.text, self.style)
         return str(self.table)
 
     @classmethod

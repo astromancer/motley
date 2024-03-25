@@ -2,27 +2,26 @@
 
 # std
 import functools as ftl
-from typing import OrderedDict
-from collections import abc, defaultdict
+from collections import OrderedDict, abc, defaultdict
 
 # third-party
 import numpy as np
 from loguru import logger
 
 # local
-from recipes.containers import is_null
+from recipes.flow import Emit
+from recipes.functionals import always, echo0
+from recipes.containers import ensure, is_null
 from recipes import duplicate_if_scalar, pprint as ppr
-from recipes.functionals import always, echo0, raises as bork
 
 # relative
-from .. import codes, formatters
+from .. import codes
+from ..format import formatters
 from ..utils import get_width, resolve_alignment
-from .column import resolve_columns
+from . import column
 
 
 __all__ = (
-    'str2tup',
-    'null',
     'apportion',
     'justify_widths',
     'align_at',
@@ -35,20 +34,21 @@ __all__ = (
     'truncate',
     'is_astropy_table',
     'convert_astropy_table',
-    '_underline'
 )
 
 # ---------------------------------------------------------------------------- #
 # Module Constants
+
+NULL = object()
 
 DOTS = '…'  # single character ellipsis u"\u2026" to indicate truncation
 
 COL_ALIGN_FUNCS = {'<': np.char.ljust,
                    '>': np.char.rjust}
 
-
 # Utils
 # ---------------------------------------------------------------------------- #
+
 
 def str2tup(keys):
     if isinstance(keys, str):
@@ -154,7 +154,6 @@ def resolve_width(width, data, headers=None):
 
 # ---------------------------------------------------------------------------- #
 
-
 def ensure_dict(obj, n_cols, what='\b'):
     # convert obj to dict
 
@@ -177,14 +176,11 @@ def ensure_dict(obj, n_cols, what='\b'):
         f'{n_cols} columns.'
     )
 
+
 # ---------------------------------------------------------------------------- #
 
-
-null = object()
-
-
 def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
-                  default=null, default_factory=None, args=(), **kws):
+                  default=NULL, default_factory=None, args=(), **kws):
     """
     Map user input to integer column indices.
 
@@ -211,13 +207,14 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
         default).
     """
 
+    # set action raise / warn
+    emit = Emit(ValueError if raises else logger.opt(depth=1).warning)
+
+    # coerce to ordered dict
     out = OrderedDict(ensure_dict(obj, n_cols, what))
 
-    # set action raise / warn
-    emit = bork(ValueError) if raises else logger.warning
-
     # convert column name aliases to index positions
-    aliases = list(aliases or ())
+    aliases = ensure.list(aliases, tuple)
     if not aliases and (str in set(map(type, out.keys()))):
         emit(f'Could not assign {what} due to missing `column_headers`.')
 
@@ -229,7 +226,7 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
         # copy dict to prevent RuntimeError on pop
         for key in list(out.keys()):
             item = out.pop(key)
-            for i in resolve_columns(key, aliases, n_cols, what, emit):
+            for i in column.index(key, aliases, n_cols, what, emit):
                 out[i] = item
 
     # convert values
@@ -238,7 +235,7 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
             out[i] = converter(item)
 
     # get default obj
-    if default is not null:
+    if default is not NULL:
         default_factory = always(default)
 
     if default_factory:
@@ -272,9 +269,9 @@ def resolve_converters(converters):
         else:
             raise ValueError(
                 f'Converter key {type_or_col!r} (for function {fun}) is '
-                f'invalid. Converters should be specified as type-callable '
-                f'pairs for type specific conversion, or str-callable pairs '
-                f'for column conversion.'
+                'invalid. Converters should be specified as (type, callable) '
+                'pairs for type specific conversion, or (str, callable) pairs '
+                'for column conversion.'
             )
 
     return type_convert, col_converters

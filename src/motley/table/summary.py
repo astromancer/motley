@@ -1,6 +1,5 @@
 # std
 import numbers
-import operator as op
 from warnings import warn
 from collections import abc
 from typing import MutableMapping
@@ -10,16 +9,14 @@ import numpy as np
 
 # local
 from recipes import api
-from recipes.string import delim
 from recipes.logging import LoggingMixin
 
 # relative
-from ..formatter import format
 from ..codes import utils as ansi
+from ..format.formatter import format_optional
 from .utils import align_at, apportion
 
 
-# from .utils import justified_delta
 # ---------------------------------------------------------------------------- #
 
 BULLET = '⦁'  # '·'  # '\N{MIDDLE DOT}'
@@ -27,19 +24,17 @@ BULLET = '⦁'  # '·'  # '\N{MIDDLE DOT}'
 
 PILLAR_COLUMN_KEYS = {'pillars', 'except', 'not', 'ignore', 'keep'}
 KNOWN_SUMMARY_STRINGS = {'header', 'footer', 'drop'}
-# *PILLAR_COLUMN_KEYS,
-#'ncols', 'n_cols',
-# 'borders'
+# *PILLAR_COLUMN_KEYS,  'ncols', 'n_cols',  'borders'
 
-parse_fmt_opt = delim.Parser('¿?')
+# Format for single value columns
+SVC_FMT = R'{key[-1]: <|B} = {{val}\[ [{unit}]\]: <}'
 
-null = object()
 
 # defines vectorized length
 # lengths = np.vectorize(len, [int])
 
-# ---------------------------------------------------------------------------- #
 
+# ---------------------------------------------------------------------------- #
 
 def resolve(summary, table):
     # resolve: User spec for summary table:
@@ -109,18 +104,9 @@ def _resolve(summary):
 
         if summary:
             kws.update(summary)
-            #warn(f'Ignoring unresolved summary info: {summary}.')
+            # warn(f'Ignoring unresolved summary info: {summary}.')
 
         return i, ncols, pillars, kws
-
-
-def format_special(fmt, *args, **kws):
-    for opt in parse_fmt_opt.iterate(fmt):
-        key = delim.braces.match(opt.enclosed).enclosed
-        if kws.pop(key, '') != '':
-            fmt = fmt.replace(str(opt), '')
-
-    return format(fmt, *args, **kws)
 
 
 def _stack_keyval_pairs(items, ncols):
@@ -136,6 +122,8 @@ def _stack_keyval_pairs(items, ncols):
 def bulleted(string, bullet, space):
     return string if string.isspace() else f'{bullet}{" " * int(space)}{string}'
 
+
+# ---------------------------------------------------------------------------- #
 
 class SummaryTable(LoggingMixin):
 
@@ -160,7 +148,7 @@ class SummaryTable(LoggingMixin):
         action=None
     )
     def __init__(self, table, loc=0, ncols=None, ignore=(), bullet=BULLET,
-                 fmt='{key: <|B} = {{val}¿ [{unit}]?: <}', whitespace=2, **kws):
+                 fmt=SVC_FMT, whitespace=2, **kws):
         """
         Check which columns contain single unique value duplicated. These data
         are represented as a sub-header in the table.  This makes for a more
@@ -169,7 +157,7 @@ class SummaryTable(LoggingMixin):
         Parameters
         ----------
         data
-        col_headers`
+        col_headers
 
         Returns
         -------
@@ -186,10 +174,10 @@ class SummaryTable(LoggingMixin):
             raise NotImplementedError
 
         data = table.data
-        n_head_col = table.n_head_col
+        n_head_cols = table.n_head_cols
         if (loc is False) or (ncols is False):
             self.items = {}
-            self.index_shown = np.arange(table.ncols + n_head_col)
+            self.index_shown = np.arange(table.ncols + n_head_cols)
             self.loc = -1
             return
 
@@ -199,25 +187,17 @@ class SummaryTable(LoggingMixin):
         val_squash = data[0, idx_squash]
 
         idx_show = np.setdiff1d(range(data.shape[1]), idx_squash)
-        idx_show = np.r_[np.arange(n_head_col), idx_show + n_head_col]
-        
+        idx_show = np.r_[np.arange(n_head_cols), idx_show + n_head_cols]
+
         # check if any data left to display
         if idx_show.size == 0:
             self.logger.warning('No data left in table after summarizing '
                                 'singular value columns.')
 
         # get summarized items. columns for which all data identical
-        headers, units = (), ()
-        if (n := len(idx_squash)):
-            items = op.itemgetter(*idx_squash)(
-                list(zip(table.col_headers, table.units)))
-
-            if n == 1:
-                items = [items]
-
-            headers, units = zip(*items)
-
-        self.items = dict(zip(headers, zip(val_squash, units)))
+        # headers = np.take(table.col_headers, idx_squash, axis=-1)
+        headers = table.col_header_block[:,  idx_squash + table.n_head_cols]
+        self.items = dict(zip(map(tuple, zip(*headers)), val_squash))
         self.index_shown = idx_show
         self.loc = int(loc)
 
@@ -237,13 +217,12 @@ class SummaryTable(LoggingMixin):
     @property
     def index_inset(self):
         tbl = self.table
-        n = tbl.data.shape[1] + tbl.n_head_col
+        n = tbl.data.shape[1] + tbl.n_head_cols
         return np.setdiff1d(np.arange(n), self.index_shown)
 
     def allowed(self):
         """Check if table allows summarizarion."""
         return (len(self.table.data) > 1) and self.table.has_col_head
-        
 
     def possible(self, ignore=()):
         if not self.allowed():
@@ -255,7 +234,7 @@ class SummaryTable(LoggingMixin):
         if any(ignore):
             *_, idx_ign = np.where(self.table.col_headers == np.atleast_2d(ignore).T)
 
-        # idx_same = np.setdiff1d(idx_same, idx_ign)  # + self.n_head_col
+        # idx_same = np.setdiff1d(idx_same, idx_ign)  # + self.n_head_cols
         return np.setdiff1d(idx_same, idx_ign)
 
     # def _default_format(self, key, val, unit):
@@ -273,13 +252,15 @@ class SummaryTable(LoggingMixin):
                **self.kws}
 
         # summary_items
-        cells = [format_special(fmt, key=key, val=val, unit=unit)
-                 for key, (val, unit) in self.items.items()]
-        widths = np.vectorize(ansi.length, [int])(cells) + self.whitespace
+        unit = (-1 if self.table.has_units else None)
+        cells = [format_optional(fmt, key=head[:unit], val=val, unit=head[unit:])
+                 for head, val in self.items.items()]
         # NOTE widths without cell borders
+        widths = np.vectorize(ansi.length, [int])(cells) + self.whitespace
 
+        # compute number of columns for availale space
         ncols = self._auto_ncols(widths) if self.auto_ncols else int(self.ncols)
-
+        # bullet size
         lb = ansi.length(self.bullet)
 
         # handle single row summary
@@ -287,8 +268,8 @@ class SummaryTable(LoggingMixin):
             borders = ['', *([self.bullet] * (ncols - 1)), '']
             # justify: Add space to columns. Passing column widths to Table API
             # assumes borders not included
-            avail_space = self.table.get_width(frame=False) - sum(widths) - lb * ncols
-            delta = apportion(avail_space, ncols)
+            width = self.table.get_width(frame=False)
+            delta = apportion(width - sum(widths) - (lb * ncols), ncols)
             return Table(cells, borders=borders, width=np.add(widths, delta),
                          **kws)
 
@@ -306,8 +287,8 @@ class SummaryTable(LoggingMixin):
             rows = np.transpose([align_at(col, '=') for col in rows.T])
 
         # justify
-        avail_space = self.table.get_width(frame=False) - sum(widths) - lb * ncols
-        delta = apportion(avail_space, ncols)
+        width = self.table.get_width(frame=False)
+        delta = apportion(width - sum(widths) - (lb * ncols), ncols)
         space = 2
         if self.bullet and all(delta > space):
             rows = np.vectorize(bulleted, [str])(rows, self.bullet, space)

@@ -1,3 +1,6 @@
+"""
+Construct tables from sequences of objects and lists of attributes.
+"""
 
 # std
 import functools as ftl
@@ -8,31 +11,19 @@ from collections import abc, defaultdict
 import numpy as np
 
 # local
+from recipes.containers.sets import OrderedSet
 from pyxides.grouping import Groups
 from pyxides.vectorize import AttrTabulate
-from recipes.containers.dicts import AttrDict
-from recipes.containers.sets import OrderedSet
 
 # relative
 from ..utils import make_group_title, resolve_alignment
 from .table import Table
 from .column import Column
-from .xlsx import XlsxWriter
 
 
 # ---------------------------------------------------------------------------- #
-
-CONVERTERS = {  # TODO: MOVE TO formatter
-    's': str,
-    'r': repr,
-    'a': ascii,
-    'o': ord,
-    'c': chr,
-    't': str.title,
-    'q': lambda _: repr(str(_))
-}
-
 SENTINEL = object()
+
 # ---------------------------------------------------------------------------- #
 
 
@@ -355,24 +346,27 @@ class AttrTable:
         if attrs is None:
             attrs = self.attrs
 
-        data = container.attrs(*attrs)
-        # cols = list(zip(*data))
-        col_headers = self.get_headers(attrs)
+        # get data
+        data = self.get_data(container, attrs)
+
+        # get column headers
+        headers = [self.get_groups(attrs), self.get_headers(attrs)]
+        headers = list(filter(None, headers))
         flags = {colname: list(map(flag, container) if callable(flag) else flag)
                  for colname, flag in self.flags.items()}
-        align = {k: v for k, v in self.align.items() if k in col_headers}
-        return Table(data, **{**self.kws,  # defaults
-                              **{**dict(title=container.__class__.__name__,
-                                        align=align,
-                                        col_headers=col_headers,
-                                        col_groups=self.get_groups(attrs),
-                                        totals=self.totals,
-                                        flags=flags,
-                                        footnotes=self.footnotes),
-                                 **{key: self.get_defaults(attrs, key)
-                                    for key in ('units', 'formatters')},
-                                 **kws},  # keywords from user input
-                              })
+        align = {k: v for k, v in self.align.items() if k in headers}
+        return Table(data,
+                     **{**self.kws,  # defaults
+                        **{**dict(title=container.__class__.__name__,
+                                  align=align,
+                                  col_headers=headers,
+                                  totals=self.totals,
+                                  flags=flags,
+                                  footnotes=self.footnotes),
+                           **{key: self.get_defaults(attrs, key)
+                              for key in ('units', 'formatters')},
+                           **kws},  # keywords from user input
+                        })
 
     def prepare(self, groups, **kws):
         # class GroupedTables:
@@ -469,13 +463,12 @@ class AttrTable:
             # gt = np.ma.sum(op.AttrVector('totals').filter(tables.values()), 0)
             grand = np.ma.sum([_.totals for _ in tables.values()
                                if _.totals is not None], 0)
-
             tables['totals'] = tbl = Table(grand,
                                            title='Totals:',
-                                           title_align='<',
                                            formatters=tbl.formatters,
-                                           row_headers='',
-                                           masked='')
+                                           row_headers=[' '],
+                                           masked='',
+                                           **kws)
 
         #
         tbl.footnotes = list(footnotes)
@@ -496,7 +489,7 @@ class AttrTable:
                 list(compactable),
                 self.get_table(first[:1], compactable,
                                chead=None, cgroups=None,
-                               row_nrs=False, **kws).pre_table[0]
+                               row_nrs=False, **kws)._formatted[0]
             ))
             first.inset = first.summary()
 
@@ -509,31 +502,12 @@ class AttrTable:
 
         if widths is None:
             widths = {}
-            
-        data = np.array(self.get_data(self.parent.sort_by('t.t0')))
-
-        # FIXME: better to use get_table here, but then we need to keep
-        # table.data as objects not convert to str prematurely!
-        # PLEASE FIX THIS UNGODLY HACK
-
-        col_headers = self.get_headers()
-        tmp = AttrDict(
-            data=data,
-            col_groups=self.get_groups(),
-            col_headers=col_headers,
-            _col_headers=col_headers,
-            units=self.get_units(),
-            formatters={self.attrs.index(k): v for k, v in self.formatters.items()},
-            totals=[col_headers.index(t) for t in self.totals],
-            title=self.title,
-            shape=(len(data), len(self.attrs)),
-            n_cols= len(self.attrs)
-        )
 
         # may need to set widths manually eg. for cells that contain formulae
         # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
-        # table = tmp()
+
+        tbl = self.get_table(self.parent)
         align = {**self.align, **kws.pop('align', {})}
-        tmp.resolve_input = ftl.partial(Table.resolve_input, tmp)
-        return XlsxWriter(tmp, widths, align=align, **kws).write(
-            path, sheet, formats, overwrite)
+        formats = dict(formats)
+        tbl.to_xlsx(path, sheet, overwrite=overwrite, formats=formats,
+                    widths=widths, align=align, **kws)

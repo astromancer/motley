@@ -23,7 +23,7 @@ formatter can understand, use the `stylize` function:
 
 
 Field widths inside nested contexts are adjusted to compensate for hidden (non
-display) colour code-points:
+display) colour/style code-points:
 >>> motley.stylize('{{{filename}:|green}@{line:d|orange}: <52}| {msg}')
 '{\x1b[;32m{filename}\x1b[0m@\x1b[;38;2;255;165;0m{line:d}\x1b[0m: <84}| {msg}'
 
@@ -33,7 +33,7 @@ You can also use the well known x11 colour names
 '\x1b[;38;2;127;255;212;3;48;2;211;211;211mHello world\x1b[0m'
 
 
-RGB colour are given like so:
+RGB colours are input like this:
 >>> motley.format('{:s|(122,0,0),B,I,_/(171,100,41)}', 'Hello world')
 '\x1b[;38;2;122;0;0;1;3;4;48;2;171;100;41mHello world\x1b[0m'
 
@@ -42,10 +42,9 @@ Finally, the stylize function can also be used as a partial formatter that will
 substitute all available fields, and leave the rest unaltered instead of borking.
 >>> motley.format_partial('Give me as {many} as you {can}', many='much')
 'Give me as much as you {can}'
-
 """
 
-
+from _string import formatter_field_name_split
 # std
 import re
 from textwrap import dedent
