@@ -20,7 +20,7 @@ FG_EFFECTS = {
     'hidden':           8,  # conceal
     'strike':           9,
     # 10                    Primary(default) font
-    # 11–19                 {\displaystyle n}  Select the n-th alternate font.
+    # 11–19                 Select the n-th alternate font.
     #                       n-th alternate font (14 being the fourth alternate
     #                       font, up to 19 being the 9th alternate font).
     # 20                    Fraktur:hardly ever supported
@@ -28,7 +28,7 @@ FG_EFFECTS = {
     #                       supported; double underline hardly ever supported.
     # 22                    Normal color or intensity. Neither bold nor faint
     # 23                    Not italic, not Fraktur
-    # 24                    Underline: None:Not singly or doubly underlined
+    # 24                    Underline: None: Not singly or doubly underlined
     # 25                    Blink: off
     # 26                    Reserved
     # 27                    Image: Positive
@@ -144,4 +144,9 @@ COLOR_ALIASES = {
     'y':                'yellow',
     'k':                'black',
     'w':                'white',
+}
+
+ALIASES = {
+    'fg': {**STYLE_ALIASES, **COLOR_ALIASES},
+    'bg': COLOR_ALIASES
 }

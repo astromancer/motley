@@ -7,6 +7,8 @@ Does the work to translate colour/effect names to ANSI codes
 import re
 import numbers
 import functools as ftl
+import itertools as itt
+from collections import defaultdict
 
 # third-party
 import numpy as np
@@ -17,9 +19,10 @@ from recipes.containers.dicts import TranslatorMap
 
 # relative
 from ..colors import CSS_TO_RGB
+from . import explain
 from .utils import parse
 from .exceptions import InvalidStyle
-from ._codes import BG_CODES, FG_CODES, COLOR_ALIASES, STYLE_ALIASES
+from ._codes import ALIASES, BG_CODES, COLOR_ALIASES, FG_CODES, STYLE_ALIASES
 
 
 # ---------------------------------------------------------------------------- #
@@ -36,6 +39,7 @@ RGX_RGB = re.compile(r'''(?x)
     (?P<b>\d{1,3})\s*
     ((?(1)\])(?(2)\))$)
 ''')
+
 
 # Movement = {} # TODO
 # ---------------------------------------------------------------------------- #
@@ -97,9 +101,108 @@ FORMAT_24BIT = KeywordResolver(fg='38;2;{:d};{:d};{:d}',
 COLOR_FORMATTERS = {8:  FORMAT_8BIT,
                     24: FORMAT_24BIT}
 
+# ---------------------------------------------------------------------------- #
+
+
+def standardize(*effects, **kws):
+    items = defaultdict(list)
+    for key, val in itt.chain(std(effects), std(kws)):
+        items[key].append(val)
+
+    return dict(items)
+
+
+@ftl.singledispatch
+def std(obj, fg_or_bg='fg'):
+    """default dispatch func for resolving ANSI codes from user input"""
+    raise InvalidStyle(obj, fg_or_bg)
+
+
+@std.register(type(None))
+def _(obj, fg_or_bg='fg'):
+    return
+    yield  # sourcery skip: remove-unreachable-code #pylint: disable=unreachable
+
+
+@std.register(str)
+def _(obj, fg_or_bg='fg'):
+
+    obj = obj.strip()
+    if obj == '':
+        return
+
+    # resolve hex / html / css colours
+    if obj.startswith('#'):
+        yield fg_or_bg, hex_to_rgb(obj)
+        return
+
+    # number strings eg: '4' or code sequences eg: '38;2;12;33;0'
+    # are interpreted as ansi codes and passed through
+    if all(map(str.isdigit, obj.split(';'))):
+        yield from explain.params(obj).items()
+        return
+
+    # try resolve as a named color / effect
+    if value := ALIASES[fg_or_bg].get(obj, None):
+        yield fg_or_bg, value
+        return
+
+    # case only matters for the shortcut 'B' => 'bold', this would have been
+    # resolved above
+    obj = obj.lower()
+    if value := CSS_TO_RGB.get(obj, None):
+        yield fg_or_bg, value
+        return
+
+    # try resolve RGB string: '[123,1,99]'
+    if rgb := RGX_RGB.fullmatch(obj):
+        rgb = rgb.groupdict()
+        yield from std(tuple(map(int, map(rgb.get, 'rgb'))), fg_or_bg)
+        return
+
+    if obj not in CODES[fg_or_bg]:
+        raise InvalidStyle(obj, fg_or_bg)
+    
+    yield fg_or_bg, obj
+
+
+@std.register(numbers.Integral)
+def _(obj, fg_or_bg='fg'):
+    # integers are interpreted as 8-bit colour codes
+    if 0 <= obj < 256:
+        yield fg_or_bg, obj
+        return
+
+    raise ValueError(f'Could not interpret key {obj!r} as a 8-bit colour for '
+                     f'{fg_or_bg}.')
+
+
+@std.register(np.ndarray)
+@std.register(list)
+@std.register(tuple)
+def _(obj, fg_or_bg='fg'):
+    # 3-tuples, lists are interpreted as 24-bit rgb colour codes
+    if is_24bit(obj):
+        yield fg_or_bg, to_24bit(obj)
+        return
+
+    # resolve sequence
+    for p in obj:
+        yield from std(p, fg_or_bg)
+
+
+@std.register(dict)
+def _(obj, _=''):
+    for key, val in obj.items():
+        # `val` may have tuple of effects: eg: ((55, 55, 55), 'bold', 'italic')
+        # but may also be a rgb tuple eg: (55, 55, 55)
+        yield from std(val, key)
+
 
 # ---------------------------------------------------------------------------- #
 # Dispatch functions for translating user input to ANSI codes
+
+# def resolver(obj, fg_or_bg='fg'):
 
 
 @ftl.singledispatch
@@ -116,6 +219,8 @@ def _(obj, fg_or_bg='fg'):
 
 @resolve.register(str)
 def _(obj, fg_or_bg='fg'):
+
+    obj = obj.strip()
     if obj == '':
         return
 
@@ -126,7 +231,6 @@ def _(obj, fg_or_bg='fg'):
 
     # number strings eg: '4' or code sequences eg: '38;2;12;33;0'
     # are interpreted as ansi codes and passed through
-
     if all(map(str.isdigit, obj.split(';'))):
         yield obj
         return
@@ -155,7 +259,7 @@ def _(obj, fg_or_bg='fg'):
     if 0 <= obj < 256:
         yield FORMAT_8BIT[fg_or_bg].format(obj)
     else:
-        raise ValueError(f'Could not interpret key {obj!r} as a 8 bit colour.')
+        raise ValueError(f'Could not interpret key {obj!r} as a 8-bit colour.')
 
 
 @resolve.register(np.ndarray)
@@ -165,9 +269,11 @@ def _(obj, fg_or_bg='fg'):
     # 3-tuples, lists are interpreted as 24-bit rgb colour codes
     if is_24bit(obj):
         yield FORMAT_24BIT[fg_or_bg].format(*to_24bit(obj))
-    else:
-        for p in obj:
-            yield from resolve(p, fg_or_bg)
+        return
+
+    # resolve sequence
+    for p in obj:
+        yield from resolve(p, fg_or_bg)
 
 
 @resolve.register(dict)
@@ -177,6 +283,8 @@ def _(obj, _=''):
         # but may also be a rgb tuple eg: (55, 55, 55)
         yield from resolve(val, key)
 
+
+# ---------------------------------------------------------------------------- #
 
 def is_24bit(obj):
     if len(obj) != 3:
@@ -190,7 +298,7 @@ def to_24bit(triplet):
     # check we have 3-tuple
     if len(triplet) != 3:
         raise ValueError(
-            f'{triplet!r} has incorrect size for 24bit colour. 24 bit Colours'
+            f'{triplet!r} has incorrect size for 24-bit colour. 24 bit Colours'
             ' are represented by a sequence of 3 integers in range (0, 256), or'
             ' 3 floats in range (0, 1).')
 
@@ -212,7 +320,8 @@ def to_24bit(triplet):
             raise TypeError(
                 f'Could not interpret key {triplet!r} as a 24 bit colour.'
             )
-    return triplet
+
+    return tuple(triplet)
 
 
 # to_rgb = to_24bit
@@ -226,6 +335,7 @@ def hex_to_rgb(value):
     return tuple(int(bit, 16) for bit in mit.sliced(value, size // 3))
 
 
+# ---------------------------------------------------------------------------- #
 def _iter_codes(*effects, **kws):
     """
 

@@ -803,7 +803,7 @@ class Table(LoggingMixin):
         self.subtitle = subtitle
 
         self.has_title = title not in (None, False)
-        self.title_style = title_style
+        self.title_style = codes.standardize(title_style)
         self.title_align = resolve_alignment(title_align)
 
         self.subtitle_style = subtitle_style or self.title_style
