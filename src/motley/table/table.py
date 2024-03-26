@@ -903,7 +903,6 @@ class Table(LoggingMixin):
         # add the (row / column) headers / row numbers / totals
         if self.n_head_cols:
             data = np.ma.hstack((self.row_header_block, data))
-            
 
         # add totals row
         if self.has_totals:
@@ -1181,13 +1180,13 @@ class Table(LoggingMixin):
 
     @property
     def col_header_block(self):
-        
+
         nhr, nhc = self.n_head_rows, self.n_head_cols
         block = np.full((nhr, self.ncols + nhc), '', 'O')
 
         # top left corner
         block[:nhr, :nhc] = self.headers_header_block
-        
+
         # add col numbers
         if hcn := self.has_col_nrs:
             block[0, :len(self.col_nrs)] = self.col_nrs
@@ -1604,6 +1603,7 @@ class Table(LoggingMixin):
 
         # add header widths
         if include_headers:
+
             to_measure = list(self.col_header_block) if include_headers else []
             merge_above = int(self.has_units) + self.has_row_head
 
@@ -1611,11 +1611,11 @@ class Table(LoggingMixin):
                 for depth, headers in enumerate(to_measure[::-1]):
                     indices = set(range(self.ncols + self.n_head_cols))
 
-                    if depth > merge_above:
+                    if depth >= merge_above:
                         # count groups only once since cells will be merged
-                        if idx := where_duplicate(headers):
+                        if idx := where_duplicate(headers, consecutive=True):
                             rmv = set.union(*map(set, idx))
-                            indices -= set(np.add(list(rmv), self.n_head_cols))
+                            indices -= set(rmv)
 
                     for i in indices:
                         widths[i] = max(widths[i], get_width(headers[i], count_hidden))
@@ -1741,7 +1741,7 @@ class Table(LoggingMixin):
     def split(self, max_width=None):
         # TODO: return Table objects??
 
-        max_width = max_width or self.max_width
+        max_width = max_width or (self.max_width - self.frame)
 
         widths = self.col_widths[self._idx_shown] + self.lcb[self._idx_shown]
         # rhw = widths[:self.n_head_cols].sum()  # row header width
@@ -1756,7 +1756,7 @@ class Table(LoggingMixin):
             if self.has_col_head:
                 group_splits = self._get_group_boundaries(-1)
                 splits = np.digitize(require_split, group_splits) - 1
-                splits = np.take(group_splits, splits) + 1
+                splits = np.take(group_splits, splits)
             else:
                 width = ctcw[-1]
                 nsplit = int(np.ceil(width / max_width))
@@ -1779,13 +1779,13 @@ class Table(LoggingMixin):
 
     def _get_group_boundaries(self, i):
         # prefer to split at group boundaries
-        return [j for _, (*_, j) in unique(self.col_headers[i], consecutive=True)]
+        return [j for _, (*_, j) in unique(self.col_header_block[i], True)]
 
-    def get_group_boundaries(self, indices):
+    def get_group_boundaries(self, rows=..., columns=...):
         # prefer to split at group boundaries
         if self.has_col_head:
             splits = []
-            *top, last = self.col_header_block[:, indices]
+            *top, last = self.col_header_block[rows, columns]
             for groups in top:
                 # section = np.take(groups, indices)
                 idx = [i for _, (*_, i) in unique(groups, consecutive=True)]
@@ -1836,7 +1836,7 @@ class Table(LoggingMixin):
     def get_col_header_lines(self, indices):
 
         # column groups
-        for data, splits in self.get_group_boundaries(indices):
+        for data, splits in self.get_group_boundaries(..., indices):
             line = self._merged_row(data, indices, splits)
             line = codes.apply(line, self.col_head_style)
 
