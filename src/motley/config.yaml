@@ -1,0 +1,52 @@
+
+xlsx:
+    style:
+
+        data:
+            font:
+                name:       Ubuntu Mono
+                size:       10
+
+        title:
+            font:
+                size:           14
+                bold:           True
+            alignment:
+                horizontal:     center
+                vertical:       center
+                wrap_text:      True
+            border:
+                bottom:         double
+
+        headers:
+            font:
+                size:           12
+                bold:           True
+            alignment:
+                horizontal:     center
+                vertical:       center
+                wrap_text:      True
+            # border:
+            #     bottom:         double
+
+        groups:
+            border:
+                right:          double
+
+        units:
+            # font:
+            alignment:
+                horizontal:     center
+                vertical:       top
+            border: 
+                bottom:         double
+
+        totals:
+            font:
+                bold:   True
+            border:
+                bottom: thin
+                top:    thin
+
+        bottomrule :    double
+        

@@ -497,8 +497,8 @@ class AttrTable:
         # tables.update(empty)
         return tables
 
-    def to_xlsx(self, path, sheet=None, formats=(), widths=None, overwrite=False,
-                **kws):
+    def to_xlsx(self, path, sheet=None, formats=(), widths=None, align=None,
+                overwrite=False, **kws):
 
         if widths is None:
             widths = {}
@@ -507,7 +507,7 @@ class AttrTable:
         # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
 
         tbl = self.get_table(self.parent)
-        align = {**self.align, **kws.pop('align', {})}
+        align = {**self.align, **(align or {})}
         formats = dict(formats)
         tbl.to_xlsx(path, sheet, overwrite=overwrite, formats=formats,
                     widths=widths, align=align, **kws)

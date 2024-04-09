@@ -18,6 +18,7 @@ from openpyxl.styles import Alignment, Border, Font, Side
 # local
 from recipes import op
 from recipes.string import sub
+from recipes.config import ConfigNode
 from recipes.logging import LoggingMixin
 from recipes.containers.ensure import ensure
 from recipes.containers.dicts import AttrDict
@@ -28,6 +29,10 @@ from recipes.containers import (duplicate_if_scalar, duplicates, split, unique,
 
 
 # ---------------------------------------------------------------------------- #
+#
+CONFIG = ConfigNode.load_module(__file__)
+
+#
 ALIGNMENT_MAP = {'>': 'right',
                  '<': 'left',
                  '^': 'center'}
@@ -136,53 +141,37 @@ def set_block_style(cells, **kws):
 #         yield max(hwidth, width, minimum)
 
 
+def get_style(config):
+    # Style config
+    style = config.copy()
+    
+    # Font
+    base = style.pop(('data', 'font'))
+    for section, prop in style.find('font').items():
+        style[section, 'font'] = Font(**{**base, **prop['font']})
+    style['data', 'font'] = Font(**base)
+        
+    # Borders
+    for path, side in config.find('border').flatten().items():
+        style[path] = Side(side)
+
+    # Alignment
+    for kls in (Alignment, Border):
+        prop = kls.__name__.lower()
+        for section, vals in style.find(prop).items():
+            style[section, prop] = kls(**vals[prop])
+
+    return style
+
+# ---------------------------------------------------------------------------- #
+
 class XlsxWriter(LoggingMixin):
 
-    # -------------------------------------------------------------------- #
-    # styling defaults
+    # ------------------------------------------------------------------------ #
+    # style config
+    style = get_style(CONFIG.style)
 
-    # TODO: move to config
-    font = dict(name='Ubuntu Mono', size=10)
-    rule = Side('thin')
-    rule2 = Side('double')
-    bottomrule = True
-
-    style = {}
-    style['title'] = dict(
-        font=Font(**{**font,
-                     'size': 14,
-                     'bold': True}),
-        alignment=Alignment(horizontal='center',
-                            vertical='center',
-                            wrap_text=True),
-        border=Border(bottom=rule2)
-    )
-
-    style['headers'] = dict(
-        font=Font(**{**font,
-                     'size': 12,
-                     'bold': True}),
-        alignment=Alignment(horizontal='center',
-                            vertical='center',
-                            wrap_text=True),
-        # border=Border(bottom=rule2)
-    )
-
-    style['units'] = dict(
-        font=Font(**font),
-        alignment=Alignment(horizontal='center',
-                            vertical='top'),
-        # border=Border(bottom=rule2)
-    )
-    style['data'] = dict(
-        font=Font(**font),
-        # alignment=Alignment(horizontal='center',
-        #                     vertical='center')
-    )
-    style['totals'] = dict(
-        font=Font(**font, bold=True),
-        border=Border(bottom=rule, top=rule)
-    )
+    # ------------------------------------------------------------------------ #
 
     def __init__(self, table, widths=None, align=None,
                  merge_unduplicate=('headers'), header_formatter=str):
@@ -255,7 +244,7 @@ class XlsxWriter(LoggingMixin):
                     if workbook.sheetnames == ['Sheet']:
                         workbook.active.title = sheet
                     else:
-                        ws = workbook.create_sheet(sheet)
+                        ws = workbook.create_sheet(sheet)  # , index=
             else:
                 ws = workbook.active
         else:
@@ -334,7 +323,7 @@ class XlsxWriter(LoggingMixin):
         if table.col_groups:
             for val, (*_, index) in unique(table.col_headers[0]):
                 set_block_style(ws[cell_range(index, 1, index, r)],
-                                border=Border(right=self.rule2))
+                                border=self.style.groups.border)
 
             # if val in self.merge_unduplicate:
             #     self.merge_duplicate_rows( )
@@ -347,9 +336,9 @@ class XlsxWriter(LoggingMixin):
                     indices = table.resolve_columns(h, table.n_cols, 'merge region')
                     self.merge_duplicate_rows(table.data, r0, indices, nrows)
 
-        if self.bottomrule and not table.has_totals:
+        if (bottomrule := self.style.get('bottomrule')): # and not table.has_totals:
             set_block_style(ws[cell_range(0, r + 1, ncols - 1, r + 1)],
-                            border=Border(top=self.rule2))
+                            border=Border(top=Side(bottomrule)))
 
         if path:
             workbook.save(path)
@@ -412,7 +401,7 @@ class XlsxWriter(LoggingMixin):
         set_block_style(
             self.worksheet[cell_range(0, q, ncols - 1, q)],
             **self.style['units' if (table.n_head_rows > 1) else 'headers'],
-            border=Border(bottom=self.rule2)
+            # border=Border(bottom=Side('double'))
         )
 
         if 'headers' in self.merge_unduplicate:
