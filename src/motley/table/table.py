@@ -1755,13 +1755,15 @@ class Table(LoggingMixin):
         if (many := len(require_split)):
             if self.has_col_head:
                 group_splits = self._get_group_boundaries(-1)
-                splits = np.digitize(require_split, group_splits) - 1
+                splits = np.digitize(require_split, group_splits)
                 splits = np.take(group_splits, splits)
             else:
                 width = ctcw[-1]
                 nsplit = int(np.ceil(width / max_width))
                 allocation = np.array(ctcw // int(np.ceil(width / nsplit)))
                 splits, = np.where(np.diff(allocation) == 1)
+        else:
+            splits = []
 
         # location of current split
         first = True
