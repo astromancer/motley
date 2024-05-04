@@ -49,15 +49,6 @@ COL_ALIGN_FUNCS = {'<': np.char.ljust,
 # Utils
 # ---------------------------------------------------------------------------- #
 
-
-def str2tup(keys):
-    if isinstance(keys, str):
-        keys = (keys, )  # a tuple
-    return keys
-
-
-# ---------------------------------------------------------------------------- #
-
 def apportion(width, n):
     # divide space as equally as possible between `n` columns
     space = np.array([width // n] * n)

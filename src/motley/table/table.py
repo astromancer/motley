@@ -517,7 +517,7 @@ class Table(LoggingMixin):
                  #
                  # TODO: '{"DATA TABLE":^s|Bg_/c}'
                  # Force colours to be specified this way to reduce the number of
-                 # parameters here!
+                 # parameters here!?
 
                  title=None,
                  title_align='center',
@@ -817,7 +817,8 @@ class Table(LoggingMixin):
 
         # columns headers
         self.col_nrs = ()
-        self.col_headers = self.resolve_col_headers(col_headers, kws.pop('col_groups', ()))
+        self.col_headers = self.resolve_col_headers(col_headers,
+                                                    kws.pop('col_groups', ()))
 
         # row headers
         self.row_nrs = row_nrs
