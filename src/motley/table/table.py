@@ -22,7 +22,7 @@ import more_itertools as mit
 from recipes.logging import LoggingMixin
 from recipes.functionals import always, echo0
 from recipes.oo.property import CachedProperty
-from recipes.iter import cosplit, filtered, flip_lr
+from recipes.iter import cofilter, cosplit, flip_lr
 from recipes import api, dicts, flow, op, pprint as ppr
 from recipes.containers import (cosort, ensure, is_null, is_scalar, not_null,
                                 unique, where, where_duplicate)
@@ -1854,8 +1854,8 @@ class Table(LoggingMixin):
 
         line = self.LEFT_BORDER if self.frame else ''
 
-        groups = filtered(cosplit(data, indices, indices=split_points + 1))
-        for (text, *_), idx in groups:
+        groups = cofilter(*zip(*cosplit(data, indices, indices=split_points + 1)))
+        for (text, *_), idx in zip(*groups):
             idx = list(idx)
             space = (self.col_widths[idx] + self.lcb[idx]).sum()
             if codes.length(text) >= space:
