@@ -27,7 +27,7 @@ KNOWN_SUMMARY_STRINGS = {'header', 'footer', 'drop'}
 # *PILLAR_COLUMN_KEYS,  'ncols', 'n_cols',  'borders'
 
 # Format for single value columns
-SVC_FMT = R'{key[-1]: <|B} = {{val}\[ [{unit}]\]: <}'
+SVC_FMT = R'{key[-1]: <|B} = {{val}<? [{unit}]?>: <}'
 
 
 # defines vectorized length

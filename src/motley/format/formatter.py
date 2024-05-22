@@ -75,7 +75,7 @@ STRING_CLASSES = (str, UserString)
 builtin_formatter = BuiltinFormatter()  # oformat
 
 # Formatting optional fields
-OPTIONAL_FIELD_PARSER = delim.Parser(('\[', '\]'))
+OPTIONAL_FIELD_PARSER = delim.xml
 
 # CONVERTERS = {
 #     's': str,
