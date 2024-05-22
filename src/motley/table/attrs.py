@@ -12,8 +12,8 @@ import numpy as np
 
 # local
 from recipes.containers.sets import OrderedSet
-from pyxides.grouping import Groups
-from pyxides.vectorize import AttrTabulate
+from pyxides.grouping import Grouped
+from pyxides.vectorize import AttrTableMixin
 
 # relative
 from ..utils import make_group_title, resolve_alignment
@@ -83,8 +83,6 @@ class AttrColumn(Column):
         self.flag_info = flag_info
 
 
-# TODO:? from pyxides.vectorize import AttrTableDescriptor
-
 class AttrTable:
     """
     Helper class for tabulating attributes (or properties) of lists of objects.
@@ -126,13 +124,8 @@ class AttrTable:
                 totals.append(attr)
 
         obj = cls(mapping.keys(), totals=totals, **options, **kws)
-        obj._columns = list(mapping.values())
+        obj._columns = mapping
         return obj
-
-    def __get__(self, instance, kls):
-        if instance:  # lookup from instance
-            self.parent = instance
-        return self  # lookup from class
 
     def _ensure_dict(self, obj):
         if obj is None:
@@ -144,9 +137,16 @@ class AttrTable:
         return dict(zip(self.attrs, obj))
 
     def __new__(cls, attrs, *args, **kws):
+
         if isinstance(attrs, dict):
             return cls.from_dict(attrs)
+
         return super().__new__(cls)
+
+    def __get__(self, instance, kls):
+        if instance:  # lookup from instance
+            self.target = instance
+        return self  # lookup from class
 
     def __init__(self,
                  attrs,
@@ -194,7 +194,7 @@ class AttrTable:
 
         # self.headers = dict(zip(attrs, self.get_headers(attrs)))
         # self._heads = {a: self.get_header_parts(a) for a in self.attrs}
-        self.parent = None
+        self.target = None
 
     def __call__(self, attrs=None, container=None, **kws):
         """
@@ -214,14 +214,15 @@ class AttrTable:
 
         """
 
-        container = container or self.parent
-        if isinstance(self.parent, AttrTabulate):
-            return self.get_table(self.parent, attrs, **kws)
+        container = container or self.target
 
-        if isinstance(self.parent, Groups):
-            return self.get_tables(self.parent, attrs, **kws)
+        if isinstance(container, Grouped):
+            return self.get_tables(container, attrs, **kws)
 
-        raise TypeError(f'Cannot tabulate object of type {type(self.parent)}.')
+        if isinstance(container, AttrTableMixin):
+            return self.get_table(container, attrs, **kws)
+
+        raise TypeError(f'Cannot tabulate object of type {type(container)}.')
 
     def get_defaults(self, attrs, which):
         defaults = getattr(self, which)
@@ -289,7 +290,7 @@ class AttrTable:
             raise ValueError('Attribute must be a str')
 
         # block below will bork with empty containers
-        # obj = self.parent[0]
+        # obj = self.target[0]
         # if not hasattr(obj, attr):
         #     raise ValueError('%r is not a valid attribute of object of '
         #                      'type %r' % (attr, obj.__class__.__name__))
@@ -306,7 +307,7 @@ class AttrTable:
 
     def get_data(self, container=None, attrs=None, converters=None):
         if container is None:
-            container = self.parent
+            container = self.target
 
         if len(container) == 0:
             return []
@@ -336,7 +337,7 @@ class AttrTable:
         motley.table.Table
         """
 
-        if not isinstance(container, AttrTabulate):
+        if not isinstance(container, AttrTableMixin):
             raise TypeError(f'Object of type {type(container)} does not '
                             f'support vectorized attribute lookup on items.')
 
@@ -345,33 +346,90 @@ class AttrTable:
 
         if attrs is None:
             attrs = self.attrs
+        # elif isinstance(MutableMapping)
 
         # get data
         data = self.get_data(container, attrs)
 
         # get column headers
-        headers = [self.get_groups(attrs), self.get_headers(attrs)]
-        headers = list(filter(None, headers))
+        config = self._get_config(attrs, **kws)
+        (*_, colnames) = zip(*config['col_headers'])
         flags = {colname: list(map(flag, container) if callable(flag) else flag)
-                 for colname, flag in self.flags.items()}
-        align = {k: v for k, v in self.align.items() if k in headers}
-        return Table(data,
-                     **{**self.kws,  # defaults
-                        **{**dict(title=container.__class__.__name__,
-                                  align=align,
-                                  col_headers=headers,
-                                  totals=self.totals,
-                                  flags=flags,
-                                  footnotes=self.footnotes),
-                           **{key: self.get_defaults(attrs, key)
-                              for key in ('units', 'formatters')},
-                           **kws},  # keywords from user input
-                        })
+                 for colname, flag in self.flags.items() if colname in colnames}
 
-    def prepare(self, groups, **kws):
+        return Table(data,
+                     # keywords from user input
+                     **{**config, 'flags': flags, **kws})
+
+    def summarize(self, summary, **kws):
+        """
+        Keyword arguments passed directly to the `motley.table.Table`
+        constructor.
+
+        Returns
+        -------
+        motley.table.Table
+        """
+
+        groups = self.target
+        if not isinstance(groups, Grouped):
+            raise TypeError(f'Object of type {type(groups).__name__} does not '
+                            f'support vectorized attribute lookup on items.')
+
+        # get data
+        data = groups.attrs.summarize(summary)
+        attrs = tuple(summary.keys())
+        # nfiles = list(map(len, groups.values()))
+
+        config = self._get_config(attrs,
+                                  **{'title': f'{self.target.__class__.__name__} summary',
+                                     **kws})
+        return Table(data, **config)
+
+    def _get_config(self, attrs, **kws):
+        # get column headers
+        headers = [self.get_groups(attrs), self.get_headers(attrs)]
+        headers = (*_, colnames) = list(filter(None, headers))
+        # flags = {colname: list(map(flag, container) if callable(flag) else flag)
+        #          for colname, flag in self.flags.items() if colname in colnames}
+        align = {k: v for k, v in self.align.items() if k in headers}
+
+        return {**self.kws,  # defaults
+                **{**dict(title=f'{self.target.__class__.__name__}',
+                          align=align,
+                          col_headers=headers,
+                          totals=self.totals,
+                          #   flags=flags,
+                          footnotes=self.footnotes),
+                   **{key: self.get_defaults(attrs, key)
+                      for key in ('units', 'formatters')},
+                   **kws},  # keywords from user input
+                }
+
+    def to_xlsx(self, path, sheet=None, formats=(), widths=None, align=None,
+                overwrite=False, **kws):
+
+        if widths is None:
+            widths = {}
+
+        # may need to set widths manually eg. for cells that contain formulae
+        # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
+
+        table = self.get_table(self.target)
+        align = {**self.align, **(align or {})}
+        formats = dict(formats)
+        table.to_xlsx(path, sheet, overwrite=overwrite, formats=formats,
+                    widths=widths, align=align, **kws)
+
+    def to_latex(self, style='table', indent=2, **kws):
+        # self.tabulate.parent = self.parent
+        tbl = self.get_table(self.target, title=False, col_groups=None, **kws)
+        tbl.to_latex(style='table', indent=2, **kws)
+
+    def prepare(self, groups, attrs, **kws):
         # class GroupedTables:
 
-        attrs = OrderedSet(self.attrs)
+        attrs = OrderedSet(attrs or self.attrs)
         attrs_grouped_by = ()
         compactable = set()
         # multiple = (len(self) > 1)
@@ -412,8 +470,9 @@ class AttrTable:
     def get_tables(self, groups, attrs=None, titled=True, filler_text='EMPTY',
                    grand_total=None, **kws):
         """
-        Get a dictionary of tables for the containers in `groups`. This method
-        assists working with groups of tables.
+        Get a dictionary of tables (`motley.table.Table` objects) for the
+        containers in `groups`. This method assists working with groups of
+        tables.
         """
 
         title = kws.pop('title', self.__class__.__name__)
@@ -423,7 +482,7 @@ class AttrTable:
         if titled is True:
             titled = make_group_title
 
-        attrs, compactable, headers, units, totals = self.prepare(groups)
+        attrs, compactable, headers, units, totals = self.prepare(groups, attrs)
         grand_total = grand_total or totals
 
         tables = {}
@@ -461,9 +520,11 @@ class AttrTable:
         # grand total
         if grand_total:
             # gt = np.ma.sum(op.AttrVector('totals').filter(tables.values()), 0)
-            grand = np.ma.sum([_.totals for _ in tables.values()
-                               if _.totals is not None], 0)
-            tables['totals'] = tbl = Table(grand,
+            totals = [_.totals if _.nrows > 1 else _.data[0] for _ in tables.values()]
+            totals = np.ma.array(totals)
+            totals.mask[:] = totals.mask.any(0)
+
+            tables['totals'] = tbl = Table(totals.sum(0),
                                            title='Totals:',
                                            formatters=tbl.formatters,
                                            row_headers=[' '],
@@ -496,18 +557,3 @@ class AttrTable:
         # put empty tables at the end
         # tables.update(empty)
         return tables
-
-    def to_xlsx(self, path, sheet=None, formats=(), widths=None, align=None,
-                overwrite=False, **kws):
-
-        if widths is None:
-            widths = {}
-
-        # may need to set widths manually eg. for cells that contain formulae
-        # tmp.col_widths = get_col_widths(tmp) if widths is None else widths
-
-        tbl = self.get_table(self.parent)
-        align = {**self.align, **(align or {})}
-        formats = dict(formats)
-        tbl.to_xlsx(path, sheet, overwrite=overwrite, formats=formats,
-                    widths=widths, align=align, **kws)
