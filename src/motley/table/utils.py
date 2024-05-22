@@ -209,16 +209,15 @@ def resolve_input(obj, n_cols, aliases, what, converter=None, raises=True,
     if not aliases and (str in set(map(type, out.keys()))):
         emit(f'Could not assign {what} due to missing `column_headers`.')
 
-    if aliases:
-        if ... in out:
-            # ... to be resolved first. Allows overwriting with later entries
-            out.move_to_end(..., last=False)
+    if ... in out:
+        # ... to be resolved first. Allows overwriting with later entries
+        out.move_to_end(..., last=False)
 
-        # copy dict to prevent RuntimeError on pop
-        for key in list(out.keys()):
-            item = out.pop(key)
-            for i in column.index(key, aliases, n_cols, what, emit):
-                out[i] = item
+    # copy dict to prevent RuntimeError on pop
+    for key in list(out.keys()):
+        item = out.pop(key)
+        for i in column.index(key, aliases, n_cols, what, emit):
+            out[i] = item
 
     # convert values
     if converter:
@@ -312,7 +311,7 @@ def rindex(string, char, default=-1):
     return idx if (idx := string.rfind(char)) != -1 else default
 
 
-def _underline(string):
+def ansi_underline(string):
     """
     Underline last line of multi-line string, or entire string if single line
     """

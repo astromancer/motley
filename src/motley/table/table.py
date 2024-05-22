@@ -2,7 +2,6 @@
 Pretty printed tables for small data sets
 """
 
-
 # std
 import os
 import typing
@@ -19,6 +18,7 @@ import numpy as np
 import more_itertools as mit
 
 # local
+from recipes.oo.slots import sanitize
 from recipes.logging import LoggingMixin
 from recipes.functionals import always, echo0
 from recipes.oo.property import CachedProperty
@@ -32,8 +32,7 @@ from .. import codes
 from ..format.formatter import format as mformat
 from ..utils import get_width, resolve_alignment
 from . import column, summary as sm
-from .xlsx import XlsxWriter
-from .utils import (NULL, _underline, apportion, convert_astropy_table,
+from .utils import (NULL, ansi_underline, apportion, convert_astropy_table,
                     is_astropy_table, justify_widths, measure_column_widths,
                     resolve_converters, resolve_input, truncate)
 
@@ -327,6 +326,7 @@ class Table(LoggingMixin):
     MID_BORDER = MID_BORDER
     LEFT_BORDER = LEFT_BORDER
     RIGHT_BORDER = RIGHT_BORDER
+    NRS_HEADER = '#'
 
     # The column format specification:
     cell_fmt = '{3}{0:{1}{2}}{4}'
@@ -339,7 +339,6 @@ class Table(LoggingMixin):
 
     # foot_fmt = None  # '{flag} : {info}'
     # _merge_repeat_groups = True
-    _nrs_header = '#'
 
     def resolve_input(self, obj, n_cols=None, what='\b', converter=None,
                       raises=True, default=NULL, default_factory=None,
@@ -406,6 +405,34 @@ class Table(LoggingMixin):
         return cls.from_dict(cols, **kws)
 
     @classmethod
+    @api.synonyms((API_SYNONYMS := dicts.merge({
+        'sub_title':                            'subtitle',
+        'units?':                               'units',
+        'footnotes?':                           'footnotes',
+        # 'formatters?':                        'formatters',
+        '(cell_?)white(space)?':                'whitespace',
+        'minimal(ist)?':                        'minimalist',
+        '((col(umn)?)?_?)widths?':              'widths',
+        '(c(ol(umn)?)?_?)?_head(er)?_align':    'col_head_align',
+        # 'c(ol(umn)?_?)groups':                  'col_headers',
+        '(row_?)?nrs':                          'row_nrs',
+        # 'n(um(be)?)?r?_?rows':                  'row_nrs',
+        'n((um(ber)?)|r?)_?rows':               'row_nrs',
+        'totals?':                              'totals',
+        '(c(ol(umn)?)?_?)?borders?':            'col_borders',
+        'vlines':                               'col_borders',
+        # 'title_style':                          'title_style',
+    },
+        *({f'{p}head(er)?s?':                   f'{rc}_headers',
+           f'{p}head(er)?_style':               f'{rc}_head_style'}
+          for rc, p in {'row':  'r(ow)?_?',
+                        'col':  'c(ol(umn)?)?_?'}.items())
+    )),
+        action=None)
+    def from_table(cls, table, **kws):
+        return cls(**{**table._init_kws, **kws})
+
+    @classmethod
     @api.synonyms(
         {
             'convert':                  'converters',
@@ -462,32 +489,7 @@ class Table(LoggingMixin):
     # TODO: test mappings!!
 
     # mappings for terse kws
-    @api.synonyms(
-        dicts.merge({
-            'sub_title':                            'subtitle',
-            'units?':                               'units',
-            'footnotes?':                           'footnotes',
-            # 'formatters?':                        'formatters',
-            '(cell_?)white(space)?':                'whitespace',
-            'minimal(ist)?':                        'minimalist',
-            '((col(umn)?)?_?)widths?':              'widths',
-            '(c(ol(umn)?)?_?)?_head(er)?_align':    'col_head_align',
-            # 'c(ol(umn)?_?)groups':                  'col_headers',
-            '(row_?)?nrs':                          'row_nrs',
-            # 'n(um(be)?)?r?_?rows':                  'row_nrs',
-            'n((um(ber)?)|r?)_?rows':               'row_nrs',
-            'totals?':                              'totals',
-            '(c(ol(umn)?)?_?)?borders?':            'col_borders',
-            'vlines':                               'col_borders',
-            # 'title_style':                          'title_style',
-        },
-            *({f'{p}head(er)?s?':                   f'{rc}_headers',
-               f'{p}head(er)?_style':               f'{rc}_head_style'}
-              for rc, p in {'row':  'r(ow)?_?',
-                            'col':  'c(ol(umn)?)?_?'}.items())
-        ),
-        action=None
-    )
+    @api.synonyms(API_SYNONYMS, action=None)
     def __init__(self,
                  data,
                  *args,
@@ -750,6 +752,8 @@ class Table(LoggingMixin):
         # pprint.mapping(locals(), ignore=['self'])
         # logger.debug('SUMMARY {!r}.', summary)
 
+        self._init_kws = sanitize(locals())
+
         # special case: dict
         if isinstance(data, dict):
             data, kws = self._parse_from_dict(data, **kws)
@@ -858,6 +862,7 @@ class Table(LoggingMixin):
         if isinstance(flag_fmt, str):
             flag_fmt = flag_fmt.format
         assert callable(flag_fmt)
+
         self.flag_fmt = flag_fmt
 
         # Footnotes
@@ -980,33 +985,7 @@ class Table(LoggingMixin):
         # self.col_widths = requested_widths
         # otypes=[int] in case borders are empty
 
-        # row borders
-        n_rows, _ = self._formatted.shape
-        # note: headers are index -1
-        if hlines is None:
-            hlines = []
-        elif hlines is ...:
-            hlines = np.arange(len(data))
-        elif hlines:
-            hlines = np.array(hlines)
-            hlines[hlines < 0] += n_rows
-        else:
-            hlines = False
-
-        if hlines is False:
-            hlines = []
-        else:
-            hlines = list(hlines)
-            # if self.has_col_head:
-            #     hlines.append(-1)
-
-            if self.has_totals:  # and hlines:
-                hlines.append(n_rows - self.has_col_head - self.has_units - 2)
-
-        if self.frame:
-            hlines.append(n_rows - self.has_col_head - self.has_units - 1)
-
-        self.hlines = sorted(set(hlines))
+        self.hlines = self.resolve_hlines(hlines)
 
         # Column specs
         # add whitespace for better legibility
@@ -1045,9 +1024,37 @@ class Table(LoggingMixin):
 
         self.show_colourbar = False
 
+    def resolve_hlines(self, hlines):
+        # row borders
+        n_rows, _ = self._formatted.shape
+        # note: headers are negatively indexed
+        if hlines is None:
+            hlines = []
+        elif hlines is ...:
+            hlines = np.arange(n_rows)
+        elif hlines:
+            hlines = np.array(hlines)
+            hlines[hlines < 0] += n_rows
+        else:
+            hlines = False
+
+        if hlines is False:
+            hlines = []
+        else:
+            hlines = list(hlines)
+            if self.has_col_head:
+                hlines.append(-1)
+                if self.n_head_rows > 2:
+                    hlines.append(-self.n_head_rows)
+
+            if self.has_totals:
+                hlines.extend(np.subtract(n_rows, (1, 2)))
+
+        return sorted(set(hlines))
+
     def resolve_borders(self, col_borders, frame, n_cols):
         # col borders (rhs)
-        mid_border = MID_BORDER
+        mid_border = self.MID_BORDER
         if isinstance(col_borders, str):
             mid_border = col_borders
             col_borders = [col_borders]
@@ -1062,7 +1069,7 @@ class Table(LoggingMixin):
         default_borders[n_cols] = self.RIGHT_BORDER
         borders = self.resolve_input(col_borders, n_cols, 'border', str,
                                      default_factory=default_borders.get)
-        # return np.array(list(borders.values()))
+
         return np.array([*borders.values(), self.RIGHT_BORDER])
 
         # if self.summarize == 'footnote':
@@ -1185,8 +1192,9 @@ class Table(LoggingMixin):
         nhr, nhc = self.n_head_rows, self.n_head_cols
         block = np.full((nhr, self.ncols + nhc), '', 'O')
 
-        # top left corner
-        block[:nhr, :nhc] = self.headers_header_block
+        if block.size:
+            # top left corner
+            block[:nhr, :nhc] = self.headers_header_block
 
         # add col numbers
         if hcn := self.has_col_nrs:
@@ -1207,8 +1215,8 @@ class Table(LoggingMixin):
     def headers_header_block(self):
         # top left corner headers/headers block
         block = np.full((self.n_head_rows,  self.n_head_cols), '', 'O')
-        if self.has_row_nrs:
-            block[-1, 0] = '#'
+        if self.has_col_head and self.has_row_nrs:
+            block[-self.has_units - 1, 0] = self.NRS_HEADER
 
         return block
 
@@ -1654,10 +1662,14 @@ class Table(LoggingMixin):
                                        default_factory=default_factory)
         # make align an array with same size as nr of columns in table
 
-        # row headers are left aligned, row nrs right aligned
-        return ''.join(('<' * self.has_row_head,
-                        '>' * self.has_row_nrs,
-                        *cosort(*zip(*alignment.items()))[1]))
+        return ''.join((
+            # row headers are left aligned
+            '<' * self.has_row_head,
+            # row nrs right aligned
+            ('<', '>')[len(data) > 10] if self.has_row_nrs else '',
+            # data column alignments
+            *cosort(*zip(*alignment.items()))[1]
+        ))
 
         # dot_aligned = np.array(where(align, '.')) - self.n_head_cols
         # align = align.replace('.', '<')
@@ -1671,7 +1683,8 @@ class Table(LoggingMixin):
         # all data in this column is of the same type
         type_, = types
         if issubclass(type_, numbers.Integral):
-            return '>'
+            lr = np.floor(np.log10(np.ma.abs(self.data[:, col_idx]).astype(int))).ptp()
+            return '>' if lr else '<'
 
         if issubclass(type_, numbers.Real):
             return '.'
@@ -1839,13 +1852,14 @@ class Table(LoggingMixin):
     def get_col_header_lines(self, indices):
 
         # column groups
-        for data, splits in self.get_group_boundaries(..., indices):
+        heading_splits = self.get_group_boundaries(..., indices)
+        for i, (data, splits) in enumerate(heading_splits, -self.n_head_rows):
             line = self._merged_row(data, indices, splits)
             line = codes.apply(line, self.col_head_style)
 
-            if self.hlines:
+            if i in self.hlines:
                 # only underline if headers are underlined
-                line = _underline(line)
+                line = self._midrule(line)
 
             yield line
 
@@ -1857,15 +1871,14 @@ class Table(LoggingMixin):
         groups = cofilter(*zip(*cosplit(data, indices, indices=split_points + 1)))
         for (text, *_), idx in zip(*groups):
             idx = list(idx)
+            first, last = idx[0], idx[-1]
             space = (self.col_widths[idx] + self.lcb[idx]).sum()
             if codes.length(text) >= space:
-                text = truncate(text, space - 1)
+                text = truncate(text, space - self.lcb[last])
 
             # add formatted group heading for columns
-            first = idx[0]
-            last = idx[-1]
             line += mformat('{: {}{}}{}',
-                            text, self.col_head_align[first], space - 1,
+                            text, self.col_head_align[first], space - self.lcb[last],
                             self.borders[last])
 
             # self.RIGHT_BORDER
@@ -1884,27 +1897,19 @@ class Table(LoggingMixin):
 
         Returns
         -------
-        list of str (table rows)
+        list of str (table lines)
         """
-        table = []
+        lines = []
         idx = self._idx_shown if column_indices is None else column_indices
         part_table = self._formatted[:, idx]
         table_width = self.get_width(idx)
 
-        if self.frame:
-            # top line
-            # NOTE: ANSI overline not supported (linux terminal) use underlined
-            #  whitespace
-            style = (*self.title_style['fg'], '_')
-            top_line = codes.apply(' ' * table_width, style)
-            table.append(top_line)
+        lines.extend(self._toprule(table_width))
 
         # header block
-        table.extend(self._get_heading_lines(idx, table_width, continued))
+        lines.extend(self._get_heading_lines(idx, table_width, continued))
 
         # make rows
-        start = -(self.has_col_head + self.has_units)
-
         widths = self.col_widths[idx]
         alignment = itt.repeat(self.align[idx])
 
@@ -1917,33 +1922,46 @@ class Table(LoggingMixin):
         #                           fillvalue=''))
 
         used = set()
-        for i, row_cells in enumerate(part_table, start):
+        for i, row_cells in enumerate(part_table, 0):
             insert = self.insert.get(i, None)
             if insert is not None:
-                table.extend(self.insert_lines(insert, table_width))
+                lines.extend(self.insert_lines(insert, table_width))
                 used.add(i)
 
             row_props = self.highlight.get(i)
-            underline = (i in self.hlines)
-            table.extend(
+            lines.extend(
+                # fixme: maybe don't apply to border symbols
                 codes.apply(row, row_props)
                 for row in self._row_lines(
-                    row_cells, widths, next(alignment), borders, underline)
+                    row_cells, widths, next(alignment), borders)
             )
-            # fixme: maybe don't apply to border symbols
+            # underline
+            if i in self.hlines:
+                lines[-1] = self._midrule(lines[-1])
 
         # check if all insert lines have been consumed
         unused = set(self.insert.keys()) - used
         for i in unused:
-            table.extend(self.insert_lines(self.insert[i], table_width))
+            lines.extend(self.insert_lines(self.insert[i], table_width))
 
         # finally add any footnotes present
         if len(self.footnotes):
-            table.extend(self.footnotes)
+            lines.extend(self.footnotes)
 
-        return table
+        return lines
 
-    def _row_lines(self, cells, widths, alignment, borders, underline=False):
+    def _toprule(self, width):
+        if self.frame:
+            # top line
+            # NOTE: ANSI overline not supported (linux terminal) use underlined
+            #  whitespace
+            style = (*self.title_style['fg'], '_')
+            yield codes.apply(' ' * width, style)
+
+    def _midrule(self, text):
+        return ansi_underline(text)
+
+    def _row_lines(self, cells, widths, alignment, borders):
         """
         handle multi-line cell elements, apply properties to each item in the
         list of columns create a single string
@@ -1966,13 +1984,9 @@ class Table(LoggingMixin):
         # NOTE: using str.splitlines here creates empty sequences for cells
         #  with empty strings as contents.  This is undesired since this
         #  generator will then yield nothing instead of a formatted row
-        n_lines = max(map(len, lines))
 
         for i, row_items in enumerate(itt.zip_longest(*lines, fillvalue='')):
-            row = self._row_stack_cells(row_items, widths, alignment, borders)
-            if (i + 1 == n_lines) and underline:
-                row = _underline(row)
-            yield row
+            yield self._row_stack_cells(row_items, widths, alignment, borders)
 
     def _row_stack_cells(self, cells, widths, alignment, borders):
 
@@ -2169,5 +2183,12 @@ class Table(LoggingMixin):
 
     def to_xlsx(self, path=None, sheet=None, formats=(), widths=(),
                 overwrite=False, **kws):
+        from .xlsx import XlsxWriter
+
         # may need to set widths manually eg. for cells that contain formulae
         return XlsxWriter(self, widths, **kws).write(path, sheet, formats, overwrite)
+
+    def to_latex(self, path=None, style='table', tabsize=2, overwrite=False, **kws):
+        from .latex import LatexWriter
+
+        return LatexWriter(self)(path, style, tabsize, overwrite, **kws)
