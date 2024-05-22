@@ -1,12 +1,8 @@
 # Things specific to this project #
 ###################################
 dev/
+src/motley/table/dev.py
 src/motley/styles.py
-src/motley/mprog.py
-src/motley/unicode.py
-src/motley/progress.py
-tests/debug_formatter.py
-
 
 # Editor temporary/working/backup files #
 #########################################
