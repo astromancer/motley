@@ -984,7 +984,6 @@ class Table(LoggingMixin):
         # self.borders = borders
         # self.col_widths = requested_widths
         # otypes=[int] in case borders are empty
-
         self.hlines = self.resolve_hlines(hlines)
 
         # Column specs
@@ -1024,24 +1023,26 @@ class Table(LoggingMixin):
 
         self.show_colourbar = False
 
+    def _resolve_hlines(self, hlines):
+        # row borders
+        n_rows, _ = self._formatted.shape
+
+        if hlines is ...:
+            return np.arange(n_rows)
+
+        if hlines:
+            # headers are negatively indexed
+            hlines = np.array(hlines)
+            hlines[hlines < 0] += n_rows
+            return hlines
+
+        return []
+
     def resolve_hlines(self, hlines):
         # row borders
         n_rows, _ = self._formatted.shape
-        # note: headers are negatively indexed
-        if hlines is None:
-            hlines = []
-        elif hlines is ...:
-            hlines = np.arange(n_rows)
-        elif hlines:
-            hlines = np.array(hlines)
-            hlines[hlines < 0] += n_rows
-        else:
-            hlines = False
-
-        if hlines is False:
-            hlines = []
-        else:
-            hlines = list(hlines)
+        hlines = list(self._resolve_hlines(hlines))
+        if self.frame:
             if self.has_col_head:
                 hlines.append(-1)
                 if self.n_head_rows > 2:
@@ -1049,6 +1050,9 @@ class Table(LoggingMixin):
 
             if self.has_totals:
                 hlines.extend(np.subtract(n_rows, (1, 2)))
+
+            # bottom
+            hlines.append(n_rows - 1)
 
         return sorted(set(hlines))
 
@@ -1209,7 +1213,7 @@ class Table(LoggingMixin):
         if self.has_units:
             block[-1, nhc:] = self.units
 
-        return block
+        return block.astype(str)
 
     @CachedProperty()
     def headers_header_block(self):
@@ -1300,14 +1304,14 @@ class Table(LoggingMixin):
         assert (which := which.lower().rstrip('s')) in allowed
         # other = (allowed - {which}).pop()
         rc = which[:3]
-
         nrc = getattr(self, f'n{rc}s')
         # nh = getattr(self, f'n_head_{other}s')
         # allowed_excess = set(range(nh + 1))
 
         headers = list(headers)
         if is_scalar(headers[0]):
-            assert len(headers) == nrc
+            if (n := len(headers)) != nrc:
+                raise ValueError(f'{n} headers for {nrc} {which}.')
             headers = [headers]
             # headers = list(map(ensure.tuple, headers))
         else:
@@ -1840,7 +1844,9 @@ class Table(LoggingMixin):
                                         style=['underline' * self.frame])
 
         # check inset width
-        column_width_total = (len(self.LEFT_BORDER) + self.col_widths[idx] + self.lcb[idx]).sum()
+        column_width_total = (len(self.LEFT_BORDER)
+                              + self.col_widths[idx]
+                              + self.lcb[idx]).sum()
         if table_width > column_width_total:
             # This means the inset table is wider than the main table and we
             # need to add some space to the columns
@@ -1852,18 +1858,25 @@ class Table(LoggingMixin):
     def get_col_header_lines(self, indices):
 
         # column groups
-        heading_splits = self.get_group_boundaries(..., indices)
+        heading_splits = list(self.get_group_boundaries(..., indices))
+
+        if heading_splits:
+            _, idx = zip(*heading_splits)
+            new = [np.setdiff1d(b, a) for a, b in mit.pairwise(idx)]
+            ul = dict(zip(range(-self.n_head_rows, 0), new))
+
         for i, (data, splits) in enumerate(heading_splits, -self.n_head_rows):
-            line = self._merged_row(data, indices, splits)
+
+            line = self._merged_row(data, indices, splits, ul.get(i, ()))
             line = codes.apply(line, self.col_head_style)
 
             if i in self.hlines:
                 # only underline if headers are underlined
-                line = self._midrule(line)
+                yield from self._midrule(line)
+            else:
+                yield line
 
-            yield line
-
-    def _merged_row(self, data, indices, split_points):
+    def _merged_row(self, data, indices, split_points, ul):
         # see :  xslx.merge_duplicate_cells
 
         line = self.LEFT_BORDER if self.frame else ''
@@ -1871,17 +1884,25 @@ class Table(LoggingMixin):
         groups = cofilter(*zip(*cosplit(data, indices, indices=split_points + 1)))
         for (text, *_), idx in zip(*groups):
             idx = list(idx)
+
             first, last = idx[0], idx[-1]
             space = (self.col_widths[idx] + self.lcb[idx]).sum()
             if codes.length(text) >= space:
                 text = truncate(text, space - self.lcb[last])
 
             # add formatted group heading for columns
-            line += mformat('{: {}{}}{}',
-                            text, self.col_head_align[first], space - self.lcb[last],
-                            self.borders[last])
+            cell = mformat('{: {}{}}{}',
+                           text,
+                           self.col_head_align[first],
+                           space - self.lcb[last],
+                           self.borders[last])
 
-            # self.RIGHT_BORDER
+            # underline for top border of next row
+            if type(self) is Table and not_null(ul):
+                cell = ansi_underline(cell)
+
+            line += cell
+
         return line
 
     def _build(self, column_indices=None, continued=False):
@@ -1899,17 +1920,17 @@ class Table(LoggingMixin):
         -------
         list of str (table lines)
         """
-        lines = []
         idx = self._idx_shown if column_indices is None else column_indices
         part_table = self._formatted[:, idx]
         table_width = self.get_width(idx)
 
-        lines.extend(self._toprule(table_width))
+        # frame
+        yield from self._toprule(table_width)
 
-        # header block
-        lines.extend(self._get_heading_lines(idx, table_width, continued))
+        # title / header block
+        yield from self._get_heading_lines(idx, table_width, continued)
 
-        # make rows
+        # data
         widths = self.col_widths[idx]
         alignment = itt.repeat(self.align[idx])
 
@@ -1917,38 +1938,37 @@ class Table(LoggingMixin):
         right = self.borders[idx]
         borders = (left, right)
 
-        # left = [self.LEFT_BORDER, [''] * len(indices)]
-        # borders = list(itt.zip_longest(self.LEFT_BORDER, self.borders[idx],
-        #                           fillvalue=''))
-
         used = set()
         for i, row_cells in enumerate(part_table, 0):
             insert = self.insert.get(i, None)
             if insert is not None:
-                lines.extend(self.insert_lines(insert, table_width))
+                yield from self.insert_lines(insert, table_width)
                 used.add(i)
 
             row_props = self.highlight.get(i)
-            lines.extend(
+
+            *lines, final = self._row_lines(row_cells, widths, next(alignment), borders)
+            for line in lines:
                 # fixme: maybe don't apply to border symbols
-                codes.apply(row, row_props)
-                for row in self._row_lines(
-                    row_cells, widths, next(alignment), borders)
-            )
+                yield codes.apply(line, row_props)
+
             # underline
             if i in self.hlines:
-                lines[-1] = self._midrule(lines[-1])
+                yield from self._midrule(final)
+            else:
+                yield final
 
         # check if all insert lines have been consumed
         unused = set(self.insert.keys()) - used
         for i in unused:
-            lines.extend(self.insert_lines(self.insert[i], table_width))
+            yield from self.insert_lines(self.insert[i], table_width)
+
+        # bottom frame
+        yield from self._bottomrule(table_width)
 
         # finally add any footnotes present
         if len(self.footnotes):
-            lines.extend(self.footnotes)
-
-        return lines
+            yield from self.footnotes
 
     def _toprule(self, width):
         if self.frame:
@@ -1959,7 +1979,11 @@ class Table(LoggingMixin):
             yield codes.apply(' ' * width, style)
 
     def _midrule(self, text):
-        return ansi_underline(text)
+        yield ansi_underline(text)
+
+    def _bottomrule(self, width):
+        return
+        yield
 
     def _row_lines(self, cells, widths, alignment, borders):
         """

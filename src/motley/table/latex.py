@@ -1,6 +1,5 @@
 
 # std
-import textwrap as txw
 from pathlib import Path
 from string import Template
 
@@ -29,16 +28,19 @@ class LatexTable(Table):
     booktabs = True
 
     def _toprule(self, _):
-        cmd = 'toprule'if self.booktabs else 'hline'
-        yield f'\\{cmd}'
+        if self.frame:
+            yield rf"\{'toprule' if self.booktabs else 'hline'}"
 
     def _midrule(self, text):
-        cmd = 'midrule'if self.booktabs else 'hline'
-        return f'{text}\n\\{cmd}'
+        yield text
+        yield rf"\{'midrule' if self.booktabs else 'hline'}"
 
-    # def _bottomrule(self):
+    # def _bottomrule(self, _):
+    #     return
+    #     yield
 
 # ---------------------------------------------------------------------------- #
+
 
 class LatexWriter:
 
@@ -63,7 +65,7 @@ class LatexWriter:
             )
 
         # reindent
-        table = worker(**kws, tabsize=tabsize) 
+        table = worker(**kws, tabsize=tabsize)
         return '\n'.join(map(str.rstrip,  table.splitlines()))
 
     def _tabular_body(self,
@@ -103,7 +105,7 @@ class LatexWriter:
         # letters = list(map(chr, range(65, 65 + len(col_spec))))
         letters = [f'{i:c}' for i in range(65, 65 + len(col_spec))]
         letters[0] = f'% {letters[0]}'
-        col_spec = Table(
+        col_spec = LatexTable(
             [letters, col_spec],
             col_borders=[*[LatexTable.MID_BORDER] * (len(letters) - 1), ''],
             frame=False, too_wide=False
@@ -115,6 +117,7 @@ class LatexWriter:
         col_spec.col_widths = widths = np.max([[*map(len, letters)], widths], 0)
         col_spec.truncate_cells(widths)
         letters, spec = map(str.rstrip, str(col_spec).splitlines())
+
         return '\n'.join((letters, spec.replace('&', ' ')))
 
     def _to_table(self, star='*', pos='ht!',
@@ -155,8 +158,8 @@ class LatexWriter:
                 ''', tabsize)
         )
 
-        colspec = string.indent(self._tabular_colspec(tbl), tabsize * 2).lstrip()
-        body = string.indent(str(tbl), tabsize * 2).lstrip()
+        colspec = string.indent(self._tabular_colspec(tbl), tabsize * 2)
+        body = string.indent(str(tbl), tabsize * 2)
         if booktabs:
             body = string.replace_suffix(body, R'\midrule', R'\bottomrule')
 
