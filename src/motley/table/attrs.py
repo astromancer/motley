@@ -475,6 +475,9 @@ class AttrTable:
         tables.
         """
 
+        if not any(groups.values()):
+            return dict(groups, itt.repeat([Table.empty()]))
+        
         title = kws.pop('title', self.__class__.__name__)
         ncc = kws.pop('summary', False)  # number of columns in summary part
         kws['summary'] = False
