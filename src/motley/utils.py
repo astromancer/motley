@@ -18,6 +18,7 @@ from recipes import op, string
 from recipes.shell import terminal
 from recipes.oo.singleton import Singleton
 from recipes.containers.dicts import invert
+from recipes.string.unicode import vertical_brace
 
 # relative
 from . import codes
@@ -234,7 +235,7 @@ class _vstack(Singleton):  # NOTE this could just be a module...
         for i, gid in enumerate(ordered_keys):
             tbl = groups[gid]
             braces += ('\n' * bool(i) +
-                       vbrace(tbl.data.shape[0], gid) +
+                       vertical_brace(tbl.data.shape[0], gid) +
                        '\n' * (tbl.has_totals + vspace))
 
         # vertical offset
@@ -260,51 +261,6 @@ def make_group_title(keys):
         return "; ".join(map(str, keys))
     except Exception:
         return str(keys)
-
-
-def vbrace(size, name=''):
-    """
-    Create a multi-line right brace.
-
-    Parameters
-    ----------
-    size : int
-        Number of lines to span.
-    name : str, optional
-        Text to place on the right and vertically in center, by default ''.
-
-    Examples
-    --------
-    >>> vbrace(5, 'Text!')
-    '⎫\n'
-    '⎪\n'
-    '⎬ Text!\n'
-    '⎪\n'
-    '⎭\n'
-
-    Returns
-    -------
-    str
-        [description]
-
-
-    """
-    # TODO: recipes.strings.unicode.long_brace ???
-    # Various other brace styles
-
-    if size == 1:
-        return '} ' + str(name)
-
-    if size == 2:
-        return ('⎱\n'       # Upper right or lower left curly bracket section
-                '⎰')        # Upper left or lower right curly bracket section
-
-    d, r = divmod(int(size) - 3, 2)
-    return '\n'.join((r'⎫',             # 23AB: Right curly bracket upper hook
-                      *'⎪' * d,         # 23AA Curly bracket extension
-                      f'⎬ {name}',      # 23AC Right curly bracket middle piece
-                      *'⎪' * (d + r),
-                      r'⎭'))            # 23AD Right curly bracket lower hook
 
 
 def overlay(text, background='', align='^', width=None):
