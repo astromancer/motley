@@ -14,14 +14,14 @@ from matplotlib import colormaps
 from matplotlib.colors import Normalize
 
 # local
-from scrawl.image import resolve_clim
 from recipes import string
 from recipes.functionals import echo0
-from recipes.string.unicode import subscripts, superscripts
+from recipes.string.unicode.scriptcase import subscripts, superscripts
 
 # relative
 from .. import apply, codes, table, textbox
 from ..codes import utils as ansi
+from .utils import resolve_clim
 from .trace import trace_boundary
 
 
@@ -487,7 +487,7 @@ class AnsiImage(TextImageBase):
         else:
             style = '_'
             topline = ' ' * pixel_size * shape[1]
-            s = '\n'.join((topline, 
+            s = '\n'.join((topline,
                            super().format(False, xticks, yticks, **kws)))
 
         #
@@ -501,7 +501,7 @@ class AnsiImage(TextImageBase):
             current = j
         new += topline[current:]
 
-        return s.replace(topline, new) # if uframe else '\n'.join((new, s))
+        return s.replace(topline, new)  # if uframe else '\n'.join((new, s))
 
 
 class BinaryTextImage(TextImageBase):
