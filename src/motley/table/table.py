@@ -373,6 +373,8 @@ class Table(LoggingMixin):
         -------
 
         """
+        if len(columns) == 1 and isinstance(*columns, dict):
+            return cls._from_column_map(*columns, **kws)
 
         # TODO: figure out why it's necessary to explicitly resolve kws here
         synonymns = cls.__init__.__wrapper__.__self__
@@ -380,7 +382,36 @@ class Table(LoggingMixin):
         # keep native types by making columns object arrays
         return cls(np.ma.column_stack([np.ma.array(_, 'O') for _ in columns]),
                    *args, **kws)
+        
+    @classmethod
+    def _from_column_map(cls, mapping, **kws):
+        mapping = dict(mapping)
 
+        column_to_table = {
+            'title':     'headers',
+            'unit':      'units',
+            'convert':   'converters',
+            'fmt':       'formatters',
+            'align':     'alignment',
+            'flags':     'flags',
+            # 'flag_info': 'footnotes'
+        }
+        
+        data = []
+        totals = []
+        options = defaultdict(dict)
+        for name, column in mapping.items():
+            data.append(column.data)
+            # populate the headers, units, converters, formatters
+            for attr, opt in column_to_table.items():
+                if (val := getattr(column, attr)):
+                    options[opt][name]= val
+                
+            if col.total:
+                totals.append(name)
+                    
+        return cls(data, totals=totals, **options, **kws)
+    
     @classmethod
     def from_rows(cls, *rows, ignore_keys=(), fill='--', sort=None,
                   convert_keys=echo0, **kws):

@@ -133,7 +133,8 @@ class Column(LoggingMixin):  # SlotHelper, ListOf(Cell)
     # precision = ForwardProperty('fmt.precision')
 
     def __init__(self, data, name=None, title=None, group=None, unit=None,
-                 total=False, fmt=None, align='.', width=None,):
+                 total=False, flags=(), fmt=None, align='.', width=None, 
+                 precision=None):
 
         # TODO: fmt = '{:. 14.5?f|gBi_/teal}'
 
@@ -145,10 +146,11 @@ class Column(LoggingMixin):  # SlotHelper, ListOf(Cell)
         self.group = group
         self.unit = unit
         self.total = self.data.sum() if total else None
+        self.flags = flags
 
         if fmt is None:
             # fmt = Formattable(fmt)
-            fmt = self.get_default_formatter()
+            fmt = self.get_default_formatter(precision)
 
         assert callable(fmt)
         self.fmt = fmt
@@ -170,7 +172,7 @@ class Column(LoggingMixin):  # SlotHelper, ListOf(Cell)
     # def resolve_formatter(self, fmt):
     #     ''
 
-    def get_default_formatter(self, precision, short):
+    def get_default_formatter(self, precision=3, short=False):
         """
         Selects an appropriate formatter based on the types (classes) of objects 
         in the column
