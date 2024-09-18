@@ -143,14 +143,14 @@ def _(obj, fg_or_bg='fg'):
         return
 
     # try resolve as a named color / effect
-    if value := ALIASES[fg_or_bg].get(obj, None):
+    if value := ALIASES[fg_or_bg].get(obj):
         yield fg_or_bg, value
         return
 
     # case only matters for the shortcut 'B' => 'bold', this would have been
     # resolved above
     obj = obj.lower()
-    if value := CSS_TO_RGB.get(obj, None):
+    if value := CSS_TO_RGB.get(obj):
         yield fg_or_bg, value
         return
 
@@ -236,11 +236,11 @@ def _(obj, fg_or_bg='fg'):
         return
 
     # try resolve as a named color / effect
-    if value := CODES[fg_or_bg].get(obj, None):
+    if value := CODES[fg_or_bg].get(obj):
         yield value
         return
 
-    if value := CSS_TO_RGB.get(obj, None):
+    if value := CSS_TO_RGB.get(obj):
         yield FORMAT_24BIT[fg_or_bg].format(*value)
         return
 

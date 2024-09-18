@@ -1971,7 +1971,7 @@ class Table(LoggingMixin):
 
         used = set()
         for i, row_cells in enumerate(part_table, 0):
-            insert = self.insert.get(i, None)
+            insert = self.insert.get(i)
             if insert is not None:
                 yield from self.insert_lines(insert, table_width)
                 used.add(i)

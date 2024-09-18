@@ -52,7 +52,7 @@ def _explain(params):
 
     params = filter(None, params.split(';'))
     while (p := next(params, None)):
-        if fg_or_bg := SPECIAL.get(p, None):
+        if fg_or_bg := SPECIAL.get(p):
             bitcode = next(params)
             nbit = COMPOUND_CODE_BITS[bitcode]
             rgb = tuple(next(params) for _ in range(int(math.log2(nbit))))
