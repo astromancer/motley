@@ -418,7 +418,7 @@ class ReportStatsTable(ReportStats):
             # indicate gaps with ellipsis
             lineIxShow = sorted(set(range(start, end)) - set(ignore))
             nrpairs = np.array(list(mit.pairwise(lineIxShow + [end])))
-            gaps = nrpairs.ptp(1)  # np.subtract(*zip(*nrpairs))
+            gaps = np.ptp(nrpairs, 1)  # np.subtract(*zip(*nrpairs))
             self.where_gaps = nrpairs[gaps > 1][:, 0]
             # relative to source code line numbers
         else:
